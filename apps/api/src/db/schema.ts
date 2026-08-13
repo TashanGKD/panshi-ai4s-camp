@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -68,23 +69,29 @@ export const contentModules = pgTable('content_modules', {
   key: text('key').primaryKey(),
   draft: jsonb('draft').$type<JsonObject>().notNull().default(sql`'{}'::jsonb`),
   draftRevision: integer('draft_revision').notNull().default(0),
-  publishedVersionId: uuid('published_version_id').references(
-    (): AnyPgColumn => contentVersions.id,
-    { onDelete: 'restrict' },
-  ),
+  publishedVersionId: uuid('published_version_id'),
 }, (table) => [
   check('content_modules_draft_revision_check', sql`${table.draftRevision} >= 0`),
+  foreignKey({
+    name: 'content_modules_published_version_content_versions_fk',
+    columns: [table.key, table.publishedVersionId],
+    foreignColumns: [contentVersions.moduleKey, contentVersions.id],
+  }).onDelete('restrict'),
 ])
 
 export const contentVersions = pgTable('content_versions', {
   id: uuid('id').primaryKey().defaultRandom(),
-  moduleKey: text('module_key').notNull().references(() => contentModules.key, { onDelete: 'restrict' }),
+  moduleKey: text('module_key').notNull().references(
+    (): AnyPgColumn => contentModules.key,
+    { onDelete: 'restrict' },
+  ),
   version: integer('version').notNull(),
   payload: jsonb('payload').$type<JsonObject>().notNull(),
   createdBy: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
   createdAt: createdAt(),
 }, (table) => [
   unique('content_versions_module_key_version_unique').on(table.moduleKey, table.version),
+  unique('content_versions_module_key_id_unique').on(table.moduleKey, table.id),
   check('content_versions_version_check', sql`${table.version} > 0`),
 ])
 
@@ -182,7 +189,7 @@ export const resources = pgTable('resources', {
 
 export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'restrict' }),
   action: text('action').notNull(),
   entityType: text('entity_type').notNull(),
   entityId: text('entity_id'),

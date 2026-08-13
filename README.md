@@ -29,20 +29,33 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 ## PostgreSQL 与迁移
 
-本地开发可启动 Compose 中唯一的 PostgreSQL 服务：
+本地开发可启动 Compose 中唯一的 PostgreSQL 服务。下面的 Compose 命令是标准工作流，但本次验证环境缺少 Docker Compose 插件且 Docker daemon 未运行，因此没有实际执行：
 
 ```bash
 docker compose up -d postgres
-DATABASE_URL="$DATABASE_URL" npm run db:migrate -w @panshi/api
 ```
 
-运行迁移前必须显式设置 `DATABASE_URL`。Compose 将容器的 5432 端口映射到主机 5433，并使用项目专属具名卷 `panshi-postgres-data`；其配置值只适用于本地开发。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
-
-数据库集成测试必须显式提供 `TEST_DATABASE_URL`，且数据库名必须采用 `panshi_ai4s_camp_*_test` 形式。测试不会回退到 `DATABASE_URL`：
+Compose 仅把容器的 5432 端口绑定到主机回环地址 `127.0.0.1:5433`，并使用项目专属具名卷 `panshi-postgres-data`。首次运行数据库集成测试前，在 Compose 服务内显式创建专用测试库：
 
 ```bash
-TEST_DATABASE_URL="$TEST_DATABASE_URL" npm test -w @panshi/api -- schema.test.ts
+docker compose exec postgres createdb --username panshi --owner panshi panshi_ai4s_camp_test
 ```
+
+迁移与测试命令必须显式提供目标 URL：
+
+```bash
+DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp' \
+  npm run db:migrate -w @panshi/api
+
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm test -w @panshi/api -- schema.test.ts
+```
+
+上述账号和密码是与 `compose.yaml` 对齐的本地开发占位值，绝不能用于生产环境。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
+
+数据库集成测试必须显式提供 `TEST_DATABASE_URL`，且数据库名必须恰好为 `panshi_ai4s_camp_test`；测试不会回退到 `DATABASE_URL`。测试清理会截断领域表，因此禁止指向开发库或任何名称相近但不完全相同的数据库。
+
+`audit_logs.actor_user_id` 使用 `ON DELETE RESTRICT` 保留不可变的审计归属。用户停用应更新 `users.disabled_at`，而不是删除用户记录。
 
 Task 3 的本次验证使用本机 PostgreSQL 16.14 和专用数据库 `panshi_ai4s_camp_test`。`compose.yaml` 仅完成静态 YAML 校验；由于当前环境没有 Docker Compose 插件且 Docker daemon 未运行，没有执行或声称容器端到端验证。该记录只描述本次验证环境，不表示其他开发者本机已经存在同名数据库。
 

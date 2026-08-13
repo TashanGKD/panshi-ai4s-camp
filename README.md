@@ -25,7 +25,26 @@ npm run dev:admin
 npm run dev:api
 ```
 
-应用源码会在后续任务中加入，因此本次脚手架阶段只验证工作区结构与质量命令。
+API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQL 迁移。迁移不会随服务启动自动执行。
+
+## PostgreSQL 与迁移
+
+本地开发可启动 Compose 中唯一的 PostgreSQL 服务：
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql://panshi:panshi_local@localhost:5433/panshi_ai4s_camp
+npm run db:migrate -w @panshi/api
+```
+
+Compose 将容器的 5432 端口映射到主机 5433，并使用项目专属具名卷 `panshi-postgres-data`。其中用户名和密码仅为本地开发占位值。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
+
+数据库集成测试必须显式提供 `TEST_DATABASE_URL`，且数据库名必须采用 `panshi_ai4s_camp_*_test` 形式。测试不会回退到 `DATABASE_URL`：
+
+```bash
+TEST_DATABASE_URL=postgresql://test_user:test_password@localhost:5432/panshi_ai4s_camp_test \
+  npm test -w @panshi/api -- schema.test.ts
+```
 
 ## 质量命令
 
@@ -38,6 +57,6 @@ npm run build
 npm audit --omit=dev
 ```
 
-`npm test` 会先运行根目录结构测试，再逐一运行五个 workspace 的 Vitest。当前尚无应用测试，Vitest 会明确报告 `No test files found` 并通过；后续任务加入测试后无需修改根命令。`typecheck` 和 `build` 会逐一调用每个 workspace 的 TypeScript 配置，当前配置以 `files: []` 明示尚无源码。
+`npm test` 会先运行根目录结构测试，再逐一运行五个 workspace 的 Vitest。API schema 集成测试必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 
 环境变量从 `.env.example` 复制后按本机环境填写；示例文件不保存真实凭据。

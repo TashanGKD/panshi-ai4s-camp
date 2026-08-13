@@ -1,0 +1,27 @@
+{
+  "name": "panshi-ai4s-camp",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "dev:web": "npm run dev -w @panshi/web",
+    "dev:admin": "npm run dev -w @panshi/admin",
+    "dev:api": "npm run dev -w @panshi/api"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.8.1",
+    "playwright": "1.60.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}

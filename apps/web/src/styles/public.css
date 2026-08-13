@@ -8,6 +8,10 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .public-sidebar { display: grid; gap: 18px; padding-top: 44px; }
 .feature-list { display: grid; gap: 14px; }
 .contact-copy { margin: 0; color: var(--panshi-color-gray-dark); font-size: 13.5px; line-height: 1.8; }
+.contact-list { display: grid; gap: 12px; margin: 0; }
+.contact-list div { display: grid; gap: 4px; }
+.contact-list dt { font-weight: 700; }
+.contact-list dd { margin: 0; }
 .overview-list { margin: 0; padding-left: 22px; color: var(--panshi-color-gray-dark); font-size: 15px; line-height: 1.9; }
 .date-list, .organization-list { margin: 0; }
 .date-list div { padding: 12px 0; border-bottom: 1px dashed var(--panshi-color-gray-light); }
@@ -20,6 +24,13 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .event-footer { padding: 24px 0; color: var(--panshi-color-gray); background: var(--panshi-color-surface-muted); border-top: 1px solid var(--panshi-color-gray-light); font-size: 13px; }
 .placeholder-page { min-height: 420px; padding-block: 64px 96px; }
 .placeholder-page h2 { margin: 0 0 12px; font-size: 21px; }
+.public-page { min-height: 420px; padding-block: 44px 96px; }
+.public-page__section > h2 { margin: 0 0 20px; font-size: 24px; }
+.public-state { min-height: 100vh; padding-block: 64px; }
+.schedule-list { display: grid; gap: 18px; margin: 0; padding: 0; list-style: none; }
+.schedule-list > li { padding: 18px; border: 1px solid var(--panshi-color-gray-light); border-radius: var(--panshi-radius-lg); }
+.schedule-list h3 { margin: 4px 0 0; font-size: 18px; }
+.schedule-list__date { margin: 0; color: var(--panshi-color-gray); font-size: 13.5px; }
 
 @media (max-width: 640px) {
   .public-layout { display: flex; flex-direction: column; gap: 0; padding-bottom: 64px; }

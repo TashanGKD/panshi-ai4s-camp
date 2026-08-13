@@ -7,6 +7,8 @@ import {
   ContentModuleKeySchema,
   LoginResponseSchema,
   PaginationMetaSchema,
+  PublicContentPayloadSchemas,
+  PublicScheduleResponseSchema,
   PublicSiteResponseSchema,
   RegistrationSnapshotSchema,
   ResourceAccessSchema,
@@ -19,10 +21,15 @@ const publicSiteResponse = {
   apiVersion: 'v1',
   data: {
     contentVersion: '2026-08-13',
-    basic: { title: '磐石 AI4S 实训营' },
-    importantDates: { registrationDeadline: '2026-09-01' },
-    contacts: { email: 'camp@example.com' },
-    display: { hero: { enabled: true } },
+    basic: {
+      title: '磐石 AI4S 实训营',
+      dates: { start: '2026-08-23', end: '2026-08-27', label: '2026-08-23 至 2026-08-27' },
+      venue: '中国科学院物理研究所',
+      intro: [],
+    },
+    importantDates: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] },
+    contacts: { items: [] },
+    display: { series: '磐石科学智能实训营', footer: '磐石 AI4S 实训营' },
   },
 }
 
@@ -82,6 +89,28 @@ describe('contracts', () => {
 
   it('accepts the minimum renderable public site aggregation', () => {
     expect(PublicSiteResponseSchema.parse(publicSiteResponse)).toEqual(publicSiteResponse)
+  })
+
+  it('validates every fixed content module with a module-specific schema', () => {
+    expect(Object.keys(PublicContentPayloadSchemas)).toEqual(ContentModuleKeySchema.options)
+    expect(PublicContentPayloadSchemas.schedule.parse({
+      days: [{ date: '2026-08-23', label: '第一天', theme: '科研智能体', sessions: [] }],
+    })).toBeTruthy()
+    expect(PublicContentPayloadSchemas.contacts.safeParse({ email: 'invented@example.com' }).success).toBe(false)
+  })
+
+  it('keeps schedule outside the site aggregation contract', () => {
+    expect(PublicScheduleResponseSchema.parse({
+      apiVersion: 'v1',
+      data: {
+        contentVersion: 'schedule:1',
+        schedule: { days: [] },
+      },
+    })).toBeTruthy()
+    expect(PublicSiteResponseSchema.safeParse({
+      ...publicSiteResponse,
+      data: { ...publicSiteResponse.data, schedule: { days: [] } },
+    }).success).toBe(false)
   })
 
   it.each([

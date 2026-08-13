@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、API 服务基础和公开站点首页壳层已经实现。当前公开内容仍是隔离 fixture；内容发布 API、后台页面以及注册、账户等业务路由属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API 和 API 驱动的公开站点页面已经实现。后台发布页面以及注册、账户等业务路由属于后续任务。
 
 ## 运行环境
 
@@ -58,6 +58,24 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 `audit_logs.actor_user_id` 使用 `ON DELETE RESTRICT` 保留不可变的审计归属。用户停用应更新 `users.disabled_at`，而不是删除用户记录。
 
 Task 3 的本次验证使用本机 PostgreSQL 16.14 和专用数据库 `panshi_ai4s_camp_test`。`compose.yaml` 仅完成静态 YAML 校验；由于当前环境没有 Docker Compose 插件且 Docker daemon 未运行，没有执行或声称容器端到端验证。该记录只描述本次验证环境，不表示其他开发者本机已经存在同名数据库。
+
+## 初始公开内容种子
+
+初始内容种子要求调用方显式提供数据库中已经存在的真实 `users.id` 作为创建人与审计归属；脚本不创建管理员、不读取或生成生产管理员密码：
+
+```bash
+DATABASE_URL='postgresql://...' \
+CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
+  npm run db:seed:content -w @panshi/api
+```
+
+脚本幂等初始化八个固定模块，并发布 `basic`、`features`、`importantDates`、`schedule`、`contacts`、`display` 的版本 1。`organizations` 与 `travel` 仅建立未发布模块；`contacts` 发布为空列表。重复运行会复用相同或内容一致的既有版本，不重复写入版本或审计；如果既有版本 1 的 payload 不同，脚本拒绝覆盖。
+
+内容依据文件为 `磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`（本次读取的 SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。公开日期按已确认覆盖值固定为 2026-08-23 至 2026-08-27，地点为中国科学院物理研究所。源文件 OOXML 含 537 处插入和 273 处删除修订，并混有 8 月与 9 月日期残留，因此首版日程只发布五天的可核验专题层级，不复制受修订污染的逐节时间表。组织单位清单在修订中也存在增删，首版暂不发布该模块。报名截止、电话、邮箱、住宿交通、资料文件以及标为“待定”的授课人均未写入公开种子。
+
+## Task 6 验证记录（2026-08-14）
+
+本次在本机 PostgreSQL 的专用 `panshi_ai4s_camp_test` 数据库上确认迁移共 2 个文件，并分别运行数据库测试，避免多个测试文件并行清空同一测试库。验证结果：contracts 33 项、API health 46 项、API schema 19 项、API public content 7 项、Web 14 项全部通过；admin 与 UI workspace 当前没有测试文件，`--passWithNoTests` 返回成功。根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 均通过。Web 生产构建输出约 310.60 kB JavaScript（gzip 95.19 kB）。本次没有运行浏览器视觉回归或 Docker Compose 端到端验证，因此不声称这两层已验证。
 
 ## 质量命令
 

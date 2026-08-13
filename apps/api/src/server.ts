@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
 import { getApiEnv } from './config/env.js'
 import { createDatabaseClient } from './db/client.js'
+import { createContentRepository } from './modules/content/content.repository.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -214,6 +215,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const database = createDatabaseClient(env.DATABASE_URL, env.HEALTHCHECK_TIMEOUT_MS)
   const app = createApp({
     checkDatabase: database.checkHealth,
+    contentRepository: createContentRepository(database.db),
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供后续服务端与客户端实现共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型，并已建立 API 运行壳与 `GET /healthz`；下述业务路由仍是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型，并已实现 API 运行壳、`GET /healthz` 与下述公开内容读取接口；身份、报名、后台和资源下载路由仍是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
 
 ## API 范围
 
@@ -13,7 +13,15 @@
 - `/api/v1/me`：当前用户、报名快照和按登录或录取状态开放的资源。
 - `/api/v1/admin`：统一管理员角色使用的内容、报名审核和资源管理能力。
 
-具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次有界超时的 `SELECT 1` 数据库检查，查询本身使用不长于 HTTP health deadline 的 per-query timeout，外层 Promise deadline 作为最终保护。健康时精确返回 `{ "status": "ok", "database": "ok" }`；数据库拒绝或超时返回不含内部原因的 503 `SERVICE_UNAVAILABLE`。所有响应均携带 `X-Request-Id`。
+具体方法、子路径、请求体与成功响应只有在 endpoint 实现并补充契约后才可视为可用接口。`GET /healthz` 执行一次有界超时的 `SELECT 1` 数据库检查，查询本身使用不长于 HTTP health deadline 的 per-query timeout，外层 Promise deadline 作为最终保护。健康时精确返回 `{ "status": "ok", "database": "ok" }`；数据库拒绝或超时返回不含内部原因的 503 `SERVICE_UNAVAILABLE`。所有响应均携带 `X-Request-Id`。
+
+已实现的公开内容接口为：
+
+- `GET /api/v1/public/site`：只聚合已发布的 `basic`、`importantDates`、`contacts`、`display`，不包含 `schedule` 或草稿。
+- `GET /api/v1/public/schedule`：只返回已发布的 `schedule`。
+- `GET /api/v1/public/content/:key`：按固定模块 key 返回单个已发布模块；`schedule` 必须使用独立接口，因此在此路径返回 404。
+
+模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 
 ## API 运行基线
 
@@ -87,6 +95,6 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 
-公开站点聚合响应包含 `contentVersion`，以及 `basic`、`importantDates`、`contacts`、`display` 四个已发布 JSON-object payload。详细模块字段留待后续内容契约定义；`schedule` 保持独立，不混入该最小聚合。
+公开站点聚合响应包含 `contentVersion`，以及 `basic`、`importantDates`、`contacts`、`display` 四个已发布 payload；`schedule` 保持独立，不混入该最小聚合。八个模块分别使用 `BasicContentSchema`、`FeaturesContentSchema`、`OrganizationsContentSchema`、`ImportantDatesContentSchema`、`ScheduleContentSchema`、`ContactsContentSchema`、`TravelContentSchema`、`DisplayContentSchema` 校验。公开 Web 客户端再次按共享响应契约解析 HTTP payload，不导入数据库代码。
 
 报名快照表示某次提交时的 `formVersion`、`submittedAt` 和 JSON-safe 答案副本。解析后的快照及其嵌套对象、数组均不可变。它不是可在线修改的表单定义；补充或再次提交应产生新的版本化快照，而不是改写既有快照。

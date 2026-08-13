@@ -4,6 +4,9 @@ import type { RequestHandler } from 'express'
 import { errorHandler, HttpError, notFound } from './middleware/error-handler.js'
 import { requestId } from './middleware/request-id.js'
 import { createHealthRouter, type DatabaseHealthCheck } from './modules/health/health.routes.js'
+import { createContentRouter } from './modules/content/content.routes.js'
+import { createContentService } from './modules/content/content.service.js'
+import type { PublicContentRepository } from './modules/content/content.repository.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -13,6 +16,7 @@ export type ApiRuntimeConfig = {
 
 export type AppDependencies = {
   checkDatabase: DatabaseHealthCheck
+  contentRepository?: PublicContentRepository
   config: ApiRuntimeConfig
 }
 
@@ -55,7 +59,7 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
   }
 }
 
-export const createApp = ({ checkDatabase, config }: AppDependencies) => {
+export const createApp = ({ checkDatabase, contentRepository, config }: AppDependencies) => {
   const app = express()
 
   app.use(requestId)
@@ -63,6 +67,9 @@ export const createApp = ({ checkDatabase, config }: AppDependencies) => {
   app.use(cookieParser())
   app.use(createOriginGuard(config.allowedOrigins))
   app.use('/healthz', createHealthRouter(checkDatabase, config.healthcheckTimeoutMs))
+  app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
+    findPublishedByKeys: async () => [],
+  })))
   app.use(notFound)
   app.use(errorHandler)
 

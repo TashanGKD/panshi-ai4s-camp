@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed:content": "tsx src/db/seeds/initial-content.ts",
     "dev": "tsx watch src/server.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit --project tsconfig.json"

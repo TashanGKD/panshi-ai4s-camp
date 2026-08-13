@@ -2,6 +2,9 @@
   "name": "@panshi/contracts",
   "version": "0.0.0",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,10 +16,14 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "test": "npm run build && vitest run --passWithNoTests && node tests/package-consumer.smoke.mjs",
+    "prepare": "npm run build",
+    "test": "npm run build && vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3"
   }
 }

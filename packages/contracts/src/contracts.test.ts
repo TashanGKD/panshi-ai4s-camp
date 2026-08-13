@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
@@ -24,7 +26,20 @@ const publicSiteResponse = {
   },
 }
 
+const contractsPackageRoot = fileURLToPath(new URL('..', import.meta.url))
+
 describe('contracts', () => {
+  it('is consumable through native Node package exports', () => {
+    expect(() => execFileSync(process.execPath, [
+      '--input-type=module',
+      '--eval',
+      "const contracts = await import('@panshi/contracts'); contracts.ApiErrorSchema.parse({ error: { code: 'SMOKE_TEST', message: 'package export is consumable', requestId: 'smoke-1' } })",
+    ], {
+      cwd: contractsPackageRoot,
+      stdio: 'pipe',
+    })).not.toThrow()
+  })
+
   it('accepts every approved application state', () => {
     for (const value of ['draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected']) {
       expect(ApplicationStatusSchema.parse(value)).toBe(value)

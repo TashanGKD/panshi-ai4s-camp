@@ -15,13 +15,16 @@
     "test": "node tests/workspaces.test.mjs && npm run test:workspaces",
     "test:workspaces": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern '**/dist/**' --global document --global Node --global getComputedStyle",
+    "visual:test": "playwright test e2e/visual.spec.ts",
+    "visual:update": "playwright test e2e/visual.spec.ts --update-snapshots",
     "dev:web": "npm run dev -w @panshi/web",
     "dev:admin": "npm run dev -w @panshi/admin",
     "dev:api": "npm run dev -w @panshi/api"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.60.0",
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "10.8.1",
     "playwright": "1.60.0",

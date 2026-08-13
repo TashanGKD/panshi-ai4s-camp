@@ -1,0 +1,29 @@
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-color-light); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+.public-shell { min-height: 100vh; overflow-x: clip; }
+.public-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; align-items: start; padding-bottom: 96px; }
+.public-sidebar { display: grid; gap: 18px; padding-top: 44px; }
+.feature-list { display: grid; gap: 14px; }
+.contact-copy { margin: 0; color: var(--panshi-color-gray-dark); font-size: 13.5px; line-height: 1.8; }
+.overview-list { margin: 0; padding-left: 22px; color: var(--panshi-color-gray-dark); font-size: 15px; line-height: 1.9; }
+.date-list, .organization-list { margin: 0; }
+.date-list div { padding: 12px 0; border-bottom: 1px dashed var(--panshi-color-gray-light); }
+.date-list div:last-child { border-bottom: 0; }
+.date-list dt, .organization-list dt { color: var(--panshi-color-dark); font-size: 15px; font-weight: 700; }
+.date-list dd { margin: 2px 0 0; color: var(--panshi-color-gray); font-size: 13.5px; font-weight: 600; }
+.organization-list div { display: flex; gap: 14px; margin-bottom: 12px; color: var(--panshi-color-gray-dark); font-size: 14.5px; }
+.organization-list dt { flex: 0 0 76px; }
+.organization-list dd { margin: 0; }
+.event-footer { padding: 24px 0; color: var(--panshi-color-gray); background: var(--panshi-color-surface-muted); border-top: 1px solid var(--panshi-color-gray-light); font-size: 13px; }
+.placeholder-page { min-height: 420px; padding-block: 64px 96px; }
+.placeholder-page h2 { margin: 0 0 12px; font-size: 21px; }
+
+@media (max-width: 640px) {
+  .public-layout { display: flex; flex-direction: column; gap: 0; padding-bottom: 64px; }
+  .public-sidebar { width: 100%; order: 2; }
+  .organization-list div { flex-direction: column; gap: 6px; }
+  .organization-list dt { flex-basis: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --project tsconfig.json",
+    "build": "vite build",
     "dev": "vite",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit --project tsconfig.json"

@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。当前任务只建立工作区和质量门禁，不包含业务实现。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts 与 PostgreSQL 数据库基础已经实现，web/admin 页面和 API 路由仍属于后续任务。
 
 ## 运行环境
 
@@ -33,18 +33,18 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 ```bash
 docker compose up -d postgres
-export DATABASE_URL=postgresql://panshi:panshi_local@localhost:5433/panshi_ai4s_camp
-npm run db:migrate -w @panshi/api
+DATABASE_URL="$DATABASE_URL" npm run db:migrate -w @panshi/api
 ```
 
-Compose 将容器的 5432 端口映射到主机 5433，并使用项目专属具名卷 `panshi-postgres-data`。其中用户名和密码仅为本地开发占位值。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
+运行迁移前必须显式设置 `DATABASE_URL`。Compose 将容器的 5432 端口映射到主机 5433，并使用项目专属具名卷 `panshi-postgres-data`；其配置值只适用于本地开发。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
 
 数据库集成测试必须显式提供 `TEST_DATABASE_URL`，且数据库名必须采用 `panshi_ai4s_camp_*_test` 形式。测试不会回退到 `DATABASE_URL`：
 
 ```bash
-TEST_DATABASE_URL=postgresql://test_user:test_password@localhost:5432/panshi_ai4s_camp_test \
-  npm test -w @panshi/api -- schema.test.ts
+TEST_DATABASE_URL="$TEST_DATABASE_URL" npm test -w @panshi/api -- schema.test.ts
 ```
+
+Task 3 的本次验证使用本机 PostgreSQL 16.14 和专用数据库 `panshi_ai4s_camp_test`。`compose.yaml` 仅完成静态 YAML 校验；由于当前环境没有 Docker Compose 插件且 Docker daemon 未运行，没有执行或声称容器端到端验证。该记录只描述本次验证环境，不表示其他开发者本机已经存在同名数据库。
 
 ## 质量命令
 

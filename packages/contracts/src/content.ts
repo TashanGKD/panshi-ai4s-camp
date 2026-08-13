@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { JsonObjectSchema } from './common.js'
 
 export const ContentModuleKeySchema = z.enum([
   'basic',
@@ -17,7 +18,10 @@ export const PublicSiteResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
     contentVersion: z.string().min(1),
-    modules: z.array(ContentModuleKeySchema),
+    basic: JsonObjectSchema,
+    importantDates: JsonObjectSchema,
+    contacts: JsonObjectSchema,
+    display: JsonObjectSchema,
   }),
 })
 

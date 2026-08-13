@@ -9,7 +9,20 @@ import {
   RegistrationSnapshotSchema,
   ResourceAccessSchema,
   UserRoleSchema,
+  serializeLoginResponse,
+  type JsonObject,
 } from './index.js'
+
+const publicSiteResponse = {
+  apiVersion: 'v1',
+  data: {
+    contentVersion: '2026-08-13',
+    basic: { title: '磐石 AI4S 实训营' },
+    importantDates: { registrationDeadline: '2026-09-01' },
+    contacts: { email: 'camp@example.com' },
+    display: { hero: { enabled: true } },
+  },
+}
 
 describe('contracts', () => {
   it('accepts every approved application state', () => {
@@ -18,8 +31,20 @@ describe('contracts', () => {
     }
   })
 
+  it.each(['pending', 'approved', 'cancelled'])('rejects unknown application status %s', (value) => {
+    expect(ApplicationStatusSchema.safeParse(value).success).toBe(false)
+  })
+
   it('requires stable machine-readable errors', () => {
     expect(ApiErrorSchema.parse({ error: { code: 'UNAUTHORIZED', message: '未登录', requestId: 'r1' } })).toBeTruthy()
+  })
+
+  it.each([
+    { error: { code: '', message: '未登录', requestId: 'r1' } },
+    { error: { code: 'UNAUTHORIZED', message: '', requestId: 'r1' } },
+    { error: { code: 'UNAUTHORIZED', message: '未登录' } },
+  ])('rejects malformed API errors', (value) => {
+    expect(ApiErrorSchema.safeParse(value).success).toBe(false)
   })
 
   it('freezes identity and access values', () => {
@@ -40,23 +65,90 @@ describe('contracts', () => {
     ])
   })
 
-  it('validates minimal versioned response envelopes', () => {
-    expect(PublicSiteResponseSchema.parse({
-      apiVersion: 'v1',
-      data: { contentVersion: '2026-08-13', modules: ['basic', 'schedule'] },
-    })).toBeTruthy()
+  it('accepts the minimum renderable public site aggregation', () => {
+    expect(PublicSiteResponseSchema.parse(publicSiteResponse)).toEqual(publicSiteResponse)
+  })
+
+  it.each([
+    { ...publicSiteResponse, data: { ...publicSiteResponse.data, display: undefined } },
+    { ...publicSiteResponse, data: { ...publicSiteResponse.data, basic: [] } },
+    { ...publicSiteResponse, data: { ...publicSiteResponse.data, contacts: { count: 1n } } },
+  ])('rejects malformed public site responses', (value) => {
+    expect(PublicSiteResponseSchema.safeParse(value).success).toBe(false)
+  })
+
+  it('accepts a minimal login response', () => {
     expect(LoginResponseSchema.parse({
       apiVersion: 'v1',
       data: { user: { id: 'u1', role: 'user' } },
     })).toBeTruthy()
   })
 
-  it('validates immutable registration snapshot semantics', () => {
-    expect(RegistrationSnapshotSchema.parse({
+  it.each([
+    { apiVersion: 'v1', data: { user: { role: 'user' } } },
+    { apiVersion: 'v1', data: { user: { id: 'u1', role: 'owner' } } },
+    { apiVersion: 'v2', data: { user: { id: 'u1', role: 'user' } } },
+  ])('rejects malformed login responses', (value) => {
+    expect(LoginResponseSchema.safeParse(value).success).toBe(false)
+  })
+
+  it('strips credentials from serialized login responses', () => {
+    const serialized = serializeLoginResponse({
+      apiVersion: 'v1',
+      token: 'top-secret',
+      data: {
+        sessionToken: 'session-secret',
+        user: { id: 'u1', role: 'user', refreshToken: 'refresh-secret' },
+      },
+    })
+
+    expect(serialized).toEqual({
+      apiVersion: 'v1',
+      data: { user: { id: 'u1', role: 'user' } },
+    })
+    expect(JSON.stringify(serialized)).not.toMatch(/top-secret|session-secret|refresh-secret/)
+  })
+
+  it('validates and deeply freezes registration snapshots', () => {
+    const snapshot = RegistrationSnapshotSchema.parse({
       formVersion: '2026-08-13',
       submittedAt: '2026-08-13T12:00:00.000Z',
-      answers: { name: '张三' },
-    })).toBeTruthy()
+      answers: { profile: { name: '张三', fields: ['physics', { years: 2 }] } },
+    })
+
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen(snapshot.answers)).toBe(true)
+    expect(Object.isFrozen(snapshot.answers.profile)).toBe(true)
+    if (typeof snapshot.answers.profile === 'object' && snapshot.answers.profile !== null && !Array.isArray(snapshot.answers.profile)) {
+      expect(Object.isFrozen((snapshot.answers.profile as JsonObject).fields)).toBe(true)
+    }
+  })
+
+  it.each([
+    'not-a-date',
+    '2026-08-13',
+    '2026-08-13T12:00:00',
+  ])('rejects invalid submitted timestamp %s', (submittedAt) => {
+    expect(RegistrationSnapshotSchema.safeParse({
+      formVersion: 'v1',
+      submittedAt,
+      answers: {},
+    }).success).toBe(false)
+  })
+
+  it.each([
+    undefined,
+    () => 'secret',
+    Symbol('answer'),
+    1n,
+    new Date(),
+    new (class Answer { value = 'x' })(),
+  ])('rejects non-JSON registration answer %#', (answer) => {
+    expect(RegistrationSnapshotSchema.safeParse({
+      formVersion: 'v1',
+      submittedAt: '2026-08-13T12:00:00.000Z',
+      answers: { answer },
+    }).success).toBe(false)
   })
 
   it('validates pagination metadata', () => {

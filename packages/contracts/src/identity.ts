@@ -14,3 +14,5 @@ export const LoginResponseSchema = z.object({
 
 export type UserRole = z.infer<typeof UserRoleSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
+
+export const serializeLoginResponse = (input: unknown): LoginResponse => LoginResponseSchema.parse(input)

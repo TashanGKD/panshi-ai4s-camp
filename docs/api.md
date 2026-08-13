@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供后续服务端与客户端实现共同遵循。当前阶段只提供 `@panshi/contracts` 中的 Zod schema 和类型；下述路由是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供后续服务端与客户端实现共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型；下述路由是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
 
 ## API 范围
 
@@ -37,9 +37,25 @@
 
 客户端不得依赖 `message` 文案分支；程序逻辑应依赖 `code`。新增错误信息时不得改变上述顶层结构。
 
+错误生产端必须遵守以下安全规则：
+
+- `details` 必须可 JSON 序列化，并按每个错误码使用明确 allowlist 构造；schema 中的 `unknown` 不代表它会自动清洗或脱敏。
+- `details` 严禁包含凭据、Cookie 或 Authorization header、任何 token、密码、stack trace 或原始内部对象。
+- handler 必须新建安全错误 payload，通过 `ApiErrorSchema.parse` 后发送解析结果；不得只调用 `safeParse`，然后继续发送原始对象。
+
 ## Session 与身份
 
-登录态使用 Cookie-based session。登录成功响应只返回版本化的用户摘要，不返回 bearer token 或 session secret；浏览器在后续请求中携带服务端设置的 session Cookie。Cookie 的名称、有效期以及 `Secure`、`HttpOnly`、`SameSite` 等部署参数由后续身份实现确定，不属于当前共享响应契约。
+登录态使用 Cookie-based session。登录成功响应只返回版本化的用户摘要，不返回 bearer token 或 session secret；浏览器在后续请求中携带服务端设置的 session Cookie。服务端 handler 必须将输入交给 `serializeLoginResponse`，并发送它返回的解析结果；不得只校验后发送仍可能携带 `token`、`sessionToken` 或 `refreshToken` 的原始对象。
+
+Cookie 和 session 实现必须满足以下安全底线：
+
+- session Cookie 始终设置 `HttpOnly`；生产环境必须设置 `Secure`。
+- 明确设置 `SameSite=Lax`，作为同站点 Web/API 架构的默认值；如未来跨站架构确需调整，必须同时重新评估 CSRF 防护。
+- Cookie `Path` 限定为 `/api/v1`；默认使用 host-only Cookie，不设置宽泛 `Domain`，除非受信子域共享确有必要。
+- 身份认证成功或权限变化后必须轮换 session；退出登录、密码重置或 session reset 后必须使旧 session 失效。
+- 使用 Cookie 身份的状态变更请求必须校验 CSRF token 和受信 Origin；`GET`、`HEAD`、`OPTIONS` 不得产生状态变更，不能仅依赖 `SameSite` 作为 CSRF 防护。
+
+具体 Cookie 名称和有效期由后续身份实现确定。
 
 用户角色仅分为普通用户 `user` 和统一权限模型下的管理员 `admin`。资源访问级别为：
 
@@ -61,4 +77,6 @@
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 
-报名快照表示某次提交时的 `formVersion`、`submittedAt` 和答案副本。它是不可变的提交记录语义，不是可在线修改的表单定义；补充或再次提交应产生新的版本化快照，而不是改写既有快照。
+公开站点聚合响应包含 `contentVersion`，以及 `basic`、`importantDates`、`contacts`、`display` 四个已发布 JSON-object payload。详细模块字段留待后续内容契约定义；`schedule` 保持独立，不混入该最小聚合。
+
+报名快照表示某次提交时的 `formVersion`、`submittedAt` 和 JSON-safe 答案副本。解析后的快照及其嵌套对象、数组均不可变。它不是可在线修改的表单定义；补充或再次提交应产生新的版本化快照，而不是改写既有快照。

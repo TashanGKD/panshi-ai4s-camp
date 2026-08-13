@@ -1,8 +1,20 @@
 import { expect, test } from '@playwright/test'
+import { PNG } from 'pngjs'
+
+function expectPixelIdentical(actualBuffer: Buffer, expectedBuffer: Buffer, region: string) {
+  const actual = PNG.sync.read(actualBuffer)
+  const expected = PNG.sync.read(expectedBuffer)
+  expect({ width: actual.width, height: actual.height }, `${region} dimensions`).toEqual({ width: expected.width, height: expected.height })
+  let differentChannels = 0
+  for (let index = 0; index < actual.data.length; index += 1) {
+    if (actual.data[index] !== expected.data[index]) differentChannels += 1
+  }
+  expect(differentChannels, `${region} must have zero differing RGBA channels`).toBe(0)
+}
 
 const legacyReference = `<!doctype html><html><head><meta charset="utf-8"><style>
 :root{--color-primary:#5B9BD5;--color-gray-light:#E9ECEF;--color-gray-dark:#495057;--color-dark:#0E2E4F;--gradient-primary:linear-gradient(135deg,#5B9BD5 0%,#9FD4C4 100%)}
-*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Oxygen','Ubuntu','Cantarell,'Fira Sans','Droid Sans','Helvetica Neue',sans-serif}.container{max-width:1200px;width:100%;margin:0 auto;padding:0 24px;box-sizing:border-box}
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Oxygen','Ubuntu','Cantarell','Fira Sans','Droid Sans','Helvetica Neue',sans-serif}.container{max-width:1200px;width:100%;margin:0 auto;padding:0 24px;box-sizing:border-box}
 .conf-banner{padding:116px 0 40px;color:#fff;background:linear-gradient(135deg,#0E2E4F 0%,#24507C 55%,#3E76AC 100%)}
 .conf-banner-series{font-size:13.5px;color:rgba(255,255,255,.75);margin:0 0 8px}.conf-banner-name{font-size:30px;font-weight:800;line-height:1.4;margin:0 0 10px}.conf-banner-tagline{font-size:14.5px;color:rgba(255,255,255,.85);line-height:1.8;margin:0 0 18px;max-width:720px}.conf-banner-meta{display:flex;flex-wrap:wrap;gap:10px 22px;font-size:13.5px;align-items:center}
 .conf-nav{position:sticky;top:72px;z-index:5;background:#fff;border-bottom:1px solid var(--color-gray-light);box-shadow:0 2px 8px rgba(14,46,79,.04)}.conf-nav-inner{display:flex;gap:4px;overflow-x:auto}.conf-nav a{padding:13px 16px;font-size:14px;font-weight:600;color:var(--color-gray-dark);text-decoration:none;border-bottom:2px solid transparent;white-space:nowrap}
@@ -20,13 +32,40 @@ test('public home shell visual baseline', async ({ page }, testInfo) => {
   await expect(page).toHaveScreenshot(`public-home-${testInfo.project.name}.png`, { fullPage: true })
 })
 
+test('source-derived and migrated common regions are pixel-identical', async ({ page }, testInfo) => {
+  const regions = [
+    ['banner-content', '[data-testid="source-banner-content"]', '[data-testid="migrated-banner-content"] .event-container'],
+    ['navigation', '[data-testid="source-navigation"]', '[data-testid="migrated-navigation"] .event-navigation'],
+    ['section-heading', '[data-testid="source-section-heading"]', '[data-testid="migrated-section-heading"] .content-section__title'],
+    ['compact-card', '[data-testid="source-compact-card"]', '[data-testid="migrated-compact-card"] .info-card'],
+  ] as const
+  const sourceImages = new Map<string, Buffer>()
+  await page.goto('http://127.0.0.1:4174/?mode=source')
+  await page.evaluate(() => document.fonts.ready)
+  for (const [region, sourceSelector] of regions) {
+    sourceImages.set(region, await page.locator(sourceSelector).screenshot({ animations: 'disabled', path: testInfo.outputPath(`${region}-source.png`) }))
+  }
+  await page.goto('http://127.0.0.1:4174/?mode=migrated')
+  await page.evaluate(() => document.fonts.ready)
+  for (const [region, , migratedSelector] of regions) {
+    const source = sourceImages.get(region)!
+    const migrated = await page.locator(migratedSelector).screenshot({ animations: 'disabled', path: testInfo.outputPath(`${region}-migrated.png`) })
+    await testInfo.attach(`${region}-source`, { body: source, contentType: 'image/png' })
+    await testInfo.attach(`${region}-migrated`, { body: migrated, contentType: 'image/png' })
+    expectPixelIdentical(migrated, source, region)
+  }
+})
+
 test('source-aligned common values are exact', async ({ page }) => {
   const desktop = (await page.viewportSize())!.width > 640
   const styles = await page.evaluate(() => {
     const style = (selector: string, pseudo?: string) => getComputedStyle(document.querySelector(selector)!, pseudo)
     return {
       bannerBackground: style('.event-banner').backgroundImage,
+      bannerPaddingTop: style('.event-banner').paddingTop,
+      bannerPaddingBottom: style('.event-banner').paddingBottom,
       containerMaxWidth: style('.event-container').maxWidth,
+      containerPaddingLeft: style('.event-container').paddingLeft,
       titleFontSize: style('.event-banner__title').fontSize,
       titleLineHeight: style('.event-banner__title').lineHeight,
       navPosition: style('.event-navigation').position,
@@ -46,7 +85,10 @@ test('source-aligned common values are exact', async ({ page }) => {
     }
   })
   expect(styles.bannerBackground).toBe('linear-gradient(135deg, rgb(14, 46, 79) 0%, rgb(36, 80, 124) 55%, rgb(62, 118, 172) 100%)')
+  expect(styles.bannerPaddingTop).toBe('44px')
+  expect(styles.bannerPaddingBottom).toBe('40px')
   expect(styles.containerMaxWidth).toBe('1200px')
+  expect(styles.containerPaddingLeft).toBe('24px')
   expect(styles.titleFontSize).toBe(desktop ? '30px' : '23px')
   expect(styles.titleLineHeight).toBe(desktop ? '42px' : '32.2px')
   expect(styles.navPosition).toBe('sticky')
@@ -101,4 +143,30 @@ test('legacy common-region reference capture', async ({ page }, testInfo) => {
   await page.setContent(legacyReference)
   await page.evaluate(() => document.fonts.ready)
   await expect(page.locator('body')).toHaveScreenshot(`legacy-common-${testInfo.project.name}.png`)
+})
+
+test('legacy reference CSS contract is active', async ({ page }) => {
+  await page.setContent(legacyReference)
+  const desktop = (await page.viewportSize())!.width > 640
+  const styles = await page.evaluate(() => {
+    const style = (selector: string, pseudo?: string) => getComputedStyle(document.querySelector(selector)!, pseudo)
+    return {
+      bannerGradient: style('.conf-banner').backgroundImage,
+      titleFontSize: style('.conf-banner-name').fontSize,
+      titleLineHeight: style('.conf-banner-name').lineHeight,
+      navBackground: style('.conf-nav').backgroundColor,
+      navShadow: style('.conf-nav').boxShadow,
+      headingFontSize: style('.conf-sec h2').fontSize,
+      markerWidth: style('.conf-sec h2', '::before').width,
+      markerRadius: style('.conf-sec h2', '::before').borderRadius,
+    }
+  })
+  expect(styles.bannerGradient).toBe('linear-gradient(135deg, rgb(14, 46, 79) 0%, rgb(36, 80, 124) 55%, rgb(62, 118, 172) 100%)')
+  expect(styles.titleFontSize).toBe(desktop ? '30px' : '23px')
+  expect(styles.titleLineHeight).toBe(desktop ? '42px' : '32.2px')
+  expect(styles.navBackground).toBe('rgb(255, 255, 255)')
+  expect(styles.navShadow).toBe('rgba(14, 46, 79, 0.04) 0px 2px 8px 0px')
+  expect(styles.headingFontSize).toBe('21px')
+  expect(styles.markerWidth).toBe('4px')
+  expect(styles.markerRadius).toBe('2px')
 })

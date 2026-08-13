@@ -14,6 +14,7 @@ describe('public event shell', () => {
     )
 
     expect(screen.getByRole('heading', { level: 1, name: /磐石.*科学智能/ })).toBeVisible()
+    expect(screen.getByLabelText('活动信息')).toHaveTextContent('2026-08-23 至 2026-08-27')
     expect(screen.getByRole('navigation')).toHaveTextContent('实训日程')
     expect(screen.getByRole('complementary')).toHaveTextContent('重要日期')
   })

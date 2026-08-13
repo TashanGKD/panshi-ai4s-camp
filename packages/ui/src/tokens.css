@@ -47,9 +47,8 @@
 .info-card--compact p { margin: 0; color: var(--panshi-color-gray-dark); font-size: 13.5px; line-height: 1.8; }
 
 @media (max-width: 640px) {
-  :root { --panshi-page-gutter: 18px; }
-  .event-banner { padding-block: 34px 32px; }
   .event-banner__title { font-size: 23px; }
+  /* Structural overflow sizing for the approved single-row scrollable navigation; not a visual token. */
   .event-navigation__inner { width: max-content; }
 }
 

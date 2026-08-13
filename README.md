@@ -28,6 +28,8 @@ npm run dev:api
 
 API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQL 迁移。迁移不会随服务启动自动执行。
 
+`npm run dev:api` 会在 `apps/api` workspace 中执行 Node 24 原生命令 `node --watch --env-file=../../.env --import tsx src/server.ts`，因此与 Web 一样加载上述项目根目录 `.env`，并保留文件变更重启。`--env-file` 只加入 API 开发命令，不改变生产构建或运行时从 `process.env` 读取并校验配置的语义。
+
 ### Web 连接 API
 
 Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，公开客户端从其中的 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
@@ -89,6 +91,8 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
 Task 6 规格复核修正后，针对 API 基址解析与 `相关资料` 页面状态新增测试。本次实际验证结果为：contracts 33 项、API health 46 项、API public content 7 项、Web 27 项全部通过；根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 通过。Web 生产构建输出 311.53 kB JavaScript（gzip 95.52 kB）。本次仍未运行浏览器视觉回归或 Docker Compose 端到端验证。
 
 最终环境加载修正增加了直接导入实际 Vite 配置的 Node 测试，确认 `envDir` 指向包含 `.env.example` 和 `VITE_API_BASE_URL` 示例的项目根目录。该修正的配置/客户端聚焦测试 11 项、Web 全量 28 项、根目录 `typecheck`、`lint`、`build` 和 `git diff --check` 通过；Web 生产构建输出仍为 311.53 kB JavaScript（gzip 95.52 kB）。
+
+API 开发环境修正的自动化测试同时检查实际 `@panshi/api` package script，并以临时 `.env` 和 TypeScript 探针执行相同 Node watch/环境/tsx 选项顺序；探针读取到环境标记后终止，不连接数据库也不监听端口。该修正的 API 命令/启动聚焦测试 47 项、根目录 `typecheck`、`lint`、`build` 和 `git diff --check` 通过。
 
 ## 质量命令
 

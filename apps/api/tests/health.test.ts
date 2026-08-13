@@ -354,6 +354,9 @@ describe('API runtime configuration', () => {
       CORS_ORIGINS: ['https://camp.example', 'http://localhost:5173'],
       HEALTHCHECK_TIMEOUT_MS: 2_000,
       JSON_BODY_LIMIT_BYTES: 1_048_576,
+      NODE_ENV: 'development',
+      SECURE_COOKIES: false,
+      SESSION_TTL_SECONDS: 28_800,
     })
   })
 
@@ -368,6 +371,8 @@ describe('API runtime configuration', () => {
       .toMatchObject({ JSON_BODY_LIMIT_BYTES: 1_024, HEALTHCHECK_TIMEOUT_MS: 100 })
     expect(getApiEnv({ ...base, JSON_BODY_LIMIT: '10mb', HEALTHCHECK_TIMEOUT_MS: '10000' }))
       .toMatchObject({ JSON_BODY_LIMIT_BYTES: 10_485_760, HEALTHCHECK_TIMEOUT_MS: 10_000 })
+    expect(getApiEnv({ ...base, SESSION_TTL_SECONDS: '300', NODE_ENV: 'production' }))
+      .toMatchObject({ SESSION_TTL_SECONDS: 300, SECURE_COOKIES: true })
   })
 
   it('accepts canonical IPv6, deduplicates origins, and allows an empty allowlist', () => {
@@ -396,6 +401,8 @@ describe('API runtime configuration', () => {
     { API_PORT: '3001', CORS_ORIGINS: '', JSON_BODY_LIMIT: '1gb' },
     { API_PORT: '3001', CORS_ORIGINS: '', HEALTHCHECK_TIMEOUT_MS: '99' },
     { API_PORT: '3001', CORS_ORIGINS: '', HEALTHCHECK_TIMEOUT_MS: '10001' },
+    { API_PORT: '3001', CORS_ORIGINS: '', SESSION_TTL_SECONDS: '299' },
+    { API_PORT: '3001', CORS_ORIGINS: '', SESSION_TTL_SECONDS: '604801' },
   ])('rejects invalid runtime configuration without echoing values %#', (invalid) => {
     const source = {
       DATABASE_URL: 'postgresql://admin:database-secret@localhost/panshi',

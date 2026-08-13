@@ -139,6 +139,7 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
 
   const createCreator = async () => {
     const [creator] = await testDatabase!.db.insert(users).values({
+      displayName: '内容测试用户',
       phoneNormalized: '+8613900000000',
       passwordHash: 'test-only-non-login-hash',
       role: 'user',

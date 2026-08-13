@@ -4,6 +4,8 @@ import { createApp } from './app.js'
 import { getApiEnv } from './config/env.js'
 import { createDatabaseClient } from './db/client.js'
 import { createContentRepository } from './modules/content/content.repository.js'
+import { createAuditRepository } from './modules/audit/audit.repository.js'
+import { createIdentityRepository } from './modules/identity/identity.repository.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -213,13 +215,18 @@ export const installSignalHandlers = (
 export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const env = getApiEnv()
   const database = createDatabaseClient(env.DATABASE_URL, env.HEALTHCHECK_TIMEOUT_MS)
+  const identityRepository = createIdentityRepository(database.db)
   const app = createApp({
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
+    identityRepository,
+    auditRepository: createAuditRepository(database.db),
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,
       jsonLimitBytes: env.JSON_BODY_LIMIT_BYTES,
+      secureCookies: env.SECURE_COOKIES,
+      sessionTtlSeconds: env.SESSION_TTL_SECONDS,
     },
   })
 

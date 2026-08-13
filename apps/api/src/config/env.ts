@@ -48,9 +48,12 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   )).pipe(z.array(corsOrigin)).transform((origins) => [...new Set(origins)]),
   HEALTHCHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
   JSON_BODY_LIMIT: jsonBodyLimit.default(1_048_576),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(604_800).default(28_800),
 }).transform(({ JSON_BODY_LIMIT, ...env }) => ({
   ...env,
   JSON_BODY_LIMIT_BYTES: JSON_BODY_LIMIT,
+  SECURE_COOKIES: env.NODE_ENV === 'production',
 }))
 
 export type DatabaseEnv = z.infer<typeof DatabaseEnvSchema>

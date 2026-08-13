@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型，并已实现 API 运行壳、`GET /healthz` 与下述公开内容读取接口；身份、报名、后台和资源下载路由仍是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取以及管理员登录、退出和 profile 边界；报名、后台业务管理和资源下载路由仍属于后续任务。
 
 ## API 范围
 
@@ -21,15 +21,21 @@
 - `GET /api/v1/public/schedule`：只返回已发布的 `schedule`。
 - `GET /api/v1/public/content/:key`：按固定模块 key 返回单个已发布模块；`schedule` 必须使用独立接口，因此在此路径返回 404。
 
+已实现的身份接口为：
+
+- `POST /api/v1/auth/admin/login`：请求体含 `phone` 和 `password`；仅有效且未停用的 `admin` 可成功，错误凭据返回 401，普通用户或停用管理员返回 403。
+- `POST /api/v1/auth/admin/logout`：撤销当前数据库会话并清除 Cookie，成功返回 204。
+- `GET /api/v1/me/profile`：返回 `id`、`displayName`、`phoneNormalized` 和 `role`；未知、过期或已撤销会话返回 401，非管理员或已停用账号返回 403。
+
 Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由使用 App 已完成的上述 `GET /api/v1/public/site` 请求与契约校验，不单独重复请求；App 成功后页面显示真实空状态，App 失败时保留顶层错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
 
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 
 ## API 运行基线
 
-API 进程读取并校验 `DATABASE_URL`、`API_PORT` 和逗号分隔的 `CORS_ORIGINS`。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；默认端口等非规范写法会被拒绝，重复项会去重，空值表示不允许任何跨源状态变更请求。开发命令为 `npm run dev -w @panshi/api`。
+API 进程读取并校验 `DATABASE_URL`、`API_PORT`、`NODE_ENV`、`SESSION_TTL_SECONDS` 和逗号分隔的 `CORS_ORIGINS`。`SESSION_TTL_SECONDS` 默认 28800 秒（八小时），允许 300–604800 秒，不提供 remember-me。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；重复项会去重，空值表示不允许任何跨源状态变更请求。
 
-中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 基线保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。允许的 `OPTIONS` 预检返回对应 CORS header；任意来源不会被反射。该规则是 Cookie 认证上线前的 Origin 基线，后续身份任务仍需增加 CSRF token 校验。
+中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。独立 CSRF token 和登录限流尚未实现。
 
 JSON parser 的稳定客户端错误由统一错误层转换：格式错误返回 400 `MALFORMED_JSON`，不支持的 charset 或 content encoding 返回 415 `UNSUPPORTED_MEDIA_TYPE`，请求体超限返回 413 `PAYLOAD_TOO_LARGE`；响应不会包含 parser 原始消息或请求片段。
 
@@ -71,11 +77,11 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 - session Cookie 始终设置 `HttpOnly`；生产环境必须设置 `Secure`。
 - 明确设置 `SameSite=Lax`，作为同站点 Web/API 架构的默认值；如未来跨站架构确需调整，必须同时重新评估 CSRF 防护。
-- Cookie `Path` 限定为 `/api/v1`；默认使用 host-only Cookie，不设置宽泛 `Domain`，除非受信子域共享确有必要。
+- Cookie 名为 `panshi_session`，`Path=/`；默认使用 host-only Cookie，不设置宽泛 `Domain`。
 - 身份认证成功或权限变化后必须轮换 session；退出登录、密码重置或 session reset 后必须使旧 session 失效。
-- 使用 Cookie 身份的状态变更请求必须校验 CSRF token 和受信 Origin；`GET`、`HEAD`、`OPTIONS` 不得产生状态变更，不能仅依赖 `SameSite` 作为 CSRF 防护。
+- 当前状态变更请求必须校验受信 Origin；`GET`、`HEAD`、`OPTIONS` 不得产生状态变更。
 
-具体 Cookie 名称和有效期由后续身份实现确定。
+密码使用 bcrypt cost 12；未知手机号也走固定 dummy hash 比较路径。会话 token 由 `randomBytes(32)` 生成，数据库只保存 SHA-256 hash，audit metadata、错误和日志不得包含 token。
 
 用户角色仅分为普通用户 `user` 和统一权限模型下的管理员 `admin`。资源访问级别为：
 
@@ -93,7 +99,7 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 ## 已冻结的共享契约
 
-`@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、登录响应和提交报名快照。
+`@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、管理员登录请求/响应、profile 响应和提交报名快照。
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 

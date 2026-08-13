@@ -31,6 +31,7 @@ const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull(
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
+  displayName: text('display_name').notNull(),
   phoneNormalized: text('phone_normalized').notNull().unique('users_phone_normalized_unique'),
   passwordHash: text('password_hash').notNull(),
   role: text('role').$type<UserRole>().notNull().default('user'),

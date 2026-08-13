@@ -7,16 +7,25 @@ import { createHealthRouter, type DatabaseHealthCheck } from './modules/health/h
 import { createContentRouter } from './modules/content/content.routes.js'
 import { createContentService } from './modules/content/content.service.js'
 import type { PublicContentRepository } from './modules/content/content.repository.js'
+import { createAuditService } from './modules/audit/audit.service.js'
+import type { AuditRepository } from './modules/audit/audit.repository.js'
+import { createAuthRouter } from './modules/identity/auth.routes.js'
+import { createSessionService } from './modules/identity/session.service.js'
+import type { IdentityRepository } from './modules/identity/identity.repository.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
   healthcheckTimeoutMs: number
   jsonLimitBytes: number
+  secureCookies?: boolean
+  sessionTtlSeconds?: number
 }
 
 export type AppDependencies = {
   checkDatabase: DatabaseHealthCheck
   contentRepository?: PublicContentRepository
+  identityRepository?: IdentityRepository
+  auditRepository?: AuditRepository
   config: ApiRuntimeConfig
 }
 
@@ -59,14 +68,40 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
   }
 }
 
-export const createApp = ({ checkDatabase, contentRepository, config }: AppDependencies) => {
+const unavailableIdentityRepository: IdentityRepository = {
+  findUserByPhoneNormalized: async () => null,
+  revokeActiveSessionsForUser: async () => undefined,
+  createSession: async () => { throw new Error('Identity repository is unavailable') },
+  findSessionByTokenHash: async () => null,
+  revokeSessionByTokenHash: async () => undefined,
+}
+
+const noOpAuditRepository: AuditRepository = { append: async () => undefined }
+
+export const createApp = ({
+  checkDatabase,
+  contentRepository,
+  identityRepository = unavailableIdentityRepository,
+  auditRepository = noOpAuditRepository,
+  config,
+}: AppDependencies) => {
   const app = express()
+  const sessionTtlSeconds = config.sessionTtlSeconds ?? 28_800
+  const sessions = createSessionService(
+    identityRepository,
+    createAuditService(auditRepository),
+    { sessionTtlSeconds },
+  )
 
   app.use(requestId)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
   app.use(createOriginGuard(config.allowedOrigins))
   app.use('/healthz', createHealthRouter(checkDatabase, config.healthcheckTimeoutMs))
+  app.use('/api/v1', createAuthRouter(sessions, {
+    secureCookies: config.secureCookies ?? false,
+    sessionTtlSeconds,
+  }))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
     findPublishedByKeys: async () => [],
   })))

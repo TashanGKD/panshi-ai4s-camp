@@ -6,6 +6,7 @@ import {
   ApplicationStatusSchema,
   ContentModuleKeySchema,
   LoginResponseSchema,
+  ProfileResponseSchema,
   PaginationMetaSchema,
   PublicContentPayloadSchemas,
   PublicContentModuleResponseSchema,
@@ -194,14 +195,14 @@ describe('contracts', () => {
   it('accepts a minimal login response', () => {
     expect(LoginResponseSchema.parse({
       apiVersion: 'v1',
-      data: { user: { id: 'u1', role: 'user' } },
+      data: { user: { id: 'u1', displayName: '张三', role: 'user' } },
     })).toBeTruthy()
   })
 
   it.each([
-    { apiVersion: 'v1', data: { user: { role: 'user' } } },
-    { apiVersion: 'v1', data: { user: { id: 'u1', role: 'owner' } } },
-    { apiVersion: 'v2', data: { user: { id: 'u1', role: 'user' } } },
+    { apiVersion: 'v1', data: { user: { displayName: '张三', role: 'user' } } },
+    { apiVersion: 'v1', data: { user: { id: 'u1', displayName: '张三', role: 'owner' } } },
+    { apiVersion: 'v2', data: { user: { id: 'u1', displayName: '张三', role: 'user' } } },
   ])('rejects malformed login responses', (value) => {
     expect(LoginResponseSchema.safeParse(value).success).toBe(false)
   })
@@ -212,15 +213,45 @@ describe('contracts', () => {
       token: 'top-secret',
       data: {
         sessionToken: 'session-secret',
-        user: { id: 'u1', role: 'user', refreshToken: 'refresh-secret' },
+        user: { id: 'u1', displayName: '张三', role: 'user', refreshToken: 'refresh-secret' },
       },
     })
 
     expect(serialized).toEqual({
       apiVersion: 'v1',
-      data: { user: { id: 'u1', role: 'user' } },
+      data: { user: { id: 'u1', displayName: '张三', role: 'user' } },
     })
     expect(JSON.stringify(serialized)).not.toMatch(/top-secret|session-secret|refresh-secret/)
+  })
+
+  it('accepts a forward-compatible authenticated profile without credential fields', () => {
+    const profile = ProfileResponseSchema.parse({
+      apiVersion: 'v1',
+      trace: 'future-field',
+      data: {
+        future: true,
+        user: {
+          id: 'admin-1',
+          displayName: '管理员',
+          phoneNormalized: '+8613800138000',
+          role: 'admin',
+          passwordHash: 'must-not-survive',
+        },
+      },
+    })
+
+    expect(profile).toEqual({
+      apiVersion: 'v1',
+      data: {
+        user: {
+          id: 'admin-1',
+          displayName: '管理员',
+          phoneNormalized: '+8613800138000',
+          role: 'admin',
+        },
+      },
+    })
+    expect(JSON.stringify(profile)).not.toContain('must-not-survive')
   })
 
   it('validates and deeply freezes registration snapshots', () => {

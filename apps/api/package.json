@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "admin:create": "tsx src/cli/create-admin.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:content": "tsx src/db/seeds/initial-content.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
     "test": "vitest run --passWithNoTests",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",
+    "test:integration:auth": "node tests/require-auth-integration-env.mjs && vitest run tests/admin-auth.integration.test.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

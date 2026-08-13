@@ -112,6 +112,7 @@ const expectedChecks = [
 
 const createUser = async () => {
   const [user] = await db.insert(users).values({
+    displayName: '测试用户',
     phoneNormalized: `+8613${Math.floor(Math.random() * 1_000_000_000).toString().padStart(9, '0')}`,
     passwordHash: 'test-password-hash',
     role: 'user',
@@ -305,13 +306,23 @@ describe('initial PostgreSQL schema', () => {
 
   it('requires unique normalized phone numbers', async () => {
     const phoneNormalized = '+8613800000000'
-    await db.insert(users).values({ phoneNormalized, passwordHash: 'hash-one', role: 'user' })
+    await db.insert(users).values({ displayName: '用户一', phoneNormalized, passwordHash: 'hash-one', role: 'user' })
 
     await expect(db.insert(users).values({
+      displayName: '用户二',
       phoneNormalized,
       passwordHash: 'hash-two',
       role: 'user',
     })).rejects.toThrow()
+  })
+
+  it('adds a required display name through a forward migration', async () => {
+    const columns = await pool.query<{ column_name: string, is_nullable: string }>(`
+      select column_name, is_nullable
+      from information_schema.columns
+      where table_schema = 'public' and table_name = 'users' and column_name = 'display_name'
+    `)
+    expect(columns.rows).toEqual([{ column_name: 'display_name', is_nullable: 'NO' }])
   })
 
   it('rejects a second application for the same user', async () => {
@@ -498,7 +509,7 @@ describe('initial PostgreSQL schema', () => {
     }
   })
 
-  it('keeps exactly two stable migration hashes across repeated runs', async () => {
+  it('keeps exactly three stable migration hashes across repeated runs', async () => {
     const migrateOnce = async () => {
       const migrationDatabase = createDatabaseClient(testDatabaseUrl)
       await runMigrations({
@@ -516,6 +527,7 @@ describe('initial PostgreSQL schema', () => {
     expect(firstRun.rows.map(({ name }) => name)).toEqual([
       '0001_initial.sql',
       '0002_content_publication_integrity.sql',
+      '0003_user_display_name.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

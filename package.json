@@ -2,14 +2,19 @@
   "name": "panshi-ai4s-camp",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces",
+    "test": "node tests/workspaces.test.mjs && npm run test:workspaces",
+    "test:workspaces": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint .",
     "dev:web": "npm run dev -w @panshi/web",
     "dev:admin": "npm run dev -w @panshi/admin",

@@ -2,6 +2,11 @@
 
 这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。当前任务只建立工作区和质量门禁，不包含业务实现。
 
+## 运行环境
+
+- Node.js 24.x
+- npm 11.x
+
 ## 工作区职责
 
 - `apps/web`：学员侧公开网站。
@@ -28,13 +33,11 @@ npm run dev:api
 node tests/workspaces.test.mjs
 npm run typecheck
 npm run lint
-```
-
-需要运行各工作区后续提供的完整检查时，可使用：
-
-```bash
-npm run build
 npm test
+npm run build
+npm audit --omit=dev
 ```
+
+`npm test` 会先运行根目录结构测试，再逐一运行五个 workspace 的 Vitest。当前尚无应用测试，Vitest 会明确报告 `No test files found` 并通过；后续任务加入测试后无需修改根命令。`typecheck` 和 `build` 会逐一调用每个 workspace 的 TypeScript 配置，当前配置以 `files: []` 明示尚无源码。
 
 环境变量从 `.env.example` 复制后按本机环境填写；示例文件不保存真实凭据。

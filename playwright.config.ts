@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   outputDir: './test-results',
-  snapshotPathTemplate: '{testDir}/baselines/{arg}-{projectName}{ext}',
+  snapshotPathTemplate: '{testDir}/baselines/{arg}-{projectName}-{platform}{ext}',
   expect: { toHaveScreenshot: { animations: 'disabled', maxDiffPixels: 0 } },
   use: {
     baseURL: 'http://127.0.0.1:4173',

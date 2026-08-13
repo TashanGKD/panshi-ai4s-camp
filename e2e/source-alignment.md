@@ -24,6 +24,8 @@ Explicit baseline update only:
 npm run visual:update
 ```
 
+Committed full-page and legacy-reference snapshots use `{projectName}-{platform}` filenames, so each operating system keeps its own baseline. `visual:test` compares only and fails when the current platform baseline is absent; `visual:update` is the explicit command for generating that platform's files. Developers and CI should use the pinned Playwright/Chromium version and fixed locale, timezone, color scheme, fonts, and viewports, then inspect newly generated images before committing them. The direct source-vs-migrated PNG comparison is environment-local because both buffers are captured in the same browser run; it remains a zero-RGBA comparison and is not replaced or weakened by platform snapshots.
+
 Pixel comparison uses `maxDiffPixels: 0`; there is no nonzero tolerance.
 
 The first baseline run found that `@playwright/test` was not installed even though the Playwright CLI was present. The matching `1.60.0` test package was added with `npm install --ignore-scripts`, so no browser download was triggered and the existing Chromium cache remained in use.

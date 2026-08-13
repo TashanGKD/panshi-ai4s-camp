@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts 与 PostgreSQL 数据库基础已经实现，web/admin 页面和 API 路由仍属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、API 服务基础和公开站点首页壳层已经实现。当前公开内容仍是隔离 fixture；内容发布 API、后台页面以及注册、账户等业务路由属于后续任务。
 
 ## 运行环境
 
@@ -71,5 +71,14 @@ npm audit --omit=dev
 ```
 
 `npm test` 会先运行根目录结构测试，再逐一运行五个 workspace 的 Vitest。API schema 集成测试必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
+
+公开站点的 Playwright 视觉测试使用本机已安装的 Chromium，并按操作系统保存快照：
+
+```bash
+npm run visual:test
+npm run visual:update
+```
+
+`visual:test` 只比较当前平台已有的基线，不会改写图片；`visual:update` 才生成或更新当前平台基线。快照文件名包含 Playwright 的 `{platform}` 值（例如 `darwin` 或 `linux`），因此 macOS 与 Linux CI 各自维护对应基线。首次在新平台运行时，应在固定 Node、Playwright/Chromium、字体和视口环境中执行 `visual:update`，人工检查生成图片后再提交。测试中的 source-vs-migrated 直接 PNG 对比始终要求零个 RGBA 通道差异，但该比较只在同一次运行、同一渲染环境内成立，不跨操作系统复用像素结果。
 
 环境变量从 `.env.example` 复制后按本机环境填写；示例文件不保存真实凭据。

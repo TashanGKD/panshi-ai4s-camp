@@ -1,5 +1,6 @@
 import { ContentSection, EventBanner, EventNavigation, InfoCard } from '@panshi/ui'
 import '@panshi/ui/tokens.css'
+import { SkipLink } from '../app/SkipLink'
 import type { HomeFixture } from '../data/homeFixture'
 import '../styles/public.css'
 
@@ -11,10 +12,11 @@ export const navigationItems = [
 
 export function HomePage({ fixture }: { fixture: HomeFixture }) {
   return <div className="public-shell">
+    <SkipLink />
     <EventBanner {...fixture} />
     <EventNavigation items={navigationItems} />
     <div className="event-container public-layout" data-testid="desktop-content-sidebar">
-      <main id="main-content">
+      <main id="main-content" tabIndex={-1}>
         <ContentSection title="实训营简介">{fixture.intro.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}</ContentSection>
         <ContentSection title="面向对象"><p>{fixture.target}</p></ContentSection>
         <ContentSection title="实训特点"><div className="feature-list">{fixture.features.map((feature) => <InfoCard as="article" headingLevel={3} key={feature.title} title={feature.title} variant="compact"><p>{feature.description}</p></InfoCard>)}</div></ContentSection>
@@ -26,6 +28,6 @@ export function HomePage({ fixture }: { fixture: HomeFixture }) {
         <InfoCard title="联系我们"><p className="contact-copy">{fixture.contact}</p></InfoCard>
       </aside>
     </div>
-    <footer className="event-footer"><div className="event-container">磐石·科学智能（AI for Science）实训营</div></footer>
+    <footer className="event-footer"><div className="event-container">{fixture.title}</div></footer>
   </div>
 }

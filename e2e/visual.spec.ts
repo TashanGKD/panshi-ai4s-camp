@@ -28,8 +28,8 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => document.fonts.ready)
 })
 
-test('public home shell visual baseline', async ({ page }, testInfo) => {
-  await expect(page).toHaveScreenshot(`public-home-${testInfo.project.name}.png`, { fullPage: true })
+test('public home shell visual baseline', async ({ page }) => {
+  await expect(page).toHaveScreenshot('public-home.png', { fullPage: true })
 })
 
 test('source-derived and migrated common regions are pixel-identical', async ({ page }, testInfo) => {
@@ -182,10 +182,34 @@ test('source-aligned common values are exact', async ({ page }) => {
 })
 
 test('navigation is keyboard visible and mobile sidebar follows content', async ({ page }) => {
+  const skipLink = page.getByRole('link', { name: '跳至主要内容' })
+  const hiddenSkipStyles = await skipLink.evaluate((link) => {
+    const style = getComputedStyle(link)
+    return { width: style.width, height: style.height, clipPath: style.clipPath }
+  })
+  expect(hiddenSkipStyles).toEqual({ width: '1px', height: '1px', clipPath: 'inset(50%)' })
+
   await page.keyboard.press('Tab')
+  await expect(skipLink).toBeFocused()
+  await expect(skipLink).toBeVisible()
+  const focusedSkipStyles = await skipLink.evaluate((link) => {
+    const style = getComputedStyle(link)
+    return { width: style.width, height: style.height, clipPath: style.clipPath }
+  })
+  expect(Number.parseFloat(focusedSkipStyles.width)).toBeGreaterThan(1)
+  expect(Number.parseFloat(focusedSkipStyles.height)).toBeGreaterThan(1)
+  expect(focusedSkipStyles.clipPath).toBe('none')
+  await page.keyboard.press('Enter')
+  const main = page.getByRole('main')
+  await expect(main).toBeFocused()
+  await expect(page).toHaveURL(/#main-content$/)
+
+  await page.keyboard.press('Shift+Tab')
+  const lastNavLink = page.getByRole('link', { name: '个人中心' })
+  await expect(lastNavLink).toBeFocused()
+  expect(await lastNavLink.evaluate((link) => getComputedStyle(link).outlineStyle)).toBe('solid')
+
   const firstLink = page.getByRole('link', { name: '首页' })
-  await expect(firstLink).toBeFocused()
-  expect(await firstLink.evaluate((link) => getComputedStyle(link).outlineStyle)).toBe('solid')
   await expect(firstLink).toHaveAttribute('aria-current', 'page')
 
   const ordering = await page.evaluate(() => {
@@ -213,10 +237,10 @@ test('navigation is keyboard visible and mobile sidebar follows content', async 
   }
 })
 
-test('legacy common-region reference capture', async ({ page }, testInfo) => {
+test('legacy common-region reference capture', async ({ page }) => {
   await page.setContent(legacyReference)
   await page.evaluate(() => document.fonts.ready)
-  await expect(page.locator('body')).toHaveScreenshot(`legacy-common-${testInfo.project.name}.png`)
+  await expect(page.locator('body')).toHaveScreenshot('legacy-common.png')
 })
 
 test('legacy reference CSS contract is active', async ({ page }) => {

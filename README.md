@@ -27,6 +27,12 @@ npm run dev:api
 
 API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQL 迁移。迁移不会随服务启动自动执行。
 
+### Web 连接 API
+
+Web 公开客户端从 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
+
+本地分端口开发按 `.env.example` 设置 `VITE_API_BASE_URL=http://localhost:3001`，Web 默认由 Vite 在 `http://localhost:5173` 提供。配置值必须是不含凭据、query 或 fragment 的绝对 HTTP(S) URL，可含基础路径，末尾斜杠会被规范化；非法或不安全值会在客户端初始化时明确拒绝。使用已配置的 API origin 时，`fetch` 携带 `credentials: 'include'`，所以 API 的 `CORS_ORIGINS` 必须包含实际 Web origin；同源回退使用 `credentials: 'same-origin'`。
+
 ## PostgreSQL 与迁移
 
 本地开发可启动 Compose 中唯一的 PostgreSQL 服务。下面的 Compose 命令是标准工作流，但本次验证环境缺少 Docker Compose 插件且 Docker daemon 未运行，因此没有实际执行：
@@ -73,9 +79,13 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
 
 内容依据文件为 `磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`（本次读取的 SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。公开日期按已确认覆盖值固定为 2026-08-23 至 2026-08-27，地点为中国科学院物理研究所。源文件 OOXML 含 537 处插入和 273 处删除修订，并混有 8 月与 9 月日期残留，因此首版日程只发布五天的可核验专题层级，不复制受修订污染的逐节时间表。组织单位清单在修订中也存在增删，首版暂不发布该模块。报名截止、电话、邮箱、住宿交通、资料文件以及标为“待定”的授课人均未写入公开种子。
 
+`相关资料` 页面在 Task 6 中只通过共享公开客户端检查现有 `GET /api/v1/public/site` 的网络与契约状态；请求成功后如实显示“相关资料尚未发布”。当前没有实现或声称存在资料记录、资料路由或下载权限；`apps/api/src/modules/resources` 以及 public/authenticated/admitted 权限属于 Task 15。
+
 ## Task 6 验证记录（2026-08-14）
 
 本次在本机 PostgreSQL 的专用 `panshi_ai4s_camp_test` 数据库上确认迁移共 2 个文件，并分别运行数据库测试，避免多个测试文件并行清空同一测试库。验证结果：contracts 33 项、API health 46 项、API schema 19 项、API public content 7 项、Web 14 项全部通过；admin 与 UI workspace 当前没有测试文件，`--passWithNoTests` 返回成功。根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 均通过。Web 生产构建输出约 310.60 kB JavaScript（gzip 95.19 kB）。本次没有运行浏览器视觉回归或 Docker Compose 端到端验证，因此不声称这两层已验证。
+
+Task 6 规格复核修正后，针对 API 基址解析与 `相关资料` 页面状态新增测试。本次实际验证结果为：contracts 33 项、API health 46 项、API public content 7 项、Web 27 项全部通过；根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 通过。Web 生产构建输出 311.53 kB JavaScript（gzip 95.52 kB）。本次仍未运行浏览器视觉回归或 Docker Compose 端到端验证。
 
 ## 质量命令
 

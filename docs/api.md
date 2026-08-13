@@ -21,6 +21,8 @@
 - `GET /api/v1/public/schedule`：只返回已发布的 `schedule`。
 - `GET /api/v1/public/content/:key`：按固定模块 key 返回单个已发布模块；`schedule` 必须使用独立接口，因此在此路径返回 404。
 
+Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 页面只使用共享公开客户端请求上述 `GET /api/v1/public/site`，以区分加载、成功空状态和网络/契约错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
+
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 
 ## API 运行基线

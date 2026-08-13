@@ -102,7 +102,6 @@ describe('API-driven public pages', () => {
   it.each([
     ['/contact', '联系信息尚未发布'],
     ['/travel', '住宿与交通信息尚未发布'],
-    ['/resources', '相关资料尚未发布'],
   ])('renders a truthful empty state on %s', async (path, message) => {
     installFetch()
 
@@ -110,6 +109,52 @@ describe('API-driven public pages', () => {
 
     expect(await screen.findByText(message)).toBeVisible()
     expect(screen.queryByText(/138\d{8}|@|报名截止.*2026/u)).not.toBeInTheDocument()
+  })
+
+  it('keeps ResourcesPage loading until its published-content check succeeds', async () => {
+    let siteRequests = 0
+    let resolveResources: ((response: Response) => void) | undefined
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path = requestPath(input)
+      if (!path.endsWith('/api/v1/public/site')) throw new Error(`Unexpected request: ${path}`)
+      siteRequests += 1
+      if (siteRequests === 1) return jsonResponse(siteResponse)
+      return new Promise((resolve) => { resolveResources = resolve })
+    })
+
+    renderRoute('/resources')
+
+    expect(await screen.findByRole('heading', { level: 2, name: '相关资料' })).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('正在检查相关资料')
+    await act(async () => resolveResources?.(jsonResponse(siteResponse)))
+    expect(await screen.findByText('相关资料尚未发布')).toBeVisible()
+  })
+
+  it('uses the shared public client before rendering the truthful ResourcesPage empty state', async () => {
+    const fetchSpy = installFetch()
+
+    renderRoute('/resources')
+
+    expect(await screen.findByText('相关资料尚未发布')).toBeVisible()
+    expect(fetchSpy.mock.calls.filter(([input]) => requestPath(input).endsWith('/api/v1/public/site'))).toHaveLength(2)
+  })
+
+  it.each([
+    ['network', () => Promise.reject(new Error('network unavailable'))],
+    ['schema', () => Promise.resolve(jsonResponse({ apiVersion: 'v1', data: {} }))],
+  ])('renders a ResourcesPage error after a %s failure', async (_kind, failingResponse) => {
+    let siteRequests = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const path = requestPath(input)
+      if (!path.endsWith('/api/v1/public/site')) throw new Error(`Unexpected request: ${path}`)
+      siteRequests += 1
+      return siteRequests === 1 ? jsonResponse(siteResponse) : failingResponse()
+    })
+
+    renderRoute('/resources')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('相关资料暂时无法加载')
+    expect(screen.queryByText('相关资料尚未发布')).not.toBeInTheDocument()
   })
 
   it('renders a controlled error state when public content cannot be loaded', async () => {

@@ -43,7 +43,7 @@ export function App() {
     <Route path="/schedule" element={<PublicShell site={site}><SchedulePage /></PublicShell>} />
     <Route path="/travel" element={<PublicShell site={site}><TravelPage /></PublicShell>} />
     <Route path="/contact" element={<PublicShell site={site}><ContactPage contacts={site.contacts} /></PublicShell>} />
-    <Route path="/resources" element={<PublicShell site={site}><ResourcesPage /></PublicShell>} />
+    <Route path="/resources" element={<PublicShell site={site}><ResourcesPage apiReady={state.status === 'ready'} /></PublicShell>} />
     <Route path="/register" element={<PublicShell site={site}><PlaceholderPage title="在线注册" /></PublicShell>} />
     <Route path="/account" element={<PublicShell site={site}><PlaceholderPage title="个人中心" /></PublicShell>} />
   </Routes>

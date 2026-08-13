@@ -8,6 +8,7 @@ import {
   LoginResponseSchema,
   PaginationMetaSchema,
   PublicContentPayloadSchemas,
+  PublicContentModuleResponseSchema,
   PublicScheduleResponseSchema,
   PublicSiteResponseSchema,
   RegistrationSnapshotSchema,
@@ -91,6 +92,75 @@ describe('contracts', () => {
     expect(PublicSiteResponseSchema.parse(publicSiteResponse)).toEqual(publicSiteResponse)
   })
 
+  it('accepts only safe contact link protocols', () => {
+    for (const href of [
+      'https://camp.example/contact',
+      'mailto:camp@example.com',
+      'tel:+8613800138000',
+    ]) {
+      expect(PublicContentPayloadSchemas.contacts.parse({
+        items: [{ label: '联系方式', value: '联系我们', href }],
+      })).toBeTruthy()
+    }
+  })
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'https://user:secret@camp.example/contact',
+    'not a URL',
+    'mailto:not-an-email',
+    'tel:call-me',
+  ])('rejects unsafe or malformed contact href %s', (href) => {
+    expect(PublicContentPayloadSchemas.contacts.safeParse({
+      items: [{ label: '联系方式', value: '联系我们', href }],
+    }).success).toBe(false)
+  })
+
+  it.each([
+    '2026-00-10',
+    '2026-13-01',
+    '2026-04-31',
+    '2026-02-29',
+    '0000-01-01',
+  ])('rejects invalid Gregorian content date %s', (date) => {
+    expect(PublicContentPayloadSchemas.schedule.safeParse({
+      days: [{ date, label: '第一天', theme: '主题', sessions: [] }],
+    }).success).toBe(false)
+  })
+
+  it('accepts a real leap day and rejects a reversed event date range', () => {
+    expect(PublicContentPayloadSchemas.schedule.safeParse({
+      days: [{ date: '2024-02-29', label: '第一天', theme: '主题', sessions: [] }],
+    }).success).toBe(true)
+    expect(PublicContentPayloadSchemas.basic.safeParse({
+      ...publicSiteResponse.data.basic,
+      dates: { start: '2026-08-27', end: '2026-08-23', label: '倒序日期' },
+    }).success).toBe(false)
+  })
+
+  it('strips unknown additive fields from public response envelopes', () => {
+    expect(PublicSiteResponseSchema.parse({
+      ...publicSiteResponse,
+      requestTrace: 'future-top-level-field',
+      data: { ...publicSiteResponse.data, futureData: { enabled: true } },
+    })).toEqual(publicSiteResponse)
+
+    expect(PublicContentModuleResponseSchema.parse({
+      apiVersion: 'v1',
+      futureTopLevel: true,
+      data: {
+        contentVersion: 'travel:1',
+        key: 'travel',
+        payload: { sections: [] },
+        futureData: true,
+      },
+    })).toEqual({
+      apiVersion: 'v1',
+      data: { contentVersion: 'travel:1', key: 'travel', payload: { sections: [] } },
+    })
+  })
+
   it('validates every fixed content module with a module-specific schema', () => {
     expect(Object.keys(PublicContentPayloadSchemas)).toEqual(ContentModuleKeySchema.options)
     expect(PublicContentPayloadSchemas.schedule.parse({
@@ -107,10 +177,10 @@ describe('contracts', () => {
         schedule: { days: [] },
       },
     })).toBeTruthy()
-    expect(PublicSiteResponseSchema.safeParse({
+    expect(PublicSiteResponseSchema.parse({
       ...publicSiteResponse,
       data: { ...publicSiteResponse.data, schedule: { days: [] } },
-    }).success).toBe(false)
+    })).toEqual(publicSiteResponse)
   })
 
   it.each([

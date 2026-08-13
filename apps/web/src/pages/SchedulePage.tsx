@@ -31,7 +31,20 @@ export function SchedulePage() {
     {state.status === 'ready' ? <ol className="schedule-list">{state.data.days.map((day) => <li key={day.date}>
       <p className="schedule-list__date">{day.label} · {day.date}</p>
       <h3>{day.theme}</h3>
-      {day.sessions.length > 0 ? <ul>{day.sessions.map((session) => <li key={`${session.time ?? ''}:${session.title}`}>{session.time ? `${session.time} ` : ''}{session.title}</li>)}</ul> : null}
+      {day.sessions.length > 0 ? <ul>{day.sessions.map((session) => <li key={`${session.time ?? ''}:${session.title}`}>
+        <article>
+          <h4>{session.title}</h4>
+          {session.time ? <p><strong>时间：</strong><span>{session.time}</span></p> : null}
+          {session.details && session.details.length > 0 ? <section>
+            <h5>课程详情</h5>
+            <ul>{session.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+          </section> : null}
+          {session.instructors && session.instructors.length > 0 ? <section>
+            <h5>授课教师</h5>
+            <ul>{session.instructors.map((instructor) => <li key={instructor}>{instructor}</li>)}</ul>
+          </section> : null}
+        </article>
+      </li>)}</ul> : null}
     </li>)}</ol> : null}
   </section>
 }

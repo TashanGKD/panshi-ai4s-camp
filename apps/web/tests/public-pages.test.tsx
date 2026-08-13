@@ -26,7 +26,17 @@ const scheduleResponse = {
     contentVersion: 'schedule:1',
     schedule: {
       days: [
-        { date: '2026-08-23', label: '第一天', theme: '科研智能体', sessions: [] },
+        {
+          date: '2026-08-23',
+          label: '第一天',
+          theme: '科研智能体',
+          sessions: [{
+            title: '智能体构建实践',
+            time: '09:00–10:30',
+            details: ['从科研问题定义任务', '核验工具调用结果'],
+            instructors: ['张老师', '李老师'],
+          }],
+        },
         { date: '2026-08-27', label: '第五天', theme: '参访交流与结营', sessions: [] },
       ],
     },
@@ -93,6 +103,12 @@ describe('API-driven public pages', () => {
     await screen.findByText('科研智能体')
     expect(screen.getByRole('main')).toHaveTextContent('科研智能体')
     expect(screen.getByRole('main')).toHaveTextContent('参访交流与结营')
+    expect(screen.getByRole('heading', { level: 4, name: '智能体构建实践' })).toBeVisible()
+    expect(screen.getByText('09:00–10:30')).toBeVisible()
+    expect(screen.getByRole('heading', { level: 5, name: '课程详情' })).toBeVisible()
+    expect(screen.getByText('核验工具调用结果')).toBeVisible()
+    expect(screen.getByRole('heading', { level: 5, name: '授课教师' })).toBeVisible()
+    expect(screen.getByText('李老师')).toBeVisible()
     expect(fetchSpy.mock.calls.map(([input]) => requestPath(input))).toEqual(expect.arrayContaining([
       '/api/v1/public/site',
       '/api/v1/public/schedule',
@@ -111,50 +127,32 @@ describe('API-driven public pages', () => {
     expect(screen.queryByText(/138\d{8}|@|报名截止.*2026/u)).not.toBeInTheDocument()
   })
 
-  it('keeps ResourcesPage loading until its published-content check succeeds', async () => {
-    let siteRequests = 0
-    let resolveResources: ((response: Response) => void) | undefined
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const path = requestPath(input)
-      if (!path.endsWith('/api/v1/public/site')) throw new Error(`Unexpected request: ${path}`)
-      siteRequests += 1
-      if (siteRequests === 1) return jsonResponse(siteResponse)
-      return new Promise((resolve) => { resolveResources = resolve })
-    })
+  it('does not render ResourcesPage until the shared site request succeeds', async () => {
+    let resolveSite: ((response: Response) => void) | undefined
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise((resolve) => {
+      resolveSite = resolve
+    }))
 
     renderRoute('/resources')
 
-    expect(await screen.findByRole('heading', { level: 2, name: '相关资料' })).toBeVisible()
-    expect(screen.getByRole('status')).toHaveTextContent('正在检查相关资料')
-    await act(async () => resolveResources?.(jsonResponse(siteResponse)))
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载活动信息')
+    expect(screen.queryByRole('heading', { level: 2, name: '相关资料' })).not.toBeInTheDocument()
+    await act(async () => resolveSite?.(jsonResponse(siteResponse)))
     expect(await screen.findByText('相关资料尚未发布')).toBeVisible()
-  })
-
-  it('uses the shared public client before rendering the truthful ResourcesPage empty state', async () => {
-    const fetchSpy = installFetch()
-
-    renderRoute('/resources')
-
-    expect(await screen.findByText('相关资料尚未发布')).toBeVisible()
-    expect(fetchSpy.mock.calls.filter(([input]) => requestPath(input).endsWith('/api/v1/public/site'))).toHaveLength(2)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it.each([
     ['network', () => Promise.reject(new Error('network unavailable'))],
     ['schema', () => Promise.resolve(jsonResponse({ apiVersion: 'v1', data: {} }))],
-  ])('renders a ResourcesPage error after a %s failure', async (_kind, failingResponse) => {
-    let siteRequests = 0
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const path = requestPath(input)
-      if (!path.endsWith('/api/v1/public/site')) throw new Error(`Unexpected request: ${path}`)
-      siteRequests += 1
-      return siteRequests === 1 ? jsonResponse(siteResponse) : failingResponse()
-    })
+  ])('keeps a %s site failure at the top-level Resources route boundary', async (_kind, failingResponse) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(failingResponse)
 
     renderRoute('/resources')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('相关资料暂时无法加载')
+    expect(await screen.findByRole('alert')).toHaveTextContent('活动信息暂时无法加载')
     expect(screen.queryByText('相关资料尚未发布')).not.toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it('renders a controlled error state when public content cannot be loaded', async () => {

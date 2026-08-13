@@ -1,11 +1,11 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-type ApiPackage = { scripts: { dev?: string } }
+type ApiPackage = { scripts: { dev?: string, 'test:integration:content'?: string } }
 
 describe('API development command', () => {
   it('loads the project-root environment with the supported Node watch option order', async () => {
@@ -71,5 +71,25 @@ describe('API development command', () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true })
     }
+  })
+
+  it('defines a required content integration command with a missing-env preflight', async () => {
+    const apiRoot = fileURLToPath(new URL('..', import.meta.url))
+    const apiPackage = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as ApiPackage
+    expect(apiPackage.scripts['test:integration:content']).toBe(
+      'node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts',
+    )
+
+    const environment = { ...process.env }
+    delete environment.TEST_DATABASE_URL
+    const result = spawnSync(process.execPath, ['tests/require-content-integration-env.mjs'], {
+      cwd: apiRoot,
+      encoding: 'utf8',
+      env: environment,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('TEST_DATABASE_URL is required')
   })
 })

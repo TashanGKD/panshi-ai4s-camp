@@ -58,6 +58,9 @@ DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp' 
 
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm test -w @panshi/api -- schema.test.ts
+
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:content -w @panshi/api
 ```
 
 上述账号和密码是与 `compose.yaml` 对齐的本地开发占位值，绝不能用于生产环境。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
@@ -78,11 +81,11 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
   npm run db:seed:content -w @panshi/api
 ```
 
-脚本幂等初始化八个固定模块，并发布 `basic`、`features`、`importantDates`、`schedule`、`contacts`、`display` 的版本 1。`organizations` 与 `travel` 仅建立未发布模块；`contacts` 发布为空列表。重复运行会复用相同或内容一致的既有版本，不重复写入版本或审计；如果既有版本 1 的 payload 不同，脚本拒绝覆盖。
+脚本幂等初始化八个固定模块，并发布 `basic`、`features`、`importantDates`、`schedule`、`contacts`、`display` 的版本 1。`organizations` 与 `travel` 仅建立未发布模块；`contacts` 发布为空列表。种子事务先获取项目专用的 transaction-scoped PostgreSQL advisory lock，使并发调用串行化。创建版本与把 `published_version_id` 从空值指向该版本分别记录 `content.version_created` 和 `content.version_published` 审计；复用既有版本时只要实际发生首次发布，仍会记录发布审计。重复无变化运行不重复写入版本或审计；如果既有版本 1 的 payload 不同，脚本拒绝覆盖。
 
 内容依据文件为 `磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`（本次读取的 SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。公开日期按已确认覆盖值固定为 2026-08-23 至 2026-08-27，地点为中国科学院物理研究所。源文件 OOXML 含 537 处插入和 273 处删除修订，并混有 8 月与 9 月日期残留，因此首版日程只发布五天的可核验专题层级，不复制受修订污染的逐节时间表。组织单位清单在修订中也存在增删，首版暂不发布该模块。报名截止、电话、邮箱、住宿交通、资料文件以及标为“待定”的授课人均未写入公开种子。
 
-`相关资料` 页面在 Task 6 中只通过共享公开客户端检查现有 `GET /api/v1/public/site` 的网络与契约状态；请求成功后如实显示“相关资料尚未发布”。当前没有实现或声称存在资料记录、资料路由或下载权限；`apps/api/src/modules/resources` 以及 public/authenticated/admitted 权限属于 Task 15。
+`相关资料` 路由复用 App 已加载并通过契约校验的 `GET /api/v1/public/site` 状态，不再二次请求；顶层请求成功后如实显示“相关资料尚未发布”，顶层网络或契约失败仍显示全站错误。当前没有实现或声称存在资料记录、资料路由或下载权限；`apps/api/src/modules/resources` 以及 public/authenticated/admitted 权限属于 Task 15。
 
 ## Task 6 验证记录（2026-08-14）
 
@@ -93,6 +96,8 @@ Task 6 规格复核修正后，针对 API 基址解析与 `相关资料` 页面�
 最终环境加载修正增加了直接导入实际 Vite 配置的 Node 测试，确认 `envDir` 指向包含 `.env.example` 和 `VITE_API_BASE_URL` 示例的项目根目录。该修正的配置/客户端聚焦测试 11 项、Web 全量 28 项、根目录 `typecheck`、`lint`、`build` 和 `git diff --check` 通过；Web 生产构建输出仍为 311.53 kB JavaScript（gzip 95.52 kB）。
 
 API 开发环境修正的自动化测试同时检查实际 `@panshi/api` package script，并以临时 `.env` 和 TypeScript 探针执行相同 Node watch/环境/tsx 选项顺序；探针读取到环境标记后终止，不连接数据库也不监听端口。该修正的 API 命令/启动聚焦测试 47 项、根目录 `typecheck`、`lint`、`build` 和 `git diff --check` 通过。
+
+本次公开内容边界加固验证结果：contracts 47 项、Web 30 项、无数据库 API 测试 53 项通过（PostgreSQL 边界 3 项明确跳过）；必须的 `test:integration:content` 在本机专用 `panshi_ai4s_camp_test` 上 8 项通过，缺少 `TEST_DATABASE_URL` 时的命令立即以非零状态退出。根目录 `typecheck`、`lint`、`build`、`git diff --check` 通过，`npm audit --omit=dev` 报告 0 个漏洞。Web 生产构建输出 312.90 kB JavaScript（gzip 95.95 kB）。
 
 ## 质量命令
 
@@ -105,7 +110,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-`npm test` 会先运行根目录结构测试，再逐一运行五个 workspace 的 Vitest。API schema 集成测试必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
+API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -- health.test.ts dev-command.test.ts`。内容仓库、发布指针和种子幂等性属于必须的 PostgreSQL 集成边界，使用 `npm run test:integration:content -w @panshi/api`；该命令缺少 `TEST_DATABASE_URL` 时立即失败，且只接受数据库名精确为 `panshi_ai4s_camp_test` 的 PostgreSQL URL。API schema 集成测试同样必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 
 公开站点的 Playwright 视觉测试使用本机已安装的 Chromium，并按操作系统保存快照：
 

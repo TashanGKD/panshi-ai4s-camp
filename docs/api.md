@@ -21,7 +21,7 @@
 - `GET /api/v1/public/schedule`：只返回已发布的 `schedule`。
 - `GET /api/v1/public/content/:key`：按固定模块 key 返回单个已发布模块；`schedule` 必须使用独立接口，因此在此路径返回 404。
 
-Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 页面只使用共享公开客户端请求上述 `GET /api/v1/public/site`，以区分加载、成功空状态和网络/契约错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
+Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由使用 App 已完成的上述 `GET /api/v1/public/site` 请求与契约校验，不单独重复请求；App 成功后页面显示真实空状态，App 失败时保留顶层错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
 
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 
@@ -98,5 +98,7 @@ Cookie 和 session 实现必须满足以下安全底线：
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 
 公开站点聚合响应包含 `contentVersion`，以及 `basic`、`importantDates`、`contacts`、`display` 四个已发布 payload；`schedule` 保持独立，不混入该最小聚合。八个模块分别使用 `BasicContentSchema`、`FeaturesContentSchema`、`OrganizationsContentSchema`、`ImportantDatesContentSchema`、`ScheduleContentSchema`、`ContactsContentSchema`、`TravelContentSchema`、`DisplayContentSchema` 校验。公开 Web 客户端再次按共享响应契约解析 HTTP payload，不导入数据库代码。
+
+公开响应的顶层和 `data` envelope 会容忍并剥离 v1 未知增量字段，但缺失必需字段、错误 `apiVersion` 或错误必需字段类型仍会被拒绝。公开内容 payload 保持按模块严格校验。内容日期必须是真实 Gregorian `YYYY-MM-DD`，`basic.dates.start` 不得晚于 `end`；日程共用同一日期校验。联系链接只允许不含凭据的 `https:`、合法邮箱的 `mailto:` 和合法号码的 `tel:`。
 
 报名快照表示某次提交时的 `formVersion`、`submittedAt` 和 JSON-safe 答案副本。解析后的快照及其嵌套对象、数组均不可变。它不是可在线修改的表单定义；补充或再次提交应产生新的版本化快照，而不是改写既有快照。

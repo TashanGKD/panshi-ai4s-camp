@@ -73,4 +73,25 @@ describe('public API base URL', () => {
     const { resolveApiBaseUrl } = await loadClientModule()
     expect(() => resolveApiBaseUrl(value)).toThrow(/VITE_API_BASE_URL/u)
   })
+
+  it('accepts and strips additive v1 response envelope fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      ...siteResponse,
+      futureTopLevel: 'ignored',
+      data: { ...siteResponse.data, futureData: { ignored: true } },
+    }))
+    const { createPublicClient } = await loadClientModule()
+
+    await expect(createPublicClient().getPublicSite()).resolves.toEqual(siteResponse)
+  })
+
+  it.each([
+    { ...siteResponse, apiVersion: 'v2' },
+    { ...siteResponse, data: { ...siteResponse.data, display: undefined } },
+  ])('still rejects missing or wrong required response fields', async (response) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(response))
+    const { createPublicClient } = await loadClientModule()
+
+    await expect(createPublicClient().getPublicSite()).rejects.toBeTruthy()
+  })
 })

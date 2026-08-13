@@ -6,7 +6,7 @@ import {
   PublicContentPayloadSchemas,
   type JsonObject,
 } from '@panshi/contracts'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { z } from 'zod'
 import { createConfiguredDatabaseClient } from '../client.js'
@@ -64,13 +64,18 @@ const publishedVersionIds = {
 } as const
 
 type SeedDatabase = NodePgDatabase<typeof schema>
+// First 64 bits of SHA-256("panshi-ai4s-camp:initial-content-v1"), kept stable across seed callers.
+const initialContentSeedLockKey = '4509249026622731849'
 
 export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string) => {
   const parsedCreatorUserId = z.string().uuid().parse(creatorUserId)
-  const [creator] = await db.select({ id: users.id }).from(users).where(eq(users.id, parsedCreatorUserId)).limit(1)
-  if (!creator) throw new Error('CONTENT_SEED_CREATOR_USER_ID must reference an existing user')
 
   await db.transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(${initialContentSeedLockKey}::bigint)`)
+    const [creator] = await transaction.select({ id: users.id }).from(users)
+      .where(eq(users.id, parsedCreatorUserId)).limit(1)
+    if (!creator) throw new Error('CONTENT_SEED_CREATOR_USER_ID must reference an existing user')
+
     await transaction.insert(contentModules).values(ContentModuleKeySchema.options.map((key) => ({
       key,
       draft: {},
@@ -106,20 +111,36 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
         inserted = true
       }
 
-      await transaction.update(contentModules)
+      if (inserted) {
+        await transaction.insert(auditLogs).values({
+          actorUserId: creator.id,
+          action: 'content.version_created',
+          entityType: 'content_version',
+          entityId: publishedVersionId,
+          metadata: { moduleKey: key, source: 'initial_content_seed', version: 1 },
+        })
+      }
+
+      const publication = await transaction.update(contentModules)
         .set({ publishedVersionId })
         .where(and(
           eq(contentModules.key, key),
           isNull(contentModules.publishedVersionId),
-        ))
+        )).returning({ key: contentModules.key })
 
-      if (inserted) {
+      if (publication.length > 0) {
         await transaction.insert(auditLogs).values({
           actorUserId: creator.id,
-          action: 'content.initial_seed',
-          entityType: 'content_version',
-          entityId: versionId,
-          metadata: { moduleKey: key, version: 1 },
+          action: 'content.version_published',
+          entityType: 'content_module',
+          entityId: key,
+          metadata: {
+            moduleKey: key,
+            previousPublishedVersionId: null,
+            source: 'initial_content_seed',
+            version: 1,
+            versionId: publishedVersionId,
+          },
         })
       }
     }

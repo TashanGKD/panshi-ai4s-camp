@@ -9,6 +9,7 @@
     "db:seed:content": "tsx src/db/seeds/initial-content.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
     "test": "vitest run --passWithNoTests",
+    "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

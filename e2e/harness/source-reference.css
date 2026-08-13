@@ -1,26 +1,42 @@
-:root { --color-primary: #5b9bd5; --color-accent: #6bc5d6; --color-dark: #0e2e4f; --color-gray-light: #e9ecef; --color-gray-dark: #495057; --gradient-primary: linear-gradient(135deg, #5b9bd5 0%, #9fd4c4 100%); --radius-lg: 20px; --shadow-sm: 0 2px 8px rgba(15, 46, 79, 0.08); }
-* { box-sizing: border-box; }
-body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif; -webkit-font-smoothing: antialiased; }
-.comparison-grid { width: 100%; background: #fff; }
-.comparison-column { width: 100%; background: #fff; overflow: hidden; }
-.source-container { box-sizing: border-box; width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-.source-banner-normalized, .migrated-banner-normalized .event-banner { padding: 0; color: #fff; background: none; }
-.source-banner-normalized .source-container, .migrated-banner-normalized .event-container { padding-top: 44px; padding-bottom: 40px; background: linear-gradient(135deg, #0e2e4f 0%, #24507c 55%, #3e76ac 100%); }
-.source-series { margin: 0 0 8px; color: rgba(255,255,255,.75); font-size: 13.5px; }
-.source-title { margin: 0 0 10px; font-size: 30px; font-weight: 800; line-height: 1.4; }
-.source-tagline { max-width: 720px; margin: 0 0 18px; color: rgba(255,255,255,.85); font-size: 14.5px; line-height: 1.8; }
-.source-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; font-size: 13.5px; }
-.source-meta span { display: inline-flex; align-items: center; gap: 6px; }
-.source-nav { position: sticky; top: 0; z-index: 5; overflow-x: auto; background: #fff; border-bottom: 1px solid var(--color-gray-light); box-shadow: 0 2px 8px rgba(14,46,79,.04); }
-.source-nav-inner { display: flex; gap: 4px; }
-.source-nav a { padding: 13px 16px; color: var(--color-gray-dark); border-bottom: 2px solid transparent; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
-.source-nav a.on { color: var(--color-primary); border-bottom-color: var(--color-primary); }
-.source-section, .migrated-section-wrap { padding: 44px 24px 0; }
-.source-section h2 { position: relative; margin: 0 0 16px; padding-left: 12px; color: var(--color-dark); font-size: 21px; font-weight: 800; }
-.source-section h2::before { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; border-radius: 2px; background: var(--gradient-primary); content: ''; }
-.migrated-section-wrap .content-section { padding-top: 0; }
-.source-card { width: calc(100% - 48px); margin: 20px 24px; padding: 16px 18px; background: #fff; border: 1px solid var(--color-gray-light); border-radius: var(--radius-lg); box-shadow: none; }
-.source-card h3 { margin: 2px 0 6px; color: var(--color-dark); font-size: 15.5px; font-weight: 700; }
-.source-card p { margin: 0; color: var(--color-gray-dark); font-size: 13.5px; line-height: 1.8; }
-.migrated-reference > [data-testid='migrated-compact-card'] { width: calc(100% - 48px); margin: 20px 24px; }
-@media (max-width: 640px) { .source-title { font-size: 23px; } }
+.comparison-grid { width: 100%; }
+.comparison-column { width: 100%; }
+
+.source-reference {
+  --source-color-primary: #5b9bd5;
+  --source-color-dark: #0e2e4f;
+  --source-color-gray-light: #e9ecef;
+  --source-color-gray-dark: #495057;
+  --source-gradient-primary: linear-gradient(135deg, #5b9bd5 0%, #9fd4c4 100%);
+  --source-radius-lg: 20px;
+  color: var(--source-color-dark);
+  background: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.source-reference,
+.source-reference * { box-sizing: border-box; }
+
+.source-reference .source-container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.source-reference .source-banner { padding: 44px 0 40px; color: #fff; background: linear-gradient(135deg, #0e2e4f 0%, #24507c 55%, #3e76ac 100%); }
+.source-reference .source-series { margin: 0 0 8px; color: rgba(255,255,255,.75); font-size: 13.5px; }
+.source-reference .source-title { margin: 0 0 10px; font-size: 30px; font-weight: 800; line-height: 1.4; }
+.source-reference .source-tagline { max-width: 720px; margin: 0 0 18px; color: rgba(255,255,255,.85); font-size: 14.5px; line-height: 1.8; }
+.source-reference .source-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; font-size: 13.5px; }
+.source-reference .source-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.source-reference .source-nav { position: sticky; top: 0; z-index: 5; overflow-x: auto; background: #fff; border-bottom: 1px solid var(--source-color-gray-light); box-shadow: 0 2px 8px rgba(14,46,79,.04); }
+.source-reference .source-nav-inner { display: flex; gap: 4px; }
+.source-reference .source-nav a { padding: 13px 16px; color: var(--source-color-gray-dark); border-bottom: 2px solid transparent; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.source-reference .source-nav a.on { color: var(--source-color-primary); border-bottom-color: var(--source-color-primary); }
+.source-reference .source-section { padding-top: 44px; }
+.source-reference .source-section h2 { position: relative; margin: 0 0 16px; padding-left: 12px; color: var(--source-color-dark); font-size: 21px; font-weight: 800; }
+.source-reference .source-section h2::before { position: absolute; top: 4px; bottom: 4px; left: 0; width: 4px; border-radius: 2px; background: var(--source-gradient-primary); content: ''; }
+.source-reference .source-card { padding: 16px 18px; background: #fff; border: 1px solid var(--source-color-gray-light); border-radius: var(--source-radius-lg); box-shadow: none; }
+.source-reference .source-card h3 { margin: 2px 0 6px; color: var(--source-color-dark); font-size: 15.5px; font-weight: 700; }
+.source-reference .source-card p { margin: 0; color: var(--source-color-gray-dark); font-size: 13.5px; line-height: 1.8; }
+
+@media (max-width: 640px) {
+  .source-reference .source-title { font-size: 23px; }
+  .source-reference .source-nav-inner { width: max-content; }
+}

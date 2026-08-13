@@ -34,7 +34,7 @@ test('public home shell visual baseline', async ({ page }, testInfo) => {
 
 test('source-derived and migrated common regions are pixel-identical', async ({ page }, testInfo) => {
   const regions = [
-    ['banner-content', '[data-testid="source-banner-content"]', '[data-testid="migrated-banner-content"] .event-container'],
+    ['banner', '[data-testid="source-banner"]', '.migrated-reference .event-banner'],
     ['navigation', '[data-testid="source-navigation"]', '[data-testid="migrated-navigation"] .event-navigation'],
     ['section-heading', '[data-testid="source-section-heading"]', '[data-testid="migrated-section-heading"] .content-section__title'],
     ['compact-card', '[data-testid="source-compact-card"]', '[data-testid="migrated-compact-card"] .info-card'],
@@ -42,11 +42,25 @@ test('source-derived and migrated common regions are pixel-identical', async ({ 
   const sourceImages = new Map<string, Buffer>()
   await page.goto('http://127.0.0.1:4174/?mode=source')
   await page.evaluate(() => document.fonts.ready)
+  const viewportWidth = (await page.viewportSize())!.width
+  const sourceWidths = await page.evaluate(() => ({
+    banner: document.querySelector('.source-banner')!.getBoundingClientRect().width,
+    bannerContainer: document.querySelector('.source-banner .source-container')!.getBoundingClientRect().width,
+    navigation: document.querySelector('.source-nav')!.getBoundingClientRect().width,
+  }))
+  const containerWidth = Math.min(viewportWidth, 1200)
+  expect(sourceWidths).toEqual({ banner: viewportWidth, bannerContainer: containerWidth, navigation: viewportWidth })
   for (const [region, sourceSelector] of regions) {
     sourceImages.set(region, await page.locator(sourceSelector).screenshot({ animations: 'disabled', path: testInfo.outputPath(`${region}-source.png`) }))
   }
   await page.goto('http://127.0.0.1:4174/?mode=migrated')
   await page.evaluate(() => document.fonts.ready)
+  const migratedWidths = await page.evaluate(() => ({
+    banner: document.querySelector('.event-banner')!.getBoundingClientRect().width,
+    bannerContainer: document.querySelector('.event-banner .event-container')!.getBoundingClientRect().width,
+    navigation: document.querySelector('.event-navigation')!.getBoundingClientRect().width,
+  }))
+  expect(migratedWidths).toEqual({ banner: viewportWidth, bannerContainer: containerWidth, navigation: viewportWidth })
   for (const [region, , migratedSelector] of regions) {
     const source = sourceImages.get(region)!
     const migrated = await page.locator(migratedSelector).screenshot({ animations: 'disabled', path: testInfo.outputPath(`${region}-migrated.png`) })
@@ -54,6 +68,66 @@ test('source-derived and migrated common regions are pixel-identical', async ({ 
     await testInfo.attach(`${region}-migrated`, { body: migrated, contentType: 'image/png' })
     expectPixelIdentical(migrated, source, region)
   }
+})
+
+test('source stylesheet cannot alter migrated production styles', async ({ page }) => {
+  await page.goto('http://127.0.0.1:4174/?mode=migrated')
+  const result = await page.evaluate(() => {
+    const read = () => {
+      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
+      return {
+        bodyFont: style('body').fontFamily,
+        bodyLineHeight: style('body').lineHeight,
+        banner: [style('.event-banner').padding, style('.event-banner').backgroundImage, style('.event-banner').color],
+        container: [style('.event-banner .event-container').paddingLeft, style('.event-banner .event-container').paddingTop],
+        title: [style('.event-banner__title').fontSize, style('.event-banner__title').lineHeight],
+        navigation: [style('.event-navigation').top, style('.event-navigation').backgroundColor, style('.event-navigation').boxShadow],
+        heading: [style('.content-section__title').fontSize, style('.content-section__title').paddingLeft],
+        card: [style('.info-card').padding, style('.info-card').border, style('.info-card').borderRadius],
+      }
+    }
+    const before = read()
+    const sourceStyle = [...document.querySelectorAll<HTMLStyleElement>('style[data-vite-dev-id]')]
+      .find((element) => element.dataset.viteDevId?.endsWith('/e2e/harness/source-reference.css'))
+    if (!sourceStyle?.sheet) throw new Error('source-reference.css style sheet not found')
+    sourceStyle.sheet.disabled = true
+    const withoutSource = read()
+    return { before, withoutSource }
+  })
+  expect(result.before.bodyLineHeight).toBe('25.6px')
+  expect(result.before).toEqual(result.withoutSource)
+})
+
+test('source reference selectors are scoped and wrappers only set width', async ({ page }) => {
+  await page.goto('http://127.0.0.1:4174/?mode=migrated')
+  const audit = await page.evaluate(() => {
+    const sourceStyle = [...document.querySelectorAll<HTMLStyleElement>('style[data-vite-dev-id]')]
+      .find((element) => element.dataset.viteDevId?.endsWith('/e2e/harness/source-reference.css'))
+    if (!sourceStyle?.sheet) throw new Error('source-reference.css style sheet not found')
+    const selectors: string[] = []
+    const wrapperProperties: Record<string, string[]> = {}
+    const collect = (rules: CSSRuleList) => {
+      for (const rule of [...rules]) {
+        if ('selectorText' in rule && 'style' in rule) {
+          const styleRule = rule as CSSStyleRule
+          selectors.push(styleRule.selectorText)
+          if (styleRule.selectorText === '.comparison-grid' || styleRule.selectorText === '.comparison-column') {
+            wrapperProperties[styleRule.selectorText] = [...styleRule.style]
+          }
+        }
+        if ('cssRules' in rule) collect((rule as CSSMediaRule).cssRules)
+      }
+    }
+    collect(sourceStyle.sheet.cssRules)
+    return { selectors, wrapperProperties }
+  })
+  const wrapperSelectors = new Set(['.comparison-grid', '.comparison-column'])
+  for (const selectorList of audit.selectors) {
+    if (wrapperSelectors.has(selectorList)) continue
+    expect(selectorList.split(',').every((selector) => selector.trim().startsWith('.source-reference'))).toBe(true)
+    expect(selectorList).not.toContain('migrated')
+  }
+  expect(audit.wrapperProperties).toEqual({ '.comparison-grid': ['width'], '.comparison-column': ['width'] })
 })
 
 test('source-aligned common values are exact', async ({ page }) => {

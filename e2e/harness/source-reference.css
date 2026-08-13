@@ -25,8 +25,8 @@
 .source-reference .source-tagline { max-width: 720px; margin: 0 0 18px; color: rgba(255,255,255,.85); font-size: 14.5px; line-height: 1.8; }
 .source-reference .source-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; font-size: 13.5px; }
 .source-reference .source-meta span { display: inline-flex; align-items: center; gap: 6px; }
-.source-reference .source-nav { position: sticky; top: 0; z-index: 5; overflow-x: auto; background: #fff; border-bottom: 1px solid var(--source-color-gray-light); box-shadow: 0 2px 8px rgba(14,46,79,.04); }
-.source-reference .source-nav-inner { display: flex; gap: 4px; }
+.source-reference .source-nav { position: sticky; top: 0; z-index: 5; background: #fff; border-bottom: 1px solid var(--source-color-gray-light); box-shadow: 0 2px 8px rgba(14,46,79,.04); }
+.source-reference .source-nav-inner { display: flex; gap: 4px; overflow-x: auto; }
 .source-reference .source-nav a { padding: 13px 16px; color: var(--source-color-gray-dark); border-bottom: 2px solid transparent; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .source-reference .source-nav a.on { color: var(--source-color-primary); border-bottom-color: var(--source-color-primary); }
 .source-reference .source-section { padding-top: 44px; }
@@ -38,5 +38,4 @@
 
 @media (max-width: 640px) {
   .source-reference .source-title { font-size: 23px; }
-  .source-reference .source-nav-inner { width: max-content; }
 }

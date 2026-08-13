@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
 export const ContentModuleKeySchema = z.enum([
-  'home',
+  'basic',
+  'features',
+  'organizations',
+  'importantDates',
   'schedule',
-  'registration',
+  'contacts',
   'travel',
-  'contact',
-  'resources',
+  'display',
 ])
 
 export const ResourceAccessSchema = z.enum(['public', 'authenticated', 'admitted'])

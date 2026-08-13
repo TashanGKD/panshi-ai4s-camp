@@ -59,4 +59,6 @@
 
 `@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、登录响应和提交报名快照。
 
+公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
+
 报名快照表示某次提交时的 `formVersion`、`submittedAt` 和答案副本。它是不可变的提交记录语义，不是可在线修改的表单定义；补充或再次提交应产生新的版本化快照，而不是改写既有快照。

@@ -29,19 +29,21 @@ describe('contracts', () => {
 
   it('freezes public content modules', () => {
     expect(ContentModuleKeySchema.options).toEqual([
-      'home',
+      'basic',
+      'features',
+      'organizations',
+      'importantDates',
       'schedule',
-      'registration',
+      'contacts',
       'travel',
-      'contact',
-      'resources',
+      'display',
     ])
   })
 
   it('validates minimal versioned response envelopes', () => {
     expect(PublicSiteResponseSchema.parse({
       apiVersion: 'v1',
-      data: { contentVersion: '2026-08-13', modules: ['home', 'schedule'] },
+      data: { contentVersion: '2026-08-13', modules: ['basic', 'schedule'] },
     })).toBeTruthy()
     expect(LoginResponseSchema.parse({
       apiVersion: 'v1',

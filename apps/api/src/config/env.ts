@@ -25,13 +25,33 @@ const corsOrigin = z.string().refine((value) => {
   }
 }, 'must be an HTTP(S) origin without a path')
 
+const bodyLimitMultipliers = {
+  b: 1,
+  kb: 1_024,
+  mb: 1_048_576,
+} as const
+
+const jsonBodyLimit = z.string().regex(/^\d+(?:b|kb|mb)$/iu).transform((value) => {
+  const match = /^(\d+)(b|kb|mb)$/iu.exec(value)
+  if (!match) {
+    return 0
+  }
+  const amount = Number(match[1])
+  const unit = match[2]?.toLowerCase() as keyof typeof bodyLimitMultipliers
+  return amount * bodyLimitMultipliers[unit]
+}).pipe(z.number().int().min(1_024).max(10_485_760))
+
 const ApiEnvSchema = DatabaseEnvSchema.extend({
   API_PORT: z.coerce.number().int().min(1).max(65_535),
   CORS_ORIGINS: z.string().transform((value) => (
     value.split(',').map((origin) => origin.trim()).filter(Boolean)
-  )).pipe(z.array(corsOrigin)),
-  JSON_BODY_LIMIT: z.string().regex(/^\d+(?:b|kb|mb)$/iu).default('1mb'),
-})
+  )).pipe(z.array(corsOrigin)).transform((origins) => [...new Set(origins)]),
+  HEALTHCHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
+  JSON_BODY_LIMIT: jsonBodyLimit.default(1_048_576),
+}).transform(({ JSON_BODY_LIMIT, ...env }) => ({
+  ...env,
+  JSON_BODY_LIMIT_BYTES: JSON_BODY_LIMIT,
+}))
 
 export type DatabaseEnv = z.infer<typeof DatabaseEnvSchema>
 export type ApiEnv = z.infer<typeof ApiEnvSchema>

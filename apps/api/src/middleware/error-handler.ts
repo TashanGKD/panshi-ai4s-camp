@@ -13,19 +13,23 @@ export class HttpError extends Error {
   }
 }
 
-const isPayloadTooLarge = (error: unknown): boolean => (
-  typeof error === 'object'
-  && error !== null
-  && 'status' in error
-  && error.status === 413
-)
+const getParserErrorType = (error: unknown): string | undefined => {
+  if (typeof error !== 'object' || error === null || !('type' in error)) {
+    return undefined
+  }
+  return typeof error.type === 'string' ? error.type : undefined
+}
 
 export const notFound: RequestHandler = (_request, _response, next) => {
   next(new HttpError(404, 'NOT_FOUND', '请求的接口不存在'))
 }
 
 export const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
-  void next
+  if (response.headersSent) {
+    next(error)
+    return
+  }
+
   const requestId = typeof response.locals.requestId === 'string'
     ? response.locals.requestId
     : randomUUID()
@@ -33,15 +37,27 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, nex
   let status = 500
   let code = 'INTERNAL_ERROR'
   let message = '服务器内部错误'
+  const parserErrorType = getParserErrorType(error)
 
   if (error instanceof HttpError) {
     status = error.status
     code = error.code
     message = error.publicMessage
-  } else if (isPayloadTooLarge(error)) {
+  } else if (parserErrorType === 'entity.too.large') {
     status = 413
     code = 'PAYLOAD_TOO_LARGE'
     message = '请求体过大'
+  } else if (parserErrorType === 'entity.parse.failed') {
+    status = 400
+    code = 'MALFORMED_JSON'
+    message = 'JSON 请求体格式错误'
+  } else if (
+    parserErrorType === 'encoding.unsupported'
+    || parserErrorType === 'charset.unsupported'
+  ) {
+    status = 415
+    code = 'UNSUPPORTED_MEDIA_TYPE'
+    message = '不支持的请求内容格式'
   }
 
   response.setHeader('X-Request-Id', requestId)

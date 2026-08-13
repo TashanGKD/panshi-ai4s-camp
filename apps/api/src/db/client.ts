@@ -12,7 +12,11 @@ export const createDatabaseHealthCheck = (queryable: HealthQueryable) => async (
 }
 
 export const createDatabaseClient = (databaseUrl: string) => {
-  const pool = new Pool({ connectionString: databaseUrl })
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 10_000,
+  })
   pool.on('error', () => {
     console.error('Unexpected database pool error')
   })

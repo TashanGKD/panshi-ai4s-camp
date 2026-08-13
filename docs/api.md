@@ -13,15 +13,17 @@
 - `/api/v1/me`：当前用户、报名快照和按登录或录取状态开放的资源。
 - `/api/v1/admin`：统一管理员角色使用的内容、报名审核和资源管理能力。
 
-具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次 `SELECT 1` 数据库检查，健康时精确返回 `{ "status": "ok", "database": "ok" }`，且所有响应均携带 `X-Request-Id`。
+具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次有界超时的 `SELECT 1` 数据库检查，健康时精确返回 `{ "status": "ok", "database": "ok" }`；数据库拒绝或超时返回不含内部原因的 503 `SERVICE_UNAVAILABLE`。所有响应均携带 `X-Request-Id`。
 
 ## API 运行基线
 
-API 进程读取并校验 `DATABASE_URL`、`API_PORT` 和逗号分隔的 `CORS_ORIGINS`；JSON 请求体上限可通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`。`CORS_ORIGINS` 中每项必须是无路径、无凭据的完整 HTTP(S) origin。开发命令为 `npm run dev -w @panshi/api`。
+API 进程读取并校验 `DATABASE_URL`、`API_PORT` 和逗号分隔的 `CORS_ORIGINS`。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；默认端口等非规范写法会被拒绝，重复项会去重，空值表示不允许任何跨源状态变更请求。开发命令为 `npm run dev -w @panshi/api`。
 
 中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 基线保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。允许的 `OPTIONS` 预检返回对应 CORS header；任意来源不会被反射。该规则是 Cookie 认证上线前的 Origin 基线，后续身份任务仍需增加 CSRF token 校验。
 
-服务启动不会执行 migration 或创建表；schema 变更只通过显式 `npm run db:migrate -w @panshi/api` 完成。收到 `SIGINT` 或 `SIGTERM` 后，服务停止接受新请求并只关闭一次数据库 pool。
+JSON parser 的稳定客户端错误由统一错误层转换：格式错误返回 400 `MALFORMED_JSON`，不支持的 charset 或 content encoding 返回 415 `UNSUPPORTED_MEDIA_TYPE`，请求体超限返回 413 `PAYLOAD_TOO_LARGE`；响应不会包含 parser 原始消息或请求片段。
+
+服务启动不会执行 migration 或创建表；schema 变更只通过显式 `npm run db:migrate -w @panshi/api` 完成。监听失败会经过受控的通用错误路径并关闭数据库 pool。收到 `SIGINT` 或 `SIGTERM` 后，服务停止接受新请求；重复或并发 shutdown 共享同一个 Promise，HTTP server 和数据库 pool 均最多关闭一次。可复用生命周期逻辑不直接调用 `process.exit`。
 
 ## 统一错误格式
 

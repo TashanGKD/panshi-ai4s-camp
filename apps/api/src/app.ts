@@ -7,7 +7,8 @@ import { createHealthRouter, type DatabaseHealthCheck } from './modules/health/h
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
-  jsonLimit: string
+  healthcheckTimeoutMs: number
+  jsonLimitBytes: number
 }
 
 export type AppDependencies = {
@@ -58,10 +59,10 @@ export const createApp = ({ checkDatabase, config }: AppDependencies) => {
   const app = express()
 
   app.use(requestId)
-  app.use(express.json({ limit: config.jsonLimit }))
+  app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
   app.use(createOriginGuard(config.allowedOrigins))
-  app.use('/healthz', createHealthRouter(checkDatabase))
+  app.use('/healthz', createHealthRouter(checkDatabase, config.healthcheckTimeoutMs))
   app.use(notFound)
   app.use(errorHandler)
 

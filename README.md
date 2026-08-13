@@ -17,9 +17,10 @@
 
 ## 启动命令
 
-安装依赖后，在本目录分别启动三个应用：
+安装依赖后，先在本项目根目录创建本地环境文件，再分别启动三个应用：
 
 ```bash
+cp .env.example .env
 npm run dev:web
 npm run dev:admin
 npm run dev:api
@@ -29,9 +30,9 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 ### Web 连接 API
 
-Web 公开客户端从 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
+Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，公开客户端从其中的 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
 
-本地分端口开发按 `.env.example` 设置 `VITE_API_BASE_URL=http://localhost:3001`，Web 默认由 Vite 在 `http://localhost:5173` 提供。配置值必须是不含凭据、query 或 fragment 的绝对 HTTP(S) URL，可含基础路径，末尾斜杠会被规范化；非法或不安全值会在客户端初始化时明确拒绝。使用已配置的 API origin 时，`fetch` 携带 `credentials: 'include'`，所以 API 的 `CORS_ORIGINS` 必须包含实际 Web origin；同源回退使用 `credentials: 'same-origin'`。
+根目录 `.env.example` 的本地分端口默认值为 `VITE_API_BASE_URL=http://localhost:3001`，Web 默认由 Vite 在 `http://localhost:5173` 提供。配置值必须是不含凭据、query 或 fragment 的绝对 HTTP(S) URL，可含基础路径，末尾斜杠会被规范化；非法或不安全值会在客户端初始化时明确拒绝。使用已配置的 API origin 时，`fetch` 携带 `credentials: 'include'`，所以 API 的 `CORS_ORIGINS` 必须包含实际 Web origin；同源回退使用 `credentials: 'same-origin'`。
 
 ## PostgreSQL 与迁移
 
@@ -86,6 +87,8 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
 本次在本机 PostgreSQL 的专用 `panshi_ai4s_camp_test` 数据库上确认迁移共 2 个文件，并分别运行数据库测试，避免多个测试文件并行清空同一测试库。验证结果：contracts 33 项、API health 46 项、API schema 19 项、API public content 7 项、Web 14 项全部通过；admin 与 UI workspace 当前没有测试文件，`--passWithNoTests` 返回成功。根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 均通过。Web 生产构建输出约 310.60 kB JavaScript（gzip 95.19 kB）。本次没有运行浏览器视觉回归或 Docker Compose 端到端验证，因此不声称这两层已验证。
 
 Task 6 规格复核修正后，针对 API 基址解析与 `相关资料` 页面状态新增测试。本次实际验证结果为：contracts 33 项、API health 46 项、API public content 7 项、Web 27 项全部通过；根目录 `typecheck`、`lint`、`build`、workspace 结构检查和 `git diff --check` 通过。Web 生产构建输出 311.53 kB JavaScript（gzip 95.52 kB）。本次仍未运行浏览器视觉回归或 Docker Compose 端到端验证。
+
+最终环境加载修正增加了直接导入实际 Vite 配置的 Node 测试，确认 `envDir` 指向包含 `.env.example` 和 `VITE_API_BASE_URL` 示例的项目根目录。该修正的配置/客户端聚焦测试 11 项、Web 全量 28 项、根目录 `typecheck`、`lint`、`build` 和 `git diff --check` 通过；Web 生产构建输出仍为 311.53 kB JavaScript（gzip 95.52 kB）。
 
 ## 质量命令
 

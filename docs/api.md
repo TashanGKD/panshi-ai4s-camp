@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供后续服务端与客户端实现共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型；下述路由是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供后续服务端与客户端实现共同遵循。当前阶段提供可构建、可由 Node.js 消费的 `@panshi/contracts` Zod schema、序列化 helper 和类型，并已建立 API 运行壳与 `GET /healthz`；下述业务路由仍是规划中的边界分组，不代表对应 endpoint 已实现或可访问。
 
 ## API 范围
 
@@ -13,7 +13,15 @@
 - `/api/v1/me`：当前用户、报名快照和按登录或录取状态开放的资源。
 - `/api/v1/admin`：统一管理员角色使用的内容、报名审核和资源管理能力。
 
-具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。本阶段没有实现 API endpoint。
+具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次 `SELECT 1` 数据库检查，健康时精确返回 `{ "status": "ok", "database": "ok" }`，且所有响应均携带 `X-Request-Id`。
+
+## API 运行基线
+
+API 进程读取并校验 `DATABASE_URL`、`API_PORT` 和逗号分隔的 `CORS_ORIGINS`；JSON 请求体上限可通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`。`CORS_ORIGINS` 中每项必须是无路径、无凭据的完整 HTTP(S) origin。开发命令为 `npm run dev -w @panshi/api`。
+
+中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 基线保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。允许的 `OPTIONS` 预检返回对应 CORS header；任意来源不会被反射。该规则是 Cookie 认证上线前的 Origin 基线，后续身份任务仍需增加 CSRF token 校验。
+
+服务启动不会执行 migration 或创建表；schema 变更只通过显式 `npm run db:migrate -w @panshi/api` 完成。收到 `SIGINT` 或 `SIGTERM` 后，服务停止接受新请求并只关闭一次数据库 pool。
 
 ## 统一错误格式
 

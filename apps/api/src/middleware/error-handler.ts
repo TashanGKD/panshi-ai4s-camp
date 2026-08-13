@@ -26,7 +26,8 @@ export const notFound: RequestHandler = (_request, _response, next) => {
 
 export const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   if (response.headersSent) {
-    next(error)
+    const terminalError = new Error('Response terminated after headers were sent')
+    next(terminalError)
     return
   }
 

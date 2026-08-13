@@ -5,17 +5,27 @@ import { getApiEnv } from './config/env.js'
 import { createDatabaseClient } from './db/client.js'
 
 type ServerError = Error & { code?: string }
+type RuntimeSignal = 'SIGINT' | 'SIGTERM'
 
 export type ManagedServer = {
   on: (event: 'error', listener: (error: unknown) => void) => ManagedServer
   once: (event: 'listening', listener: () => void) => ManagedServer
-  off: (event: 'listening', listener: () => void) => ManagedServer
   close: (callback: (error?: ServerError) => void) => ManagedServer
+}
+
+export type SignalSource = {
+  on: (signal: RuntimeSignal, listener: () => void) => unknown
+  off: (signal: RuntimeSignal, listener: () => void) => unknown
 }
 
 type ServerLifecycleDependencies = {
   listen: () => ManagedServer
   closeDatabase: () => Promise<void>
+  onFatal?: () => void
+}
+
+type ShutdownLifecycle = {
+  shutdown: () => Promise<void>
 }
 
 const isServerNotRunning = (error: unknown): boolean => (
@@ -49,67 +59,41 @@ const closeServer = (server: ManagedServer | undefined): Promise<void> => {
   })
 }
 
-export const createServerLifecycle = ({ listen, closeDatabase }: ServerLifecycleDependencies) => {
+export const createServerLifecycle = ({
+  listen,
+  closeDatabase,
+  onFatal = () => undefined,
+}: ServerLifecycleDependencies) => {
   let server: ManagedServer | undefined
   let listening = false
   let startSettled = false
+  let fatalHandled = false
   let rejectStart: ((error: Error) => void) | undefined
   let startPromise: Promise<void> | undefined
   let resourcesClosePromise: Promise<void> | undefined
   let shutdownPromise: Promise<void> | undefined
 
   const closeResources = () => {
-    resourcesClosePromise ??= Promise.allSettled([
-      closeServer(server),
-      Promise.resolve().then(closeDatabase),
-    ]).then((results) => {
-      if (results.some((result) => result.status === 'rejected')) {
-        throw new Error('Resource shutdown failed')
-      }
-    })
-    return resourcesClosePromise
-  }
+    resourcesClosePromise ??= (async () => {
+      let failed = false
 
-  const start = () => {
-    if (startPromise) {
-      return startPromise
-    }
-
-    startPromise = new Promise<void>((resolveStart, reject) => {
-      rejectStart = reject
-
-      const onListening = () => {
-        listening = true
-        startSettled = true
-        resolveStart()
-      }
-
-      const onError = () => {
-        if (!listening && !startSettled) {
-          startSettled = true
-          void closeResources().then(
-            () => reject(new Error('API server failed to start')),
-            () => reject(new Error('API server failed to start')),
-          )
-          return
-        }
-        void shutdown().catch(() => undefined)
+      try {
+        await closeServer(server)
+      } catch {
+        failed = true
       }
 
       try {
-        server = listen()
-        server.once('listening', onListening)
-        server.on('error', onError)
+        await closeDatabase()
       } catch {
-        startSettled = true
-        void closeResources().then(
-          () => reject(new Error('API server failed to start')),
-          () => reject(new Error('API server failed to start')),
-        )
+        failed = true
       }
-    })
 
-    return startPromise
+      if (failed) {
+        throw new Error('Resource shutdown failed')
+      }
+    })()
+    return resourcesClosePromise
   }
 
   const shutdown = () => {
@@ -128,12 +112,106 @@ export const createServerLifecycle = ({ listen, closeDatabase }: ServerLifecycle
     return shutdownPromise
   }
 
+  const handleFatalError = () => {
+    if (fatalHandled || shutdownPromise) {
+      return
+    }
+    fatalHandled = true
+    void shutdown().then(
+      () => onFatal(),
+      () => onFatal(),
+    )
+  }
+
+  const start = () => {
+    if (startPromise) {
+      return startPromise
+    }
+
+    startPromise = new Promise<void>((resolveStart, reject) => {
+      rejectStart = reject
+
+      const onListening = () => {
+        listening = true
+        startSettled = true
+        resolveStart()
+      }
+
+      const onError = () => {
+        if (!listening) {
+          if (!startSettled) {
+            startSettled = true
+            void closeResources().then(
+              () => reject(new Error('API server failed to start')),
+              () => reject(new Error('API server failed to start')),
+            )
+          }
+          return
+        }
+        handleFatalError()
+      }
+
+      try {
+        server = listen()
+        server.once('listening', onListening)
+        server.on('error', onError)
+      } catch {
+        startSettled = true
+        void closeResources().then(
+          () => reject(new Error('API server failed to start')),
+          () => reject(new Error('API server failed to start')),
+        )
+      }
+    })
+
+    return startPromise
+  }
+
   return { start, shutdown }
 }
 
-export const createConfiguredServerLifecycle = () => {
+export const installSignalHandlers = (
+  signals: SignalSource,
+  lifecycle: ShutdownLifecycle,
+  onFailure: () => void,
+) => {
+  let shutdownRequested = false
+  let signalShutdownPromise: Promise<void> | undefined
+
+  const remove = () => {
+    signals.off('SIGINT', handleSignal)
+    signals.off('SIGTERM', handleSignal)
+  }
+
+  const handleSignal = () => {
+    shutdownRequested = true
+    if (signalShutdownPromise) {
+      return
+    }
+
+    try {
+      signalShutdownPromise = lifecycle.shutdown()
+        .catch(() => onFailure())
+        .finally(remove)
+    } catch {
+      onFailure()
+      remove()
+      signalShutdownPromise = Promise.resolve()
+    }
+  }
+
+  signals.on('SIGINT', handleSignal)
+  signals.on('SIGTERM', handleSignal)
+
+  return {
+    remove,
+    shutdownRequested: () => shutdownRequested,
+  }
+}
+
+export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const env = getApiEnv()
-  const database = createDatabaseClient(env.DATABASE_URL)
+  const database = createDatabaseClient(env.DATABASE_URL, env.HEALTHCHECK_TIMEOUT_MS)
   const app = createApp({
     checkDatabase: database.checkHealth,
     config: {
@@ -147,30 +225,32 @@ export const createConfiguredServerLifecycle = () => {
     lifecycle: createServerLifecycle({
       listen: () => app.listen(env.API_PORT),
       closeDatabase: database.close,
+      onFatal,
     }),
     port: env.API_PORT,
   }
 }
 
 export const runServer = async () => {
-  let shutdownRequested = false
+  let signalRegistration: ReturnType<typeof installSignalHandlers> | undefined
+
+  const reportFatal = () => {
+    signalRegistration?.remove()
+    console.error('API server encountered a fatal runtime error')
+    process.exitCode = 1
+  }
 
   try {
-    const { lifecycle, port } = createConfiguredServerLifecycle()
-    const handleSignal = () => {
-      shutdownRequested = true
-      void lifecycle.shutdown().catch(() => {
-        console.error('API server failed to shut down cleanly')
-        process.exitCode = 1
-      })
-    }
-
-    process.once('SIGINT', handleSignal)
-    process.once('SIGTERM', handleSignal)
+    const { lifecycle, port } = createConfiguredServerLifecycle(reportFatal)
+    signalRegistration = installSignalHandlers(process, lifecycle, () => {
+      console.error('API server failed to shut down cleanly')
+      process.exitCode = 1
+    })
     await lifecycle.start()
     console.log(`API listening on port ${port}`)
   } catch {
-    if (!shutdownRequested) {
+    signalRegistration?.remove()
+    if (!signalRegistration?.shutdownRequested()) {
       console.error('API server failed to start')
       process.exitCode = 1
     }

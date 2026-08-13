@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { get } from 'node:http'
+import express from 'express'
 import request from 'supertest'
 import { ApiErrorSchema } from '@panshi/contracts'
 import type { NextFunction, Request, Response } from 'express'
@@ -7,16 +9,21 @@ import { createApp } from '../src/app.js'
 import { getApiEnv } from '../src/config/env.js'
 import { createDatabaseHealthCheck } from '../src/db/client.js'
 import { errorHandler } from '../src/middleware/error-handler.js'
-import { createServerLifecycle, type ManagedServer } from '../src/server.js'
+import {
+  createServerLifecycle,
+  installSignalHandlers,
+  type ManagedServer,
+  type SignalSource,
+} from '../src/server.js'
 
 describe('API health', () => {
   it('executes SELECT 1 through the database health capability', async () => {
     const query = vi.fn(async () => ({ rows: [{ '?column?': 1 }] }))
 
-    await createDatabaseHealthCheck({ query })()
+    await createDatabaseHealthCheck({ query }, 750)()
 
     expect(query).toHaveBeenCalledOnce()
-    expect(query).toHaveBeenCalledWith('SELECT 1')
+    expect(query).toHaveBeenCalledWith({ text: 'SELECT 1', query_timeout: 750 })
   })
 
   it('returns API and database health with request id', async () => {
@@ -247,10 +254,59 @@ describe('unified error handling', () => {
     )
 
     expect(next).toHaveBeenCalledOnce()
-    expect(next).toHaveBeenCalledWith(error)
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Response terminated after headers were sent',
+    }))
+    expect(next.mock.calls[0]?.[0]).not.toBe(error)
     expect(response.setHeader).not.toHaveBeenCalled()
     expect(response.status).not.toHaveBeenCalled()
     expect(response.json).not.toHaveBeenCalled()
+  })
+
+  it('terminates a partial response without exposing the original error', async () => {
+    const secret = 'partial-response-distinctive-secret'
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const app = express()
+    app.get('/partial', async (_request, response) => {
+      response.write('partial')
+      await Promise.reject(new Error(secret))
+    })
+    app.use(errorHandler)
+    const server = app.listen(0)
+    await new Promise<void>((resolve) => server.once('listening', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') {
+      throw new Error('Expected an assigned TCP port')
+    }
+
+    try {
+      const result = await new Promise<{ body: string; terminated: boolean }>((resolve, reject) => {
+        const clientRequest = get(`http://127.0.0.1:${address.port}/partial`, (response) => {
+          let body = ''
+          response.setEncoding('utf8')
+          response.on('data', (chunk: string) => { body += chunk })
+          response.on('aborted', () => resolve({ body, terminated: true }))
+          response.on('error', () => resolve({ body, terminated: true }))
+          response.on('end', () => resolve({ body, terminated: false }))
+        })
+        clientRequest.on('error', reject)
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+
+      const diagnostics = [
+        ...stderr.mock.calls.map((args) => args.join(' ')),
+        ...consoleError.mock.calls.map((args) => args.join(' ')),
+      ].join('\n')
+      expect(result).toEqual({ body: 'partial', terminated: true })
+      expect(diagnostics).not.toContain(secret)
+    } finally {
+      stderr.mockRestore()
+      consoleError.mockRestore()
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve())
+      })
+    }
   })
 
   it('constructs a generic 500 envelope for an unknown error', () => {
@@ -371,6 +427,24 @@ describe('server lifecycle', () => {
     expect(closeDatabase).toHaveBeenCalledOnce()
   })
 
+  it('does not reclassify repeated startup errors as post-listening fatal errors', async () => {
+    const serverClose = createDeferred<void>()
+    const server = createFakeServer(undefined, serverClose.promise)
+    const closeDatabase = vi.fn(async () => undefined)
+    const onFatal = vi.fn()
+    const lifecycle = createServerLifecycle({ listen: () => server, closeDatabase, onFatal })
+
+    const started = lifecycle.start()
+    server.emit('error', new Error('first startup secret'))
+    server.emit('error', new Error('second startup secret'))
+    serverClose.resolve()
+
+    await expect(started).rejects.toThrow('API server failed to start')
+    expect(server.close).toHaveBeenCalledOnce()
+    expect(closeDatabase).toHaveBeenCalledOnce()
+    expect(onFatal).not.toHaveBeenCalled()
+  })
+
   it('shares concurrent shutdown and closes HTTP and database once', async () => {
     const server = createFakeServer()
     const closeDatabase = vi.fn(async () => undefined)
@@ -385,6 +459,25 @@ describe('server lifecycle', () => {
     expect(first).toBe(second)
     await expect(first).resolves.toBeUndefined()
     expect(server.close).toHaveBeenCalledOnce()
+    expect(closeDatabase).toHaveBeenCalledOnce()
+  })
+
+  it('waits for HTTP drain before closing the database', async () => {
+    const serverClose = createDeferred<void>()
+    const server = createFakeServer(undefined, serverClose.promise)
+    const closeDatabase = vi.fn(async () => undefined)
+    const lifecycle = createServerLifecycle({ listen: () => server, closeDatabase })
+    const started = lifecycle.start()
+    server.emit('listening')
+    await started
+
+    const shutdown = lifecycle.shutdown()
+    await Promise.resolve()
+
+    expect(server.close).toHaveBeenCalledOnce()
+    expect(closeDatabase).not.toHaveBeenCalled()
+    serverClose.resolve()
+    await shutdown
     expect(closeDatabase).toHaveBeenCalledOnce()
   })
 
@@ -430,6 +523,77 @@ describe('server lifecycle', () => {
     expect(server.close).toHaveBeenCalledOnce()
     expect(closeDatabase).toHaveBeenCalledOnce()
   })
+
+  it('treats a post-listening error as fatal after sequential cleanup', async () => {
+    const events: string[] = []
+    const fatal = createDeferred<void>()
+    const server = createFakeServer()
+    server.close = vi.fn((callback) => {
+      events.push('server-close')
+      callback()
+      return server
+    })
+    const closeDatabase = vi.fn(async () => { events.push('database-close') })
+    const onFatal = vi.fn(() => {
+      events.push('fatal')
+      fatal.resolve()
+    })
+    const lifecycle = createServerLifecycle({ listen: () => server, closeDatabase, onFatal })
+    const started = lifecycle.start()
+    server.emit('listening')
+    await started
+
+    server.emit('error', new Error('post-listening distinctive secret'))
+    server.emit('error', new Error('second distinctive secret'))
+    await fatal.promise
+
+    expect(events).toEqual(['server-close', 'database-close', 'fatal'])
+    expect(server.close).toHaveBeenCalledOnce()
+    expect(closeDatabase).toHaveBeenCalledOnce()
+    expect(onFatal).toHaveBeenCalledOnce()
+    expect(onFatal).toHaveBeenCalledWith()
+  })
+})
+
+describe('signal handling', () => {
+  it('keeps handlers installed during shutdown and removes them after settlement', async () => {
+    const shutdown = createDeferred<void>()
+    const lifecycle = { shutdown: vi.fn(() => shutdown.promise) }
+    const signals = new EventEmitter() as SignalSource & EventEmitter
+    const onFailure = vi.fn()
+
+    installSignalHandlers(signals, lifecycle, onFailure)
+    signals.emit('SIGINT')
+    signals.emit('SIGTERM')
+
+    expect(lifecycle.shutdown).toHaveBeenCalledOnce()
+    expect(signals.listenerCount('SIGINT')).toBe(1)
+    expect(signals.listenerCount('SIGTERM')).toBe(1)
+    shutdown.resolve()
+    await shutdown.promise
+    await Promise.resolve()
+    expect(signals.listenerCount('SIGINT')).toBe(0)
+    expect(signals.listenerCount('SIGTERM')).toBe(0)
+    expect(onFailure).not.toHaveBeenCalled()
+  })
+
+  it('reports one generic signal shutdown failure and removes handlers', async () => {
+    const lifecycle = {
+      shutdown: vi.fn(async () => Promise.reject(new Error('signal shutdown secret'))),
+    }
+    const signals = new EventEmitter() as SignalSource & EventEmitter
+    const onFailure = vi.fn()
+
+    installSignalHandlers(signals, lifecycle, onFailure)
+    signals.emit('SIGINT')
+    signals.emit('SIGTERM')
+    await vi.waitFor(() => expect(onFailure).toHaveBeenCalledOnce())
+
+    expect(onFailure).toHaveBeenCalledWith()
+    expect(lifecycle.shutdown).toHaveBeenCalledOnce()
+    expect(signals.listenerCount('SIGINT')).toBe(0)
+    expect(signals.listenerCount('SIGTERM')).toBe(0)
+  })
 })
 
 const createTestApp = (overrides: {
@@ -447,11 +611,25 @@ const createTestApp = (overrides: {
 
 type FakeServer = ManagedServer & EventEmitter
 
-const createFakeServer = (closeError?: Error): FakeServer => {
+const createFakeServer = (closeError?: Error, closeGate?: Promise<void>): FakeServer => {
   const server = new EventEmitter() as unknown as FakeServer
   server.close = vi.fn((callback) => {
-    callback(closeError)
+    if (closeGate) {
+      void closeGate.then(() => callback(closeError))
+    } else {
+      callback(closeError)
+    }
     return server
   })
   return server
+}
+
+const createDeferred = <T>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }

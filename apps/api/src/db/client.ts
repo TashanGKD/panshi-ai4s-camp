@@ -4,18 +4,21 @@ import { getDatabaseEnv } from '../config/env.js'
 import * as schema from './schema.js'
 
 type HealthQueryable = {
-  query: (text: string) => Promise<unknown>
+  query: (config: { text: string; query_timeout: number }) => Promise<unknown>
 }
 
-export const createDatabaseHealthCheck = (queryable: HealthQueryable) => async () => {
-  await queryable.query('SELECT 1')
+export const createDatabaseHealthCheck = (
+  queryable: HealthQueryable,
+  timeoutMs: number,
+) => async () => {
+  await queryable.query({ text: 'SELECT 1', query_timeout: timeoutMs })
 }
 
-export const createDatabaseClient = (databaseUrl: string) => {
+export const createDatabaseClient = (databaseUrl: string, healthcheckTimeoutMs?: number) => {
+  const effectiveHealthcheckTimeoutMs = healthcheckTimeoutMs ?? 2_000
   const pool = new Pool({
     connectionString: databaseUrl,
-    connectionTimeoutMillis: 5_000,
-    query_timeout: 10_000,
+    ...(healthcheckTimeoutMs === undefined ? {} : { connectionTimeoutMillis: healthcheckTimeoutMs }),
   })
   pool.on('error', () => {
     console.error('Unexpected database pool error')
@@ -25,7 +28,7 @@ export const createDatabaseClient = (databaseUrl: string) => {
   return {
     db,
     pool,
-    checkHealth: createDatabaseHealthCheck(pool),
+    checkHealth: createDatabaseHealthCheck(pool, effectiveHealthcheckTimeoutMs),
     close: async () => pool.end(),
   }
 }

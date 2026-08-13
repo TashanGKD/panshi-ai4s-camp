@@ -13,7 +13,7 @@
 - `/api/v1/me`：当前用户、报名快照和按登录或录取状态开放的资源。
 - `/api/v1/admin`：统一管理员角色使用的内容、报名审核和资源管理能力。
 
-具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次有界超时的 `SELECT 1` 数据库检查，健康时精确返回 `{ "status": "ok", "database": "ok" }`；数据库拒绝或超时返回不含内部原因的 503 `SERVICE_UNAVAILABLE`。所有响应均携带 `X-Request-Id`。
+具体方法、子路径、请求体与成功响应只有在后续 endpoint 实现并补充契约后才可视为可用接口。当前唯一可用 endpoint 是 `GET /healthz`：它执行一次有界超时的 `SELECT 1` 数据库检查，查询本身使用不长于 HTTP health deadline 的 per-query timeout，外层 Promise deadline 作为最终保护。健康时精确返回 `{ "status": "ok", "database": "ok" }`；数据库拒绝或超时返回不含内部原因的 503 `SERVICE_UNAVAILABLE`。所有响应均携带 `X-Request-Id`。
 
 ## API 运行基线
 
@@ -23,7 +23,7 @@ API 进程读取并校验 `DATABASE_URL`、`API_PORT` 和逗号分隔的 `CORS_O
 
 JSON parser 的稳定客户端错误由统一错误层转换：格式错误返回 400 `MALFORMED_JSON`，不支持的 charset 或 content encoding 返回 415 `UNSUPPORTED_MEDIA_TYPE`，请求体超限返回 413 `PAYLOAD_TOO_LARGE`；响应不会包含 parser 原始消息或请求片段。
 
-服务启动不会执行 migration 或创建表；schema 变更只通过显式 `npm run db:migrate -w @panshi/api` 完成。监听失败会经过受控的通用错误路径并关闭数据库 pool。收到 `SIGINT` 或 `SIGTERM` 后，服务停止接受新请求；重复或并发 shutdown 共享同一个 Promise，HTTP server 和数据库 pool 均最多关闭一次。可复用生命周期逻辑不直接调用 `process.exit`。
+服务启动不会执行 migration 或创建表；schema 变更只通过显式 `npm run db:migrate -w @panshi/api` 完成。监听失败会经过受控的通用错误路径并关闭数据库 pool。收到 `SIGINT` 或 `SIGTERM` 后，服务先停止接受新请求并等待 HTTP close/drain 完成，再关闭数据库；即使 HTTP close 失败也仍会尝试关闭数据库。重复信号在 shutdown pending 期间继续由已安装的 handler 接收，并共享同一个关闭 Promise；handler 在关闭结束后移除。HTTP server 和数据库 pool 均最多关闭一次。监听后的 server error 属于 fatal runtime error，顺序清理后只报告通用错误并设置非零退出码。可复用生命周期逻辑不直接调用 `process.exit`。
 
 ## 统一错误格式
 

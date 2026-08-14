@@ -83,41 +83,75 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
   const [message, setMessage] = useState<{ kind: 'status' | 'error', text: string }>()
   const [errors, setErrors] = useState<readonly { path: string, message: string }[]>([])
   const generation = useRef(0)
+  const loadGeneration = useRef(0)
+  const operationGeneration = useRef(0)
+  const editGeneration = useRef(0)
   const operationLock = useRef(false)
   const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(baseline), [form, baseline])
 
-  const load = async (loadGeneration = ++generation.current) => {
+  const load = async ({
+    clientGeneration = generation.current,
+    preserveEditsSince,
+  }: { clientGeneration?: number, preserveEditsSince?: number } = {}) => {
+    const requestGeneration = ++loadGeneration.current
     const [nextDraft, nextHistory] = await Promise.all([client.getRegistrationFormDraft(), client.getRegistrationFormHistory()])
-    if (generation.current !== loadGeneration) return false
-    setDraft(nextDraft); setHistory(nextHistory); setForm(copy(nextDraft.data.form)); setBaseline(copy(nextDraft.data.form)); setErrors([])
+    if (generation.current !== clientGeneration || loadGeneration.current !== requestGeneration) return false
+    const serverForm = copy(nextDraft.data.form)
+    setDraft(nextDraft)
+    setHistory(nextHistory)
+    setBaseline(copy(serverForm))
+    setForm((current) => preserveEditsSince !== undefined && editGeneration.current !== preserveEditsSince ? current : copy(serverForm))
+    setErrors([])
     return true
   }
 
   useEffect(() => {
     const current = ++generation.current
-    void load(current).catch(() => { if (generation.current === current) setMessage({ kind: 'error', text: '报名表暂时无法加载' }) })
-    return () => { generation.current += 1 }
+    loadGeneration.current += 1
+    operationGeneration.current += 1
+    operationLock.current = false
+    setPending(false)
+    setMessage(undefined)
+    setErrors([])
+    void load({ clientGeneration: current }).catch(() => { if (generation.current === current) setMessage({ kind: 'error', text: '报名表暂时无法加载' }) })
+    return () => {
+      generation.current += 1
+      loadGeneration.current += 1
+      operationGeneration.current += 1
+      operationLock.current = false
+    }
   }, [client])
 
-  const run = async (operation: () => Promise<void>) => {
+  const run = async (operation: (isCurrent: () => boolean) => Promise<void>) => {
     if (operationLock.current) return
+    const clientGeneration = generation.current
+    const operationToken = ++operationGeneration.current
+    const isCurrent = () => generation.current === clientGeneration && operationGeneration.current === operationToken
     operationLock.current = true
     setPending(true); setMessage(undefined); setErrors([])
-    try { await operation() } catch (error) {
+    try { await operation(isCurrent) } catch (error) {
+      if (!isCurrent()) return
       if (error instanceof AdminApiError && error.status === 409) setMessage({ kind: 'error', text: '报名表已被其他管理员修改，请刷新页面后重试。' })
       else if (error instanceof AdminApiError && error.status === 422) {
         setErrors(error.details?.fields ?? []); setMessage({ kind: 'error', text: '请修正标出的字段后再保存。' })
       } else setMessage({ kind: 'error', text: error instanceof Error ? error.message : '操作失败，请重试。' })
     } finally {
-      operationLock.current = false
-      setPending(false)
+      if (isCurrent()) {
+        operationLock.current = false
+        setPending(false)
+      }
     }
   }
 
-  const updateQuestion = (id: string, update: Partial<RegistrationDynamicQuestion>) => setForm((current) => ({
+  const updateForm = (update: (current: RegistrationForm) => RegistrationForm) => {
+    editGeneration.current += 1
+    setForm(update)
+  }
+
+  const updateQuestion = (id: string, update: Partial<RegistrationDynamicQuestion>) => updateForm((current) => ({
     ...current, questions: current.questions.map((question) => question.id === id ? { ...question, ...update } as RegistrationDynamicQuestion : question),
   }))
-  const changeQuestionType = (id: string, type: RegistrationDynamicQuestion['type']) => setForm((current) => ({
+  const changeQuestionType = (id: string, type: RegistrationDynamicQuestion['type']) => updateForm((current) => ({
     ...current,
     questions: current.questions.map((question): RegistrationDynamicQuestion => {
       if (question.id !== id) return question
@@ -134,25 +168,25 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
       return { ...common, type, validation: question.validation }
     }),
   }))
-  const updateQuestionOption = (questionId: string, optionId: string, update: Partial<RegistrationQuestionOption>) => setForm((current) => ({
+  const updateQuestionOption = (questionId: string, optionId: string, update: Partial<RegistrationQuestionOption>) => updateForm((current) => ({
     ...current,
     questions: current.questions.map((question) => question.id === questionId && (question.type === 'single_choice' || question.type === 'multiple_choice')
       ? { ...question, options: question.options.map((option) => option.id === optionId ? { ...option, ...update } : option) }
       : question),
   }))
-  const addQuestionOption = (questionId: string) => setForm((current) => ({
+  const addQuestionOption = (questionId: string) => updateForm((current) => ({
     ...current,
     questions: current.questions.map((question) => question.id === questionId && (question.type === 'single_choice' || question.type === 'multiple_choice')
       ? { ...question, options: [...question.options, { id: editorUuid(), value: `option-${question.options.length + 1}`, label: `选项 ${question.options.length + 1}` }] }
       : question),
   }))
-  const removeQuestionOption = (questionId: string, optionId: string) => setForm((current) => ({
+  const removeQuestionOption = (questionId: string, optionId: string) => updateForm((current) => ({
     ...current,
     questions: current.questions.map((question) => question.id === questionId && (question.type === 'single_choice' || question.type === 'multiple_choice')
       ? { ...question, options: question.options.filter((option) => option.id !== optionId) }
       : question),
   }))
-  const moveQuestionOption = (questionId: string, optionId: string, direction: -1 | 1) => setForm((current) => ({
+  const moveQuestionOption = (questionId: string, optionId: string, direction: -1 | 1) => updateForm((current) => ({
     ...current,
     questions: current.questions.map((question) => {
       if (question.id !== questionId || (question.type !== 'single_choice' && question.type !== 'multiple_choice')) return question
@@ -163,23 +197,23 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
       return { ...question, options }
     }),
   }))
-  const moveQuestion = (id: string, direction: -1 | 1) => setForm((current) => {
+  const moveQuestion = (id: string, direction: -1 | 1) => updateForm((current) => {
     const index = current.questions.findIndex((question) => question.id === id)
     const target = index + direction
     if (index < 0 || target < 0 || target >= current.questions.length) return current
     const questions = [...current.questions]; [questions[index], questions[target]] = [questions[target]!, questions[index]!]
     return { ...current, questions: reordered(questions) }
   })
-  const updateAttachment = (id: string, update: Partial<RegistrationAttachment>) => setForm((current) => ({
+  const updateAttachment = (id: string, update: Partial<RegistrationAttachment>) => updateForm((current) => ({
     ...current, attachments: current.attachments.map((attachment) => attachment.id === id ? { ...attachment, ...update } : attachment),
   }))
-  const toggleAttachmentExtension = (id: string, extension: 'pdf' | 'docx') => setForm((current) => ({
+  const toggleAttachmentExtension = (id: string, extension: 'pdf' | 'docx') => updateForm((current) => ({
     ...current,
     attachments: current.attachments.map((attachment) => attachment.id === id
       ? { ...attachment, allowedExtensions: attachment.allowedExtensions.includes(extension) ? attachment.allowedExtensions.filter((item) => item !== extension) : [...attachment.allowedExtensions, extension] }
       : attachment),
   }))
-  const moveAttachment = (id: string, direction: -1 | 1) => setForm((current) => {
+  const moveAttachment = (id: string, direction: -1 | 1) => updateForm((current) => {
     const index = current.attachments.findIndex((attachment) => attachment.id === id)
     const target = index + direction
     if (index < 0 || target < 0 || target >= current.attachments.length) return current
@@ -187,24 +221,23 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
     return { ...current, attachments: reordered(attachments) }
   })
 
-  const save = () => run(async () => {
+  const save = () => run(async (isCurrent) => {
     if (!draft) return
-    const operationGeneration = generation.current
     const submittedForm = copy(form)
-    const submittedSnapshot = JSON.stringify(submittedForm)
+    const submittedEditGeneration = editGeneration.current
     const saved = await client.saveRegistrationFormDraft(submittedForm, draft.data.revision)
-    if (generation.current !== operationGeneration) return
+    if (!isCurrent()) return
     setDraft(saved)
     setBaseline(copy(saved.data.form))
-    setForm((current) => JSON.stringify(current) === submittedSnapshot ? copy(saved.data.form) : current)
+    setForm((current) => editGeneration.current === submittedEditGeneration ? copy(saved.data.form) : current)
     setMessage({ kind: 'status', text: '报名表草稿已保存。' })
   })
-  const publish = () => run(async () => {
+  const publish = () => run(async (isCurrent) => {
     if (!draft || isDirty) { setMessage({ kind: 'error', text: '请先保存草稿，再发布报名表。' }); return }
-    const operationGeneration = generation.current
+    const publishedEditGeneration = editGeneration.current
     await client.publishRegistrationForm(draft.data.revision)
-    if (generation.current !== operationGeneration) return
-    if (await load()) setMessage({ kind: 'status', text: '报名表已发布。' })
+    if (!isCurrent()) return
+    if (await load({ preserveEditsSince: publishedEditGeneration }) && isCurrent()) setMessage({ kind: 'status', text: '报名表已发布。' })
   })
 
   if (!draft || !history) return <section className="page-section"><h1>报名管理</h1><p role="status">正在加载报名表配置</p></section>
@@ -219,7 +252,7 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
       </section>
       <RegistrationPreview form={form} />
     </div>
-    <section className="panel registration-editor" aria-labelledby="questions-title"><div className="section-heading"><h2 id="questions-title">动态问题</h2><button type="button" disabled={pending} onClick={() => setForm((current) => ({ ...current, questions: [...current.questions, newQuestion(current.questions.length)] }))}>新增问题</button></div>
+    <section className="panel registration-editor" aria-labelledby="questions-title"><div className="section-heading"><h2 id="questions-title">动态问题</h2><button type="button" disabled={pending} onClick={() => updateForm((current) => ({ ...current, questions: [...current.questions, newQuestion(current.questions.length)] }))}>新增问题</button></div>
       {form.questions.length === 0 ? <p>尚未配置动态问题。</p> : form.questions.map((question, index) => <fieldset key={question.id} className="registration-editor-item"><legend>问题 {index + 1}</legend>
         <div className="form-grid"><label className="form-field">题目<input aria-label={`问题 ${index + 1} 题目`} id={`question-${question.id}-label`} value={question.label} onChange={(event) => updateQuestion(question.id, { label: event.target.value })} /><ErrorMessages errors={fieldErrors(errors, `questions.${index}.label`)} /></label>
           <label className="form-field">类型<select aria-label={`问题 ${index + 1} 类型`} value={question.type} onChange={(event) => changeQuestionType(question.id, event.target.value as RegistrationDynamicQuestion['type'])}><option value="short_text">单行文本</option><option value="long_text">多行文本</option><option value="single_choice">单选</option><option value="multiple_choice">多选</option></select><ErrorMessages errors={fieldErrors(errors, `questions.${index}.type`)} /></label></div>
@@ -232,7 +265,7 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
         <div className="collection-actions"><button type="button" className="button-secondary" disabled={pending || index === 0} onClick={() => moveQuestion(question.id, -1)}>上移</button><button type="button" className="button-secondary" disabled={pending || index === form.questions.length - 1} onClick={() => moveQuestion(question.id, 1)}>下移</button><button type="button" className="button-secondary" disabled={pending} onClick={() => updateQuestion(question.id, { active: !question.active })}>{question.active ? '停用' : '启用'}</button></div>
       </fieldset>)}
     </section>
-    <section className="panel registration-editor" aria-labelledby="attachments-title"><div className="section-heading"><h2 id="attachments-title">附件要求</h2><button type="button" disabled={pending} onClick={() => setForm((current) => ({ ...current, attachments: [...current.attachments, newAttachment(current.attachments.length)] }))}>新增附件</button></div>
+    <section className="panel registration-editor" aria-labelledby="attachments-title"><div className="section-heading"><h2 id="attachments-title">附件要求</h2><button type="button" disabled={pending} onClick={() => updateForm((current) => ({ ...current, attachments: [...current.attachments, newAttachment(current.attachments.length)] }))}>新增附件</button></div>
       {form.attachments.map((attachment, index) => <fieldset key={attachment.id} className="registration-editor-item"><legend>附件 {index + 1}</legend><div className="form-grid"><label className="form-field">名称<input aria-label={`附件 ${index + 1} 名称`} value={attachment.label} onChange={(event) => updateAttachment(attachment.id, { label: event.target.value })} /><ErrorMessages errors={fieldErrors(errors, `attachments.${index}.label`)} /></label><label className="form-field">大小限制（字节）<input aria-label={`附件 ${index + 1} 大小限制`} type="number" min={1} value={attachment.maxSizeBytes} onChange={(event) => updateAttachment(attachment.id, { maxSizeBytes: Number(event.target.value) })} /><ErrorMessages errors={fieldErrors(errors, `attachments.${index}.maxSizeBytes`)} /></label></div><label className="form-field">说明<textarea aria-label={`附件 ${index + 1} 说明`} value={attachment.helpText} onChange={(event) => updateAttachment(attachment.id, { helpText: event.target.value })} /><ErrorMessages errors={fieldErrors(errors, `attachments.${index}.helpText`)} /></label><label className="check-field"><input type="checkbox" checked={attachment.required} onChange={(event) => updateAttachment(attachment.id, { required: event.target.checked })} />必填</label><label className="check-field"><input type="checkbox" checked={attachment.active} onChange={(event) => updateAttachment(attachment.id, { active: event.target.checked })} />启用</label><fieldset className="attachment-formats"><legend>允许格式</legend>{(['pdf', 'docx'] as const).map((extension) => <label className="check-field" key={extension}><input aria-label={`附件 ${index + 1} 允许 ${extension.toUpperCase()}`} type="checkbox" checked={attachment.allowedExtensions.includes(extension)} onChange={() => toggleAttachmentExtension(attachment.id, extension)} />{extension.toUpperCase()}</label>)}<ErrorMessages errors={fieldErrors(errors, `attachments.${index}.allowedExtensions`)} /></fieldset><ErrorMessages errors={fieldErrors(errors, `attachments.${index}.id`, `attachments.${index}.order`, `attachments.${index}.required`, `attachments.${index}.active`)} /><div className="collection-actions"><button type="button" className="button-secondary" disabled={pending || index === 0} onClick={() => moveAttachment(attachment.id, -1)}>上移</button><button type="button" className="button-secondary" disabled={pending || index === form.attachments.length - 1} onClick={() => moveAttachment(attachment.id, 1)}>下移</button><button type="button" className="button-secondary" disabled={pending} onClick={() => updateAttachment(attachment.id, { active: !attachment.active })}>{attachment.active ? '停用' : '启用'}</button></div></fieldset>)}
     </section>
     <div className="content-editor__actions"><button type="button" disabled={pending || !isDirty} onClick={() => { void save() }}>保存草稿</button><button type="button" disabled={pending || isDirty} onClick={() => { void publish() }}>发布当前草稿</button>{isDirty ? <span className="dirty-hint" role="status">有未保存修改，请先保存</span> : null}</div>

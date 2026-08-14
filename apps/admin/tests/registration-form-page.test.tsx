@@ -1,8 +1,8 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_REGISTRATION_FORM } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, type RegistrationForm } from '@panshi/contracts'
 import type { AdminClient } from '../src/api/admin-client'
 import { AdminApiError } from '../src/api/admin-client'
 import { RegistrationFormPage } from '../src/pages/RegistrationFormPage'
@@ -194,6 +194,76 @@ describe('RegistrationFormPage', () => {
     await waitFor(() => expect(screen.getByText('草稿修订 1')).toBeInTheDocument())
     expect(screen.getByLabelText('问题 1 题目')).toHaveValue('保存期间的新编辑')
     expect(screen.getByText('有未保存修改，请先保存')).toBeInTheDocument()
+  })
+
+  it('keeps edits made while publish and its reload are in flight', async () => {
+    const pendingPublish = deferred<Awaited<ReturnType<AdminClient['publishRegistrationForm']>>>()
+    const form = {
+      ...DEFAULT_REGISTRATION_FORM,
+      questions: [{
+        id: '11111111-1111-4111-8111-111111111111', type: 'short_text' as const, label: '发布前题目', helpText: '',
+        required: false, order: 0, active: true, validation: {},
+      }],
+    }
+    const client = {
+      getRegistrationFormDraft: async () => ({ apiVersion: 'v1' as const, data: { form, revision: 0, baseVersion: null, publishedVersionId: null } }),
+      getRegistrationFormHistory: async () => ({ apiVersion: 'v1' as const, data: { publishedVersion: null, versions: [] } }),
+      publishRegistrationForm: () => pendingPublish.promise,
+    } as unknown as AdminClient
+    render(<MemoryRouter><RegistrationFormPage client={client} /></MemoryRouter>)
+    await screen.findByRole('heading', { name: '表单配置' })
+
+    fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
+    fireEvent.change(screen.getByLabelText('问题 1 题目'), { target: { value: '发布期间的新编辑' } })
+    pendingPublish.resolve({ apiVersion: 'v1', data: { formVersionId: '00000000-0000-4000-8000-000000000020', revision: 0, version: 1 } })
+
+    await screen.findByText('报名表已发布。')
+    expect(screen.getByLabelText('问题 1 题目')).toHaveValue('发布期间的新编辑')
+    expect(screen.getByText('有未保存修改，请先保存')).toBeInTheDocument()
+  })
+
+  it('ignores an older client save failure and completion after a client change', async () => {
+    const oldSave = deferred<Awaited<ReturnType<AdminClient['saveRegistrationFormDraft']>>>()
+    const newSave = deferred<Awaited<ReturnType<AdminClient['saveRegistrationFormDraft']>>>()
+    const newForm = {
+      ...DEFAULT_REGISTRATION_FORM,
+      questions: [{
+        id: '22222222-2222-4222-8222-222222222222', type: 'short_text' as const, label: '新页面题目', helpText: '',
+        required: false, order: 0, active: true, validation: {},
+      }],
+    }
+    const response = (form: RegistrationForm, revision = 0) => ({ apiVersion: 'v1' as const, data: { form, revision, baseVersion: null, publishedVersionId: null } })
+    const history = { apiVersion: 'v1' as const, data: { publishedVersion: null, versions: [] } }
+    const oldClient = {
+      getRegistrationFormDraft: async () => response(DEFAULT_REGISTRATION_FORM),
+      getRegistrationFormHistory: async () => history,
+      saveRegistrationFormDraft: () => oldSave.promise,
+    } as unknown as AdminClient
+    const newClient = {
+      getRegistrationFormDraft: async () => response(newForm),
+      getRegistrationFormHistory: async () => history,
+      saveRegistrationFormDraft: vi.fn(() => newSave.promise),
+    } as unknown as AdminClient
+    const view = render(<MemoryRouter><RegistrationFormPage client={oldClient} /></MemoryRouter>)
+    await screen.findByRole('heading', { name: '表单配置' })
+    fireEvent.click(screen.getByRole('button', { name: '新增问题' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+
+    view.rerender(<MemoryRouter><RegistrationFormPage client={newClient} /></MemoryRouter>)
+    expect(await screen.findByDisplayValue('新页面题目')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('问题 1 题目'), { target: { value: '新页面待保存编辑' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    expect(newClient.saveRegistrationFormDraft).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      oldSave.reject(new Error('旧客户端保存失败'))
+      await oldSave.promise.catch(() => undefined)
+    })
+    expect(screen.queryByText('旧客户端保存失败')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
+
+    newSave.resolve(response({ ...newForm, questions: [{ ...newForm.questions[0]!, label: '新页面待保存编辑' }] }, 1))
+    expect(await screen.findByText('报名表草稿已保存。')).toBeInTheDocument()
   })
 
   it('locks a same-frame double publish to one request', async () => {

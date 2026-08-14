@@ -48,8 +48,8 @@ Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由�
 - `schedule.days[].sessions[].timeRange` 使用 `{ start: "HH:mm", end: "HH:mm" }` 且 start 严格早于 end。空 `sessions` 合法；每个实际 session 都必须提供机器范围。公共读取仍兼容历史 `time` 显示字符串，但它不能替代新发布所需的 `timeRange`。
 - `schedule.speakers` 使用稳定 `id`，session 使用 `speakerIds`；讲师 ID、单节引用不得重复，每个非空引用必须存在。无讲师课程可省略或使用空 `speakerIds`。历史非空 `instructors` 字符串只保留公共显示兼容，任何新发布或回退都拒绝该字段中的非空值。
 - `contacts` 公开读取继续兼容历史 `{ label, value, href? }` 项和空列表；新发布或回退则至少需要一项 `{ name, responsibility, methods, consultationNote? }`。`methods` 至少含一个安全的 `{ type: "phone" | "email", value }`，所有联系人都必须完整结构化，错误返回 `items.n...` 字段路径。初始 seed 仍为空，不虚构联系人。
-- 发布通过注入的 validation repository 查询真实 `resources` 表；存在 `access_level='public'` 且 `file_id is null` 的记录时拒绝发布。Task 8 不新增资源 API 或 UI，它们仍由 Task 15 负责。
-- legacy 关联域缺失不会阻塞其他模块发布；例如旧版无机器键的重要日期不会阻塞 `basic`。但发布 `importantDates`、`schedule` 或 `contacts` 自身时必须满足上述当前规则，一旦相关机器字段或资源记录存在则完整校验。
+- 资料完整性由 Task 15 的资料公开/可见性变更边界负责，不参与内容模块发布校验。
+- legacy 关联域缺失不会阻塞其他模块发布；例如旧版无机器键的重要日期不会阻塞 `basic`。但发布 `importantDates`、`schedule` 或 `contacts` 自身时必须满足上述当前规则。
 
 ## API 运行基线
 

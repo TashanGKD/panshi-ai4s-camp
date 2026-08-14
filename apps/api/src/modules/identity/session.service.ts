@@ -26,8 +26,7 @@ export const createSessionService = (
   const now = options.now ?? (() => new Date())
   const createToken = options.createToken ?? (() => randomBytes(32))
 
-  return {
-    loginAdmin: async (phoneInput: string, password: string) => {
+  const login = async (phoneInput: string, password: string, requiredRole: 'user' | 'admin') => {
       let phoneNormalized: string | undefined
       try {
         phoneNormalized = normalizeMainlandChinaMobile(phoneInput)
@@ -40,7 +39,9 @@ export const createSessionService = (
         : null
       const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH)
       if (!user || !passwordMatches) throw new AuthenticationError('invalid_credentials')
-      if (user.role !== 'admin' || user.disabledAt !== null) throw new AuthenticationError('forbidden')
+      if (user.role !== requiredRole || user.disabledAt !== null) {
+        throw new AuthenticationError(requiredRole === 'admin' ? 'forbidden' : 'invalid_credentials')
+      }
 
       const issuedAt = now()
       const token = createToken().toString('hex')
@@ -64,7 +65,12 @@ export const createSessionService = (
         role: user.role,
       }
       return { token, expiresAt, user: publicUser }
-    },
+  }
+
+  return {
+    loginAdmin: (phoneInput: string, password: string) => login(phoneInput, password, 'admin'),
+
+    loginStudent: (phoneInput: string, password: string) => login(phoneInput, password, 'user'),
 
     resolve: async (token: string | undefined): Promise<AuthenticatedSessionUser> => {
       if (!token) throw new AuthenticationError('unauthorized')

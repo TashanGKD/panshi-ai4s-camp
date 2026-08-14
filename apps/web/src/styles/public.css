@@ -27,6 +27,17 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .public-page { min-height: 420px; padding-block: 44px 96px; }
 .public-page__section > h2 { margin: 0 0 20px; font-size: 24px; }
 .public-state { min-height: 100vh; padding-block: 64px; }
+.auth-card { max-width: 640px; margin-inline: auto; }
+.auth-step { color: var(--panshi-color-gray); font-weight: 600; }
+.auth-field { display: grid; gap: 8px; margin-block: 16px; font-weight: 600; }
+.auth-field input { width: 100%; padding: 12px 14px; color: var(--panshi-color-dark); background: var(--panshi-color-light); border: 1px solid var(--panshi-color-gray-light); border-radius: var(--panshi-radius-md); font: inherit; }
+.auth-field input:focus-visible { border-color: var(--panshi-color-primary); outline: 3px solid color-mix(in srgb, var(--panshi-color-primary) 28%, transparent); }
+.auth-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 20px; }
+.auth-actions button, .auth-button { padding: 10px 16px; color: white; background: var(--panshi-color-primary); border: 1px solid var(--panshi-color-primary); border-radius: var(--panshi-radius-md); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+.auth-actions button:disabled { cursor: wait; opacity: 0.6; }
+.auth-message--error { color: #a0271d; }
+.auth-message--status { color: #17623a; }
+.auth-secondary { margin-top: 24px; }
 .schedule-list { display: grid; gap: 18px; margin: 0; padding: 0; list-style: none; }
 .schedule-list > li { padding: 18px; border: 1px solid var(--panshi-color-gray-light); border-radius: var(--panshi-radius-lg); }
 .schedule-list h3 { margin: 4px 0 0; font-size: 18px; }

@@ -46,6 +46,29 @@ export const AdminLoginRequestSchema = z.object({
   password: PasswordSchema,
 })
 
+export const StudentLoginRequestSchema = AdminLoginRequestSchema
+
+export const VerificationPurposeSchema = z.enum(['register', 'reset_password'])
+
+export const VerificationCodeSchema = z.string().regex(/^\d{6}$/u)
+
+export const SendVerificationCodeRequestSchema = z.object({
+  phone: MainlandChinaMobileSchema,
+  purpose: VerificationPurposeSchema,
+})
+
+export const StudentRegistrationRequestSchema = z.object({
+  phone: MainlandChinaMobileSchema,
+  code: VerificationCodeSchema,
+  password: PasswordSchema,
+}).strict()
+
+export const PasswordResetRequestSchema = z.object({
+  phone: MainlandChinaMobileSchema,
+  code: VerificationCodeSchema,
+  newPassword: PasswordSchema,
+}).strict()
+
 export const LoginResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
@@ -63,6 +86,11 @@ export const ProfileResponseSchema = z.object({
 export type UserRole = z.infer<typeof UserRoleSchema>
 export type AuthenticatedUser = z.infer<typeof AuthenticatedUserSchema>
 export type AdminLoginRequest = z.infer<typeof AdminLoginRequestSchema>
+export type StudentLoginRequest = z.infer<typeof StudentLoginRequestSchema>
+export type VerificationPurpose = z.infer<typeof VerificationPurposeSchema>
+export type SendVerificationCodeRequest = z.infer<typeof SendVerificationCodeRequestSchema>
+export type StudentRegistrationRequest = z.infer<typeof StudentRegistrationRequestSchema>
+export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
 export type ProfileResponse = z.infer<typeof ProfileResponseSchema>
 

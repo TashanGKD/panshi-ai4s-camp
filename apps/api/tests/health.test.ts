@@ -357,7 +357,40 @@ describe('API runtime configuration', () => {
       NODE_ENV: 'development',
       SECURE_COOKIES: false,
       SESSION_TTL_SECONDS: 28_800,
+      VERIFICATION_PROVIDER: 'disabled',
+      VERIFICATION_SECRET: undefined,
+      VERIFICATION_TTL_SECONDS: 300,
+      VERIFICATION_COOLDOWN_SECONDS: 60,
+      VERIFICATION_MAX_ATTEMPTS: 5,
+      VERIFICATION_MOCK_CODE: undefined,
     })
+  })
+
+  it('accepts mock verification only in development or test with a strong local secret', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://localhost/panshi', API_PORT: '3001', CORS_ORIGINS: '',
+      VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'local-verification-secret-at-least-32-bytes',
+    }
+    expect(getApiEnv({ ...base, NODE_ENV: 'development' })).toMatchObject({
+      VERIFICATION_PROVIDER: 'mock', VERIFICATION_TTL_SECONDS: 300,
+      VERIFICATION_COOLDOWN_SECONDS: 60, VERIFICATION_MAX_ATTEMPTS: 5,
+    })
+    expect(getApiEnv({ ...base, NODE_ENV: 'test', VERIFICATION_MOCK_CODE: '246810' }))
+      .toMatchObject({ VERIFICATION_MOCK_CODE: '246810' })
+  })
+
+  it.each([
+    { NODE_ENV: 'production', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32) },
+    { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'too-short' },
+    { NODE_ENV: 'development', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32), VERIFICATION_MOCK_CODE: '246810' },
+    { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32), VERIFICATION_MOCK_CODE: '12345' },
+    { NODE_ENV: 'test', VERIFICATION_TTL_SECONDS: '59' },
+    { NODE_ENV: 'test', VERIFICATION_COOLDOWN_SECONDS: '9' },
+    { NODE_ENV: 'test', VERIFICATION_MAX_ATTEMPTS: '11' },
+  ])('rejects unsafe verification configuration %#', (verification) => {
+    expect(() => getApiEnv({
+      DATABASE_URL: 'postgresql://localhost/panshi', API_PORT: '3001', CORS_ORIGINS: '', ...verification,
+    })).toThrow('Invalid API environment configuration')
   })
 
   it('accepts body-limit boundaries and bounded health timeouts', () => {

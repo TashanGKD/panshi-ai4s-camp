@@ -8,6 +8,8 @@ import { createContentPublishingService } from './modules/content/publish.servic
 import { createIdentityRepository } from './modules/identity/identity.repository.js'
 import { createAdminSummaryRepository } from './modules/admin-summary/admin-summary.repository.js'
 import { createAdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
+import { createMockVerificationProvider } from './modules/identity/mock-verification-provider.js'
+import { createVerificationService } from './modules/identity/verification.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -218,12 +220,30 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const env = getApiEnv()
   const database = createDatabaseClient(env.DATABASE_URL, env.HEALTHCHECK_TIMEOUT_MS)
   const identityRepository = createIdentityRepository(database.db)
+  const verificationProvider = env.VERIFICATION_PROVIDER === 'mock'
+    ? createMockVerificationProvider({
+      ...(env.VERIFICATION_MOCK_CODE ? { code: env.VERIFICATION_MOCK_CODE } : {}),
+      ...(env.NODE_ENV === 'development'
+        ? { logger: ({ phone, code, purpose }) => console.info(`[verification:${purpose}] ${phone} ${code}`) }
+        : {}),
+    })
+    : undefined
+  const verificationService = env.VERIFICATION_PROVIDER === 'mock'
+    ? createVerificationService(identityRepository, verificationProvider, {
+      secret: env.VERIFICATION_SECRET!,
+      ttlSeconds: env.VERIFICATION_TTL_SECONDS,
+      cooldownSeconds: env.VERIFICATION_COOLDOWN_SECONDS,
+      maxAttempts: env.VERIFICATION_MAX_ATTEMPTS,
+    })
+    : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
   const app = createApp({
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
     identityRepository,
     authTransactionRepository: identityRepository,
+    studentIdentityRepository: identityRepository,
+    verificationService,
     contentPublishingService,
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {

@@ -10,6 +10,8 @@ import type { PublicContentRepository } from './modules/content/content.reposito
 import { createAuthRouter } from './modules/identity/auth.routes.js'
 import { createSessionService } from './modules/identity/session.service.js'
 import type { AuthTransactionRepository, IdentityRepository } from './modules/identity/identity.repository.js'
+import type { StudentIdentityRepository } from './modules/identity/identity.repository.js'
+import type { VerificationService } from './modules/identity/verification.service.js'
 import { createAdminContentRouter } from './modules/content/admin-content.routes.js'
 import type { ContentPublishingService } from './modules/content/publish.service.js'
 import { createAdminSummaryRouter } from './modules/admin-summary/admin-summary.routes.js'
@@ -28,6 +30,8 @@ export type AppDependencies = {
   contentRepository?: PublicContentRepository
   identityRepository?: IdentityRepository
   authTransactionRepository?: AuthTransactionRepository
+  studentIdentityRepository?: StudentIdentityRepository
+  verificationService?: VerificationService
   contentPublishingService?: ContentPublishingService
   adminSummaryService?: AdminSummaryService
   config: ApiRuntimeConfig
@@ -77,6 +81,8 @@ export const createApp = ({
   contentRepository,
   identityRepository,
   authTransactionRepository,
+  studentIdentityRepository,
+  verificationService,
   contentPublishingService,
   adminSummaryService,
   config,
@@ -94,6 +100,7 @@ export const createApp = ({
     app.use('/api/v1', createAuthRouter(sessions, {
       secureCookies: config.secureCookies ?? false,
       sessionTtlSeconds,
+      ...(studentIdentityRepository && verificationService ? { verificationService } : {}),
     }))
     if (contentPublishingService) {
       app.use('/api/v1/admin/content', createAdminContentRouter(sessions, contentPublishingService))

@@ -174,7 +174,7 @@ describe('administrator authentication API', () => {
     expect((await login()).status).toBe(403)
   })
 
-  it('enforces the administrator guard for an authenticated ordinary user', async () => {
+  it('allows an authenticated ordinary user to read the shared profile endpoint', async () => {
     identityRepository.users[0]!.role = 'user'
     const token = 'd'.repeat(64)
     identityRepository.sessions.push({
@@ -188,8 +188,8 @@ describe('administrator authentication API', () => {
     const response = await request(app())
       .get('/api/v1/me/profile')
       .set('Cookie', sessionCookie(token))
-    expect(response.status).toBe(403)
-    expect(response.body.error.code).toBe('FORBIDDEN')
+    expect(response.status).toBe(200)
+    expect(response.body.data.user).toMatchObject({ id: 'admin-1', role: 'user' })
   })
 
   it('returns 403 when a disabled administrator tries to log in', async () => {

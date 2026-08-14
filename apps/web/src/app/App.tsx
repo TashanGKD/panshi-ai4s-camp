@@ -9,6 +9,9 @@ import { ResourcesPage } from '../pages/ResourcesPage'
 import { SchedulePage } from '../pages/SchedulePage'
 import { TravelPage } from '../pages/TravelPage'
 import { PreviewPage } from '../pages/PreviewPage'
+import { RegisterPage } from '../pages/RegisterPage'
+import { LoginPage } from '../pages/LoginPage'
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage'
 import { PublicShell } from './PublicShell'
 import { SkipLink } from './SkipLink'
 import '../styles/public.css'
@@ -52,7 +55,9 @@ export function App() {
     <Route path="/travel" element={<PublicShell site={site}><TravelPage /></PublicShell>} />
     <Route path="/contact" element={<PublicShell site={site}><ContactPage contacts={site.contacts} /></PublicShell>} />
     <Route path="/resources" element={<PublicShell site={site}><ResourcesPage apiReady={state.status === 'ready'} /></PublicShell>} />
-    <Route path="/register" element={<PublicShell site={site}><PlaceholderPage title="在线注册" /></PublicShell>} />
+    <Route path="/register" element={<PublicShell site={site}><RegisterPage /></PublicShell>} />
+    <Route path="/login" element={<PublicShell site={site}><LoginPage /></PublicShell>} />
+    <Route path="/forgot-password" element={<PublicShell site={site}><ForgotPasswordPage /></PublicShell>} />
     <Route path="/account" element={<PublicShell site={site}><PlaceholderPage title="个人中心" /></PublicShell>} />
     <Route path="/preview/:module" element={<PreviewRoute site={site} />} />
   </Routes>

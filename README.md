@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员 Cookie 会话、草稿／同源预览／版本化发布能力，以及 Task 9 的结构化内容工作台和真实数据摘要已经实现。注册、学员账户和资料管理等业务路由属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员与学员 Cookie 会话、手机号注册和密码重置、草稿／同源预览／版本化发布能力，以及结构化内容工作台和真实数据摘要已经实现。报名表、报名提交和资料管理等业务路由属于后续任务。
 
 ## 运行环境
 
@@ -80,6 +80,9 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm run test:integration:migrations -w @panshi/api
 
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:student-auth -w @panshi/api
+
 # Task 8 的并发发布集成目标按要求只接受这一精确本机 URL，并强制单 worker／文件串行。
 TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
   npm run test:integration:publishing -w @panshi/api
@@ -103,6 +106,27 @@ CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何�
 `SESSION_TTL_SECONDS` 默认 `28800` 秒（8 小时），允许 300–604800 秒。登录事务锁定对应用户行，在同一事务内撤销旧会话、写入 replacement session 并追加成功登录审计；同一用户并发登录时最后提交的轮换获胜，最终仅一个返回 token 有效，审计失败会整体回滚。token 使用 32 字节安全随机数，数据库只保存 SHA-256 摘要，审计 metadata 不含 token 或密码。`panshi_session` Cookie 设置 `HttpOnly; SameSite=Lax; Path=/`，仅 `NODE_ENV=production` 增加 `Secure`；退出对缺失、未知、过期、已撤销或已轮换 token 都幂等返回 204，并用匹配属性清除 Cookie。只在真实 identity 与 auth transaction 依赖同时存在时挂载身份路由；生产服务器始终提供两者。
 
 写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。当前 Task 7 没有登录限流或独立 CSRF token，不应宣称已有暴力破解防护；这两项保留给后续安全加固。
+
+## 学员手机号账号
+
+学员使用 `/register`、`/login` 和 `/forgot-password` 完成三步注册、登录和密码重置。手机号与管理员共用 `users` 表，以 `role=user` 区分；`GET /api/v1/me/profile` 对任意有效登录账号开放，而所有 `/api/v1/admin/*` 接口仍由后端管理员守卫拒绝普通学员。学员登录会轮换该用户会话；密码重置在一个事务中消费验证码、更新 bcrypt hash、撤销该用户全部旧会话并写脱敏审计。
+
+验证码通过 `VerificationProvider` 适配。数据库仅保存带服务端 secret 的 HMAC-SHA256 摘要、用途、过期时间、失败次数和消费时间，不保存明文。发送阶段按手机号执行 cooldown，且不会查询或泄露账号是否存在。`VERIFICATION_PROVIDER` 安全默认值为 `disabled`，此时发送接口返回 503；`mock` 只允许 `development` 或 `test`，生产配置为 `mock` 会在启动配置解析阶段失败。启用 mock 时必须在未跟踪的本地环境中提供至少 32 UTF-8 字节的 `VERIFICATION_SECRET`；固定 `VERIFICATION_MOCK_CODE` 只允许 `NODE_ENV=test`。
+
+student-auth 浏览器测试只接受精确专用测试库，并要求所有测试手机号、密码、验证码和 HMAC secret 由运行环境显式提供。fixture 会先迁移、清空、建立公开内容和密码重置测试账号，退出 trap 与全局 teardown 均执行清理：
+
+```bash
+STUDENT_AUTH_E2E=1 \
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+E2E_VERIFICATION_CODE='<six-digit-test-code>' \
+E2E_REGISTER_PHONE='<dedicated-register-phone>' \
+E2E_REGISTER_PASSWORD='<dedicated-register-password>' \
+E2E_RESET_PHONE='<dedicated-reset-phone>' \
+E2E_RESET_PASSWORD='<dedicated-reset-password>' \
+E2E_RESET_NEW_PASSWORD='<dedicated-new-password>' \
+VERIFICATION_SECRET='<test-only-hmac-secret-at-least-32-bytes>' \
+  npm run e2e:student-auth
+```
 
 Task 3 的本次验证使用本机 PostgreSQL 16.14 和专用数据库 `panshi_ai4s_camp_test`。`compose.yaml` 仅完成静态 YAML 校验；由于当前环境没有 Docker Compose 插件且 Docker daemon 未运行，没有执行或声称容器端到端验证。该记录只描述本次验证环境，不表示其他开发者本机已经存在同名数据库。
 

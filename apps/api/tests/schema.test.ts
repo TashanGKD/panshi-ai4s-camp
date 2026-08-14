@@ -110,6 +110,7 @@ const expectedChecks = [
   { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
   { constraintName: 'users_role_check', tokens: ['role', 'user', 'admin'] },
   { constraintName: 'verification_codes_failed_attempts_check', tokens: ['failed_attempts', '>= 0'] },
+  { constraintName: 'verification_codes_purpose_check', tokens: ['purpose', 'register', 'reset_password'] },
 ] as const
 
 const createUser = async () => {
@@ -524,7 +525,7 @@ describe('initial PostgreSQL schema', () => {
     }
   })
 
-  it('keeps exactly four stable migration hashes across repeated runs', async () => {
+  it('keeps every stable migration hash across repeated runs', async () => {
     const migrateOnce = async () => {
       const migrationDatabase = createDatabaseClient(testDatabaseUrl)
       await runMigrations({
@@ -544,6 +545,7 @@ describe('initial PostgreSQL schema', () => {
       '0002_content_publication_integrity.sql',
       '0003_user_display_name.sql',
       '0004_user_identity_invariants.sql',
+      '0005_verification_code_purpose.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

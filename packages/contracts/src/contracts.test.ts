@@ -4,6 +4,10 @@ import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
   AdminLoginRequestSchema,
+  PasswordResetRequestSchema,
+  SendVerificationCodeRequestSchema,
+  StudentLoginRequestSchema,
+  StudentRegistrationRequestSchema,
   ApplicationStatusSchema,
   ContentModuleKeySchema,
   LoginResponseSchema,
@@ -246,6 +250,24 @@ describe('contracts', () => {
 
   it.each(['12345678', 'a'.repeat(72), '密'.repeat(24)])('accepts password within the UTF-8 byte boundary', (password) => {
     expect(AdminLoginRequestSchema.safeParse({ phone: '13800138000', password }).success).toBe(true)
+  })
+
+  it('validates student auth requests without accepting plaintext extras', () => {
+    expect(StudentLoginRequestSchema.parse({ phone: '13800138000', password: 'password-1' }).phone)
+      .toBe('+8613800138000')
+    expect(SendVerificationCodeRequestSchema.parse({ phone: '13800138000', purpose: 'reset_password' })).toEqual({
+      phone: '+8613800138000', purpose: 'reset_password',
+    })
+    expect(StudentRegistrationRequestSchema.safeParse({
+      phone: '13800138000', code: '246810', password: 'password-1', purpose: 'register',
+    }).success).toBe(false)
+    expect(PasswordResetRequestSchema.safeParse({
+      phone: '13800138000', code: '246810', newPassword: 'password-2', password: 'do-not-accept',
+    }).success).toBe(false)
+  })
+
+  it.each(['12345', '1234567', 'abcdef'])('rejects malformed verification code %s', (code) => {
+    expect(StudentRegistrationRequestSchema.safeParse({ phone: '13800138000', code, password: 'password-1' }).success).toBe(false)
   })
 
   it.each([

@@ -18,12 +18,11 @@ test('authenticated draft save -> preview -> publish -> rollback/audit and unaut
   await page.getByLabel('手机号').fill(adminPhone)
   await page.getByLabel('密码').fill(adminPassword)
   await page.getByRole('button', { name: '登录' }).click()
-  const editor = page.getByLabel('内容 JSON')
-  await expect(editor).toBeVisible()
-  const payload = JSON.parse(await editor.inputValue())
-  payload.title = 'E2E 草稿标题'
-  payload.intro = ['E2E 草稿正文']
-  await editor.fill(JSON.stringify(payload, null, 2))
+  await page.getByRole('link', { name: '基本信息' }).click()
+  const title = page.getByLabel('实训营名称')
+  await expect(title).toBeVisible()
+  await title.fill('E2E 草稿标题')
+  await page.getByRole('textbox', { name: '简介段落 1' }).fill('<p>E2E 草稿正文</p>')
   await page.getByRole('button', { name: '保存草稿' }).click()
   await expect(page.getByText('草稿修订 1')).toBeVisible()
 

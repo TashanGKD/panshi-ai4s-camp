@@ -6,6 +6,8 @@ import { createDatabaseClient } from './db/client.js'
 import { createContentPublishingRepository, createContentRepository } from './modules/content/content.repository.js'
 import { createContentPublishingService } from './modules/content/publish.service.js'
 import { createIdentityRepository } from './modules/identity/identity.repository.js'
+import { createAdminSummaryRepository } from './modules/admin-summary/admin-summary.repository.js'
+import { createAdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -223,6 +225,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     identityRepository,
     authTransactionRepository: identityRepository,
     contentPublishingService,
+    adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

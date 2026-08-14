@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { TravelContent } from '@panshi/contracts'
 import { getPublicTravel, PublicContentNotFoundError } from '../api/public-client'
+import { RichText } from '../components/RichText'
 
 type State = { status: 'loading' | 'empty' | 'error' } | { status: 'ready', data: TravelContent }
 
@@ -24,5 +25,5 @@ export function TravelPage() {
 }
 
 export function TravelContentView({ travel }: { travel: TravelContent }) {
-  return <>{travel.sections.map((section) => <article key={section.title}><h3>{section.title}</h3><p>{section.body}</p></article>)}</>
+  return <>{travel.sections.map((section) => <article key={section.title}><h3>{section.title}</h3><RichText as="p" html={section.body} /></article>)}</>
 }

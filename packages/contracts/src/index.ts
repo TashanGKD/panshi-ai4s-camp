@@ -1,5 +1,6 @@
 export * from './common.js'
 export * from './admin-content.js'
+export * from './admin-summary.js'
 export * from './content.js'
 export * from './identity.js'
 export * from './registration.js'

@@ -23,6 +23,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   getProfile: async () => profile(),
   login: async () => ({ apiVersion: 'v1', data: { user: { id: 'a1', displayName: '管理员', role: 'admin' } } }),
   logout: async () => undefined,
+  getSummary: async () => ({ apiVersion: 'v1', data: { applications: { total: 0, pendingReview: 0, byStatus: { draft: 0, submitted: 0, reviewing: 0, needs_supplement: 0, admitted: 0, waitlisted: 0, rejected: 0 } }, upcomingDates: [], unpublishedDrafts: [], recentOperations: [] } }),
   getDraft: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' }, publishedVersion: null } }),
   saveDraft: async (_key, payload) => ({ apiVersion: 'v1', data: { key: 'basic', revision: 2, payload, publishedVersion: null } }),
   getPreview: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' } } }),
@@ -80,20 +81,19 @@ describe('administrator route guard', () => {
     const logout = vi.fn(async () => undefined)
     renderApp(client({ logout }))
 
-    expect(await screen.findByRole('heading', { name: '磐石管理后台' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
     await waitFor(() => expect(logout).toHaveBeenCalledOnce())
     expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
   })
 
-  it('mounts only the minimal Task 8 editor and history after authentication', async () => {
+  it('mounts the Task 9 dashboard after authentication', async () => {
     const getDraft = vi.fn(client().getDraft)
     const getHistory = vi.fn(client().getHistory)
     renderApp(client({ getDraft, getHistory }))
-    expect(await screen.findByRole('heading', { name: '内容编辑' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '版本历史' })).toBeInTheDocument()
-    expect(getDraft).toHaveBeenCalledWith('basic')
-    expect(getHistory).toHaveBeenCalledWith('basic')
-    expect(screen.queryByText('报名审核')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '工作台' })).toBeInTheDocument()
+    expect(getDraft).not.toHaveBeenCalled()
+    expect(getHistory).not.toHaveBeenCalled()
+    expect(screen.getByRole('link', { name: '基本信息' })).toBeInTheDocument()
   })
 })

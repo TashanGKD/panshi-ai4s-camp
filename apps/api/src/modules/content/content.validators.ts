@@ -5,6 +5,8 @@ import {
   type ContentValidationDetails,
   type JsonObject,
 } from '@panshi/contracts'
+import { isDeepStrictEqual } from 'node:util'
+import { sanitizeContentPayload } from './content-sanitizer.js'
 
 export type ContentValidationRepository = {
   findPublishedPayload: (key: ContentModuleKey) => Promise<JsonObject | null>
@@ -213,6 +215,10 @@ export const validateContentForPublication = async (
 ): Promise<void> => {
   const issues = schemaIssues(key, payload)
   const parsed = PublicContentPayloadSchemas[key].safeParse(payload)
+
+  if (!isDeepStrictEqual(sanitizeContentPayload(key, payload), payload)) {
+    issues.push({ path: 'payload', code: 'UNSAFE_HTML', message: '富文本包含不允许的标签、属性或链接' })
+  }
 
   if (parsed.success && key === 'importantDates') {
     issues.push(...validateImportantDates(parsed.data as ImportantDatesPayload, await repository.findPublishedPayload('basic')))

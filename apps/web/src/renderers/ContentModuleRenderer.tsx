@@ -4,6 +4,7 @@ import { ContactPage } from '../pages/ContactPage'
 import { HomePage } from '../pages/HomePage'
 import { ScheduleContent } from '../pages/SchedulePage'
 import { TravelContentView } from '../pages/TravelPage'
+import { RichText } from '../components/RichText'
 
 type ImportantDatesContentType = ReturnType<typeof PublicContentPayloadSchemas.importantDates.parse>
 
@@ -29,7 +30,7 @@ export function ContentModuleRenderer({ moduleKey, payload }: { moduleKey: Conte
     }
     case 'features': {
       const features = content as ReturnType<typeof PublicContentPayloadSchemas.features.parse>
-      return <ContentSection title="实训特色"><div className="feature-list">{features.items.map((item) => <article key={item.title}><h3>{item.title}</h3><p>{item.description}</p></article>)}</div></ContentSection>
+      return <ContentSection title="实训特色"><div className="feature-list">{features.items.map((item) => <article key={item.title}><h3>{item.title}</h3><RichText as="p" html={item.description} /></article>)}</div></ContentSection>
     }
     case 'organizations': {
       const organizations = content as ReturnType<typeof PublicContentPayloadSchemas.organizations.parse>

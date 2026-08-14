@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员 Cookie 会话，以及 Task 8 的草稿、同源预览、版本化发布和回退已经实现。Task 9 的完整内容工作台以及注册、学员账户等业务路由属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员 Cookie 会话、草稿／同源预览／版本化发布能力，以及 Task 9 的结构化内容工作台和真实数据摘要已经实现。注册、学员账户和资料管理等业务路由属于后续任务。
 
 ## 运行环境
 
@@ -40,7 +40,9 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 ### 内容预览与发布
 
-最小后台当前只挂载 `basic` 的通用 JSON `ContentEditor` 和 `VersionHistory`，用于验证 Task 8 的完整能力；按业务对象组织的导航、表单和完整工作台属于 Task 9。保存必须提交加载时的 `expectedRevision`，冲突返回 `CONTENT_CONFLICT`。公共 Web 的 `/preview/:module` 使用管理员 HttpOnly Cookie 读取受保护草稿，并通过与正式页面相同的模块渲染组件和 `PublicShell` 展示；未登录或无权限时只显示登录／禁止状态。
+后台按基本信息、实训特色、组织单位、重要日期、实训日程与师资、住宿交通、联系方式和展示设置提供专用结构化表单，集合项可通过明确按钮排序。长文本在保存前使用严格白名单清洗；后台不提供任意 JSON 编辑入口。保存必须提交加载时的 `expectedRevision`，冲突返回 `CONTENT_CONFLICT`；发布错误会关联到具体字段。公共 Web 的 `/preview/:module` 使用管理员 HttpOnly Cookie 读取受保护草稿，并通过与正式页面相同的模块渲染组件和 `PublicShell` 展示；未登录或无权限时只显示登录／禁止状态。
+
+工作台通过 `GET /api/v1/admin/summary` 从 PostgreSQL 汇总报名总量与状态、待审核数量、临近重要日期、未发布草稿和最近操作。空库只显示零值与空状态，不填充演示数字；最近操作不返回 audit metadata 或内容正文。“相关资料”目前只展示 Task 15 待建设状态，不虚构资料编辑接口。
 
 发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退会先按当前规则重新校验历史 payload，再复制为新版本。旧版 importantDates、schedule 和 contacts 仍可公开读取，草稿允许不完整保存，但新发布/回退必须满足完整机器日期、课程时间与 speaker 引用、结构化联系人规则。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
 

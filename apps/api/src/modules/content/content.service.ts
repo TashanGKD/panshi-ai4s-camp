@@ -6,6 +6,7 @@ import {
 } from '@panshi/contracts'
 import type { PublicContentRepository, PublishedContentRecord } from './content.repository.js'
 import { parsePublishedContent } from './content.schemas.js'
+import { sanitizeContentPayload } from './content-sanitizer.js'
 
 const siteKeys = ['basic', 'importantDates', 'contacts', 'display'] as const
 
@@ -39,7 +40,7 @@ export const createContentService = (repository: PublicContentRepository) => ({
       apiVersion: 'v1',
       data: {
         contentVersion: [basic, importantDates, contacts, display].map(versionLabel).join(','),
-        basic: parsePublishedContent('basic', basic.payload),
+        basic: parsePublishedContent('basic', sanitizeContentPayload('basic', basic.payload)),
         importantDates: parsePublishedContent('importantDates', importantDates.payload),
         contacts: parsePublishedContent('contacts', contacts.payload),
         display: parsePublishedContent('display', display.payload),
@@ -66,7 +67,7 @@ export const createContentService = (repository: PublicContentRepository) => ({
       data: {
         contentVersion: versionLabel(record),
         key,
-        payload: parsePublishedContent(key, record.payload),
+        payload: parsePublishedContent(key, sanitizeContentPayload(key, record.payload)),
       },
     })
     return response

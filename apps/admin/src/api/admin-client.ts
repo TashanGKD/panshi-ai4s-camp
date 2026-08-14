@@ -2,6 +2,7 @@ import {
   AdminContentDraftResponseSchema,
   AdminContentHistoryResponseSchema,
   AdminContentPreviewResponseSchema,
+  AdminSummaryResponseSchema,
   ApiErrorSchema,
   ContentPublishResponseSchema,
   LoginResponseSchema,
@@ -9,6 +10,7 @@ import {
   type AdminContentDraftResponse,
   type AdminContentHistoryResponse,
   type AdminContentPreviewResponse,
+  type AdminSummaryResponse,
   type AdminLoginRequest,
   type ContentModuleKey,
   type ContentPublishResponse,
@@ -57,6 +59,7 @@ export const resolvePublicWebBaseUrl = (value: string | undefined, runtime: Admi
 
 export type AdminClient = {
   getProfile: () => Promise<ProfileResponse>
+  getSummary: () => Promise<AdminSummaryResponse>
   login: (input: AdminLoginRequest) => Promise<LoginResponse>
   logout: () => Promise<void>
   getDraft: (key: ContentModuleKey) => Promise<AdminContentDraftResponse>
@@ -87,6 +90,7 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
   }
   return {
     getProfile: async () => ProfileResponseSchema.parse(await (await send('/api/v1/me/profile')).json()),
+    getSummary: async () => AdminSummaryResponseSchema.parse(await (await send('/api/v1/admin/summary')).json()),
     login: async (input) => LoginResponseSchema.parse(await (await send('/api/v1/auth/admin/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     })).json()),

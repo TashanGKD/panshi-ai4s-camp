@@ -13,6 +13,7 @@ import {
   ContentPublishResponseSchema,
 } from '@panshi/contracts'
 import type { ContentPublishingRepository } from './content.repository.js'
+import { sanitizeContentPayload } from './content-sanitizer.js'
 
 export class ContentConflictError extends Error {
   constructor() {
@@ -49,7 +50,7 @@ export const createContentPublishingService = (repository: ContentPublishingRepo
   },
 
   saveDraft: async (key, payload, expectedRevision, actorUserId) => {
-    const record = await repository.saveDraft({ key, payload, expectedRevision, actorUserId })
+    const record = await repository.saveDraft({ key, payload: sanitizeContentPayload(key, payload), expectedRevision, actorUserId })
     if (!record) {
       if (!await repository.getDraft(key)) throw new ContentRecordNotFoundError()
       throw new ContentConflictError()

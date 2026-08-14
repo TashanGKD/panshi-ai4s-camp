@@ -103,6 +103,15 @@ describe('administrator API client', () => {
     expect(fetchMock.mock.calls[4]?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ version: 1 }) })
   })
 
+  it('loads the protected database-backed dashboard summary endpoint', async () => {
+    const response = { apiVersion: 'v1', data: { applications: { total: 0, pendingReview: 0, byStatus: { draft: 0, submitted: 0, reviewing: 0, needs_supplement: 0, admitted: 0, waitlisted: 0, rejected: 0 } }, upcomingDates: [], unpublishedDrafts: [], recentOperations: [] } }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createAdminClient(undefined, { production: true })
+    await expect(client.getSummary()).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/summary', expect.objectContaining({ credentials: 'same-origin' }))
+  })
+
   it('preserves stable conflict and field validation details', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       error: {

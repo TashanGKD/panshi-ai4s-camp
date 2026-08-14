@@ -151,6 +151,8 @@ export const TravelContentSchema = z.object({
 export const DisplayContentSchema = z.object({
   series: NonEmptyTextSchema,
   footer: NonEmptyTextSchema,
+  showRegistrationCount: z.boolean().optional(),
+  visibleNavigation: z.array(NonEmptyTextSchema).optional(),
 }).strict()
 
 export const PublicContentPayloadSchemas = {

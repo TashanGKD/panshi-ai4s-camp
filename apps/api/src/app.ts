@@ -12,6 +12,8 @@ import { createSessionService } from './modules/identity/session.service.js'
 import type { AuthTransactionRepository, IdentityRepository } from './modules/identity/identity.repository.js'
 import { createAdminContentRouter } from './modules/content/admin-content.routes.js'
 import type { ContentPublishingService } from './modules/content/publish.service.js'
+import { createAdminSummaryRouter } from './modules/admin-summary/admin-summary.routes.js'
+import type { AdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -27,6 +29,7 @@ export type AppDependencies = {
   identityRepository?: IdentityRepository
   authTransactionRepository?: AuthTransactionRepository
   contentPublishingService?: ContentPublishingService
+  adminSummaryService?: AdminSummaryService
   config: ApiRuntimeConfig
 }
 
@@ -75,6 +78,7 @@ export const createApp = ({
   identityRepository,
   authTransactionRepository,
   contentPublishingService,
+  adminSummaryService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -94,6 +98,7 @@ export const createApp = ({
     if (contentPublishingService) {
       app.use('/api/v1/admin/content', createAdminContentRouter(sessions, contentPublishingService))
     }
+    if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
   }
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
     findPublishedByKeys: async () => [],

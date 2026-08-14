@@ -15,7 +15,41 @@ import {
   validateStoredFileContent,
 } from '../src/modules/files/file-validation.js'
 
-const PDF = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n')
+const buildPdf = (version: '1.7' | '2.0' = '1.7', eol: '\n' | '\r' | '\r\n' = '\n') => {
+  const header = Buffer.from(`%PDF-${version}${eol}%\u00e2\u00e3\u00cf\u00d3${eol}`)
+  const objects = [
+    Buffer.from(`1 0 obj${eol}<< /Type /Catalog /Pages 2 0 R >>${eol}endobj${eol}`),
+    Buffer.from(`2 0 obj${eol}<< /Type /Pages /Kids [] /Count 0 >>${eol}endobj${eol}`),
+  ]
+  const offsets: number[] = []
+  let cursor = header.length
+  for (const object of objects) {
+    offsets.push(cursor)
+    cursor += object.length
+  }
+  const xrefOffset = cursor
+  const xref = Buffer.from(
+    `xref${eol}0 3${eol}0000000000 65535 f ${eol}${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join(eol)}${eol}`
+    + `trailer${eol}<< /Size 3 /Root 1 0 R >>${eol}startxref${eol}${xrefOffset}${eol}%%EOF${eol}`,
+  )
+  return Buffer.concat([header, ...objects, xref])
+}
+
+const incrementalPdf = () => {
+  const base = buildPdf()
+  const previousXref = Number(/startxref\s+(\d+)/u.exec(base.toString('latin1'))?.[1])
+  const updateObject = Buffer.from('3 0 obj\n<< /Producer (test) >>\nendobj\n')
+  const updateOffset = base.length
+  const xrefOffset = updateOffset + updateObject.length
+  const update = Buffer.from(
+    `xref\n3 1\n${String(updateOffset).padStart(10, '0')} 00000 n \n`
+    + `trailer\n<< /Size 4 /Root 1 0 R /Prev ${previousXref} >>\nstartxref\n${xrefOffset}\n%%EOF\n`,
+  )
+  return Buffer.concat([base, updateObject, update])
+}
+
+const PDF = buildPdf()
+const PDF_2_0 = buildPdf('2.0')
 
 const crc32 = (input: Buffer) => {
   let crc = 0xffffffff
@@ -26,13 +60,13 @@ const crc32 = (input: Buffer) => {
   return (crc ^ 0xffffffff) >>> 0
 }
 
-const storedZip = (entries: Array<[string, string]>, method: 0 | 8 = 0) => {
+const storedZip = (entries: Array<[string, string | Buffer]>, method: 0 | 8 = 0) => {
   const locals: Buffer[] = []
   const centrals: Buffer[] = []
   let offset = 0
   for (const [nameText, valueText] of entries) {
     const name = Buffer.from(nameText)
-    const value = Buffer.from(valueText)
+    const value = Buffer.isBuffer(valueText) ? valueText : Buffer.from(valueText)
     const encoded = method === 8 ? deflateRawSync(value) : value
     const checksum = crc32(value)
     const local = Buffer.alloc(30)
@@ -68,7 +102,13 @@ const storedZip = (entries: Array<[string, string]>, method: 0 | 8 = 0) => {
   return Buffer.concat([...locals, central, eocd])
 }
 
-const minimalDocx = () => storedZip([
+const validDocx = () => storedZip([
+  ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+  ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+  ['word/document.xml', '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>'],
+])
+
+const pseudoOpenXml = () => storedZip([
   ['[Content_Types].xml', '<Types/>'],
   ['_rels/.rels', '<Relationships/>'],
   ['word/document.xml', '<document/>'],
@@ -102,12 +142,13 @@ describe('local protected file storage', () => {
 
     expect(result.storageKey).toMatch(/^[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9-]{36}$/u)
     expect(result.storageKey).not.toContain('resume')
-    expect(result.sha256).toMatch(/^[a-f0-9]{64}$/u)
+    expect(result.sha256).toBe('1ac8bd87c0db4bebbb88b5bd18845c4b94adfce032e9ce5879806929b9132d9c')
     const opened = await local.open(result.storageKey)
     const chunks: Buffer[] = []
     for await (const chunk of opened) chunks.push(Buffer.from(chunk))
     expect(Buffer.concat(chunks)).toEqual(PDF)
     expect(await readFile(join(root, result.storageKey))).toEqual(PDF)
+    expect(await listFiles(root)).toEqual([join(root, result.storageKey)])
   })
 
   it('rejects oversize, truncated, MIME-mismatched and interrupted streams without residue', async () => {
@@ -129,6 +170,14 @@ describe('local protected file storage', () => {
         .rejects.toMatchObject({ code: item.code })
       expect(await listFiles(root)).toEqual([])
     }
+  })
+
+  it('rejects structurally invalid PDFs without leaving final or temporary files', async () => {
+    const { root, storage: local } = await storage()
+    const pseudoPdf = Buffer.from('%PDF-1.7\n%%EOF\n')
+    await expect(local.put(Readable.from(pseudoPdf), { mime: 'application/pdf', size: pseudoPdf.length }))
+      .rejects.toMatchObject({ code: 'FILE_CONTENT_INVALID' })
+    expect(await listFiles(root)).toEqual([])
   })
 
   it('rejects storage-key traversal and removes stored files idempotently', async () => {
@@ -159,14 +208,16 @@ describe('safe file names and download headers', () => {
   })
 
   it('accepts a bounded DOCX and rejects path traversal and corrupted entry data', () => {
-    const valid = minimalDocx()
+    const valid = validDocx()
     expect(() => validateStoredFileContent(valid, DOCX_MIME, 1_048_576)).not.toThrow()
     const compressed = storedZip([
-      ['[Content_Types].xml', '<Types/>'],
-      ['_rels/.rels', '<Relationships/>'],
-      ['word/document.xml', '<document/>'],
+      ['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>'],
     ], 8)
     expect(() => validateStoredFileContent(compressed, DOCX_MIME, 1_048_576)).not.toThrow()
+    expect(() => validateStoredFileContent(pseudoOpenXml(), DOCX_MIME, 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
     const dangerous = storedZip([
       ['[Content_Types].xml', '<Types/>'],
       ['_rels/.rels', '<Relationships/>'],
@@ -197,9 +248,81 @@ describe('safe file names and download headers', () => {
       .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
 
     const corrupted = Buffer.from(valid)
-    const document = corrupted.indexOf(Buffer.from('<document/>'))
+    const document = corrupted.indexOf(Buffer.from('<w:document'))
     corrupted[document] = corrupted[document]! ^ 0xff
     expect(() => validateStoredFileContent(corrupted, DOCX_MIME, 1_048_576))
       .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it('accepts PDF 2.0 under the supported policy and rejects unsupported versions', () => {
+    expect(() => validateStoredFileContent(PDF_2_0, 'application/pdf', 1_048_576)).not.toThrow()
+    expect(() => validateStoredFileContent(Buffer.from(PDF_2_0.toString('latin1').replace('%PDF-2.0', '%PDF-2.1')), 'application/pdf', 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it('accepts legal CR-only xref tables and incremental updates without weakening structural checks', () => {
+    expect(() => validateStoredFileContent(buildPdf('1.7', '\r'), 'application/pdf', 1_048_576)).not.toThrow()
+    expect(() => validateStoredFileContent(incrementalPdf(), 'application/pdf', 1_048_576)).not.toThrow()
+    const truncated = PDF.subarray(0, PDF.indexOf(Buffer.from('trailer')))
+    expect(() => validateStoredFileContent(truncated, 'application/pdf', 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it('rejects external, escaping and entity-bearing OpenXML relationships', () => {
+    const documentRelationships = (relationship: string) => storedZip([
+      ['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>'],
+      ['word/_rels/document.xml.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationship}</Relationships>`],
+    ], 8)
+    expect(() => validateStoredFileContent(documentRelationships(
+      '<Relationship Id="rId2" Type="https://example.invalid/link" Target="https://evil.invalid" TargetMode="External"/>',
+    ), DOCX_MIME, 16_384)).toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+    expect(() => validateStoredFileContent(documentRelationships(
+      '<Relationship Id="rId2" Type="https://example.invalid/data" Target="../../../outside.bin"/>',
+    ), DOCX_MIME, 16_384)).toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+
+    const xxe = storedZip([
+      ['[Content_Types].xml', '<?xml version="1.0"?><!DOCTYPE Types [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>'],
+    ])
+    expect(() => validateStoredFileContent(xxe, DOCX_MIME, 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it('binds each DOCX entry and the total expansion to maxBytes', () => {
+    const bomb = storedZip([
+      ...([['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+        ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+        ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>']] as Array<[string, string]>),
+      ['word/media/repeated.bin', 'A'.repeat(1_048_576)],
+    ], 8)
+    expect(bomb.length).toBeLessThan(4 * 1_024)
+    expect(() => validateStoredFileContent(bomb, DOCX_MIME, 4 * 1_024))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+
+    const ratioBomb = storedZip([
+      ['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>'],
+      ['word/media/repeated.bin', 'A'.repeat(1_048_576)],
+    ], 8)
+    expect(() => validateStoredFileContent(ratioBomb, DOCX_MIME, 2 * 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+
+    const tooManyEntries = storedZip([
+      ['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>'],
+      ...Array.from({ length: 20 }, (_, index) => [`word/media/${index}.bin`, 'x'] as [string, string]),
+    ], 8)
+    expect(() => validateStoredFileContent(tooManyEntries, DOCX_MIME, 8 * 1_024))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+    expect(() => validateStoredFileContent(storedZip([
+      ['[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+      ['_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'],
+      ['word/document.xml', '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>'],
+    ], 8), DOCX_MIME, 4 * 1_024)).not.toThrow()
   })
 })

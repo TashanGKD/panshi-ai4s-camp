@@ -1,4 +1,4 @@
-import { extname } from 'node:path'
+import { extname, posix } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
 export const PDF_MIME = 'application/pdf'
@@ -73,13 +73,393 @@ export const buildContentDisposition = (unsafeName: string): string => {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987(originalName)}`
 }
 
-const validatePdf = (content: Buffer) => {
-  if (content.length < 12 || !content.subarray(0, 8).toString('ascii').match(/^%PDF-1\.[0-9]/u)) {
-    throw new FileValidationError('FILE_CONTENT_INVALID', 'PDF 文件签名无效')
+const PDF_VERSION_PATTERN = /^(?:1\.[0-7]|2\.0)$/u
+
+const pdfInvalid = (message = 'PDF 文件结构无效'): never => {
+  throw new FileValidationError('FILE_CONTENT_INVALID', message)
+}
+
+const pdfDictionaryValue = (dictionary: string, name: string, pattern: string) => {
+  const match = new RegExp(`/${name}\\s+${pattern}`, 'u').exec(dictionary)
+  return match?.[1]
+}
+
+const parsePdfDictionary = (dictionary: string) => {
+  const size = Number(pdfDictionaryValue(dictionary, 'Size', '(\\d+)'))
+  const rootMatch = new RegExp('/Root\\s+(\\d+)\\s+(\\d+)\\s+R', 'u').exec(dictionary)
+  const previous = Number(pdfDictionaryValue(dictionary, 'Prev', '(\\d+)'))
+  if (!Number.isSafeInteger(size) || size < 1) pdfInvalid()
+  return {
+    size,
+    root: rootMatch ? { object: Number(rootMatch[1]), generation: Number(rootMatch[2]) } : undefined,
+    previous: Number.isSafeInteger(previous) && previous >= 0 ? previous : undefined,
   }
-  const tail = content.subarray(Math.max(0, content.length - 1_024)).toString('latin1')
-  if (!/%%EOF[\t\n\f\r ]*$/u.test(tail)) {
-    throw new FileValidationError('FILE_CONTENT_INVALID', 'PDF 文件不完整')
+}
+
+const findPdfDictionaryEnd = (text: string, start: number) => {
+  if (!text.startsWith('<<', start)) return -1
+  let depth = 0
+  for (let cursor = start; cursor < text.length - 1; cursor += 1) {
+    if (text.startsWith('<<', cursor)) {
+      depth += 1
+      cursor += 1
+    } else if (text.startsWith('>>', cursor)) {
+      depth -= 1
+      if (depth === 0) return cursor + 2
+      cursor += 1
+    }
+  }
+  return -1
+}
+
+type PdfXrefEntry = { offset: number, generation: number, inUse: boolean }
+type PdfXrefSection = {
+  entries: Map<number, PdfXrefEntry>
+  root?: { object: number, generation: number }
+  previous?: number
+  size: number
+  stream: boolean
+}
+
+const validatePdfXrefStream = (content: Buffer, offset: number, text: string): PdfXrefSection => {
+  const objectHeaderMatch = /^(\d+)\s+(\d+)\s+obj\b/u.exec(text.slice(offset))
+  if (!objectHeaderMatch) pdfInvalid()
+  const objectHeader = objectHeaderMatch!
+  const dictionaryStart = text.indexOf('<<', offset + objectHeader[0].length)
+  const dictionaryEnd = dictionaryStart < 0 ? -1 : findPdfDictionaryEnd(text, dictionaryStart)
+  if (dictionaryStart < 0 || dictionaryEnd < 0) pdfInvalid()
+  const dictionary = text.slice(dictionaryStart, dictionaryEnd)
+  if (!/\/Type\s+\/XRef(?:\s|\/|>)/u.test(dictionary)) pdfInvalid()
+  const parsed = parsePdfDictionary(dictionary)
+  const widthsResult = /\/W\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s*\]/u.exec(dictionary)
+  if (!widthsResult) pdfInvalid()
+  const widthsMatch = widthsResult!
+  const widths = widthsMatch.slice(1).map(Number)
+  const recordWidth = widths.reduce((sum, width) => sum + width, 0)
+  if (recordWidth < 1 || widths.some((width) => !Number.isInteger(width) || width < 0 || width > 8)) pdfInvalid()
+  const streamStart = text.slice(dictionaryEnd).search(/stream(?:\r\n|\n|\r)/u)
+  const endStream = text.indexOf('endstream', dictionaryEnd)
+  if (streamStart < 0 || endStream < dictionaryEnd || endStream >= content.length) pdfInvalid()
+  return { entries: new Map(), ...parsed, stream: true }
+}
+
+const readPdfLine = (text: string, start: number): { line: string, next: number } | undefined => {
+  let cursor = start
+  while (cursor < text.length && text[cursor] !== '\n' && text[cursor] !== '\r') cursor += 1
+  if (cursor >= text.length) return undefined
+  const line = text.slice(start, cursor)
+  if (text[cursor] === '\r' && text[cursor + 1] === '\n') cursor += 2
+  else cursor += 1
+  return { line, next: cursor }
+}
+
+const validatePdfTraditionalXref = (content: Buffer, offset: number, text: string): PdfXrefSection => {
+  if (!text.startsWith('xref', offset)) pdfInvalid()
+  let cursor = offset + 4
+  const offsets = new Map<number, PdfXrefEntry>()
+  let subsectionCount = 0
+  const skipWhitespace = () => {
+    while (/[\t\n\f\r ]/u.test(text[cursor] ?? '')) cursor += 1
+  }
+  const readLine = () => {
+    const result = readPdfLine(text, cursor)
+    if (result) cursor = result.next
+    return result?.line
+  }
+  while (true) {
+    skipWhitespace()
+    if (text.startsWith('trailer', cursor)) break
+    const header = readLine()
+    const match = header ? /^(\d+)\s+(\d+)$/u.exec(header) : null
+    if (!match || Number(match[2]) < 1 || Number(match[2]) > 1_000_000) pdfInvalid('PDF 交叉引用表无效')
+    const firstObject = Number(match![1])
+    const count = Number(match![2])
+    subsectionCount += 1
+    if (subsectionCount > 1000) pdfInvalid('PDF 交叉引用表无效')
+    for (let index = 0; index < count; index += 1) {
+      const entry = readLine()
+      const entryMatch = entry ? /^(\d{10})\s+(\d{5})\s+([fn])(?:\s*)$/u.exec(entry) : null
+      if (!entryMatch) pdfInvalid('PDF 交叉引用条目无效')
+      offsets.set(firstObject + index, {
+        offset: Number(entryMatch![1]),
+        generation: Number(entryMatch![2]),
+        inUse: entryMatch![3] === 'n',
+      })
+    }
+  }
+  const trailerStart = cursor
+  const dictionaryStart = text.indexOf('<<', trailerStart + 'trailer'.length)
+  const dictionaryEnd = dictionaryStart < 0 ? -1 : findPdfDictionaryEnd(text, dictionaryStart)
+  if (dictionaryStart < 0 || dictionaryEnd < 0) pdfInvalid('PDF trailer 缺失')
+  const parsed = parsePdfDictionary(text.slice(dictionaryStart, dictionaryEnd))
+  if ([...offsets.keys()].some((object) => object >= parsed.size)) pdfInvalid('PDF 交叉引用范围无效')
+  return { entries: offsets, ...parsed, stream: false }
+}
+
+const validatePdf = (content: Buffer) => {
+  const text = content.toString('latin1')
+  const headerMatch = /^%PDF-(\d\.\d)(?:\r\n|\n|\r)/u.exec(text)
+  if (!headerMatch || !PDF_VERSION_PATTERN.test(headerMatch[1]!)) pdfInvalid('PDF 版本不受支持')
+  const header = headerMatch!
+  const eof = text.lastIndexOf('%%EOF')
+  if (eof < 0 || !/^[\t\n\f\r ]*$/u.test(text.slice(eof + 5))) pdfInvalid('PDF 文件不完整')
+  const startxrefPosition = text.lastIndexOf('startxref')
+  if (startxrefPosition < 0) pdfInvalid('PDF 缺少 startxref')
+  const startxrefMatch = /startxref\s+(\d+)/u.exec(text.slice(startxrefPosition))
+  const offset = startxrefMatch ? Number(startxrefMatch[1]) : NaN
+  if (!Number.isSafeInteger(offset) || offset < header[0].length || offset >= eof) pdfInvalid('PDF startxref 无效')
+  const seen = new Set<number>()
+  const entries = new Map<number, PdfXrefEntry>()
+  let root: { object: number, generation: number } | undefined
+  let largestSize = 0
+  let hasXrefStream = false
+  let current: number | undefined = offset
+  for (let depth = 0; current !== undefined; depth += 1) {
+    if (depth >= 32 || current < header[0].length || current >= eof || seen.has(current)) pdfInvalid('PDF 交叉引用链无效')
+    seen.add(current)
+    const section: PdfXrefSection = text.startsWith('xref', current)
+      ? validatePdfTraditionalXref(content, current, text)
+      : validatePdfXrefStream(content, current, text)
+    hasXrefStream ||= section.stream
+    root ??= section.root
+    largestSize = Math.max(largestSize, section.size)
+    for (const [object, entry] of section.entries) if (!entries.has(object)) entries.set(object, entry)
+    current = section.previous
+  }
+  if (!root || root.object >= largestSize) pdfInvalid('PDF 根对象缺失')
+  const documentRoot = root!
+  const rootEntry = entries.get(documentRoot.object)
+  if (rootEntry) {
+    if (!rootEntry.inUse || rootEntry.generation !== documentRoot.generation || rootEntry.offset >= content.length) pdfInvalid('PDF 根对象缺失')
+    const endObject = text.indexOf('endobj', rootEntry.offset)
+    if (
+      !new RegExp(`^${documentRoot.object}\\s+${documentRoot.generation}\\s+obj\\b`, 'u').test(text.slice(rootEntry.offset))
+      || endObject < 0
+      || !/\/Type\s+\/Catalog(?:\s|\/|>)/u.test(text.slice(rootEntry.offset, endObject))
+    ) pdfInvalid('PDF 根对象无效')
+  } else if (!hasXrefStream || !/\d+\s+\d+\s+obj\b/u.test(text)) {
+    pdfInvalid('PDF 根对象缺失')
+  }
+}
+
+type XmlNode = {
+  name: string
+  localName: string
+  namespaceURI: string
+  attributes: Map<string, string>
+  children: XmlNode[]
+}
+
+const XML_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?/u
+
+const xmlInvalid = (): never => {
+  throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX XML 结构无效')
+}
+
+const decodeXmlAttribute = (value: string) => {
+  if (/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/iu.test(value)) xmlInvalid()
+  return value.replace(/&(?:amp|lt|gt|quot|apos|#(\d+)|#x([0-9a-f]+));/giu, (entity, decimal, hexadecimal) => {
+    if (entity === '&amp;') return '&'
+    if (entity === '&lt;') return '<'
+    if (entity === '&gt;') return '>'
+    if (entity === '&quot;') return '"'
+    if (entity === '&apos;') return "'"
+    const codePoint = decimal ? Number(decimal) : Number.parseInt(hexadecimal, 16)
+    return Number.isSafeInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+      && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ? String.fromCodePoint(codePoint)
+      : xmlInvalid()
+  })
+}
+
+const parseXml = (content: Buffer): XmlNode => {
+  const source = content.toString('utf8').replace(/^\uFEFF/u, '')
+  if (source.includes('\uFFFD') || /<!(?:DOCTYPE|ENTITY|\[CDATA\[)/iu.test(source)) xmlInvalid()
+  let cursor = 0
+  let nodeCount = 0
+  let attributeCount = 0
+  let root: XmlNode | undefined
+  const stack: Array<{ node: XmlNode, namespaces: Map<string, string> }> = []
+  const readName = () => {
+    const match = XML_NAME.exec(source.slice(cursor))
+    if (!match) xmlInvalid()
+    cursor += match![0]!.length
+    return match![0]!
+  }
+  const skipSpaces = () => {
+    while (/\s/u.test(source[cursor] ?? '')) cursor += 1
+  }
+  while (cursor < source.length) {
+    if (source[cursor] !== '<') {
+      const textEnd = source.indexOf('<', cursor)
+      const text = source.slice(cursor, textEnd < 0 ? source.length : textEnd)
+      if (!stack.length && text.trim() !== '') xmlInvalid()
+      cursor = textEnd < 0 ? source.length : textEnd
+      continue
+    }
+    if (source.startsWith('<!--', cursor)) {
+      const end = source.indexOf('-->', cursor + 4)
+      if (end < 0) xmlInvalid()
+      cursor = end + 3
+      continue
+    }
+    if (source.startsWith('<?', cursor)) {
+      const end = source.indexOf('?>', cursor + 2)
+      if (end < 0) xmlInvalid()
+      cursor = end + 2
+      continue
+    }
+    if (source.startsWith('</', cursor)) {
+      cursor += 2
+      const name = readName()
+      skipSpaces()
+      if (source[cursor] !== '>') xmlInvalid()
+      cursor += 1
+      const current = stack.pop()
+      if (!current || current.node.name !== name) xmlInvalid()
+      continue
+    }
+    if (source.startsWith('<!', cursor)) xmlInvalid()
+    cursor += 1
+    const name = readName()
+    const parentNamespaces = stack.at(-1)?.namespaces ?? new Map<string, string>()
+    const namespaces = new Map(parentNamespaces)
+    const attributes = new Map<string, string>()
+    let selfClosing = false
+    while (true) {
+      skipSpaces()
+      if (source.startsWith('/>', cursor)) {
+        selfClosing = true
+        cursor += 2
+        break
+      }
+      if (source[cursor] === '>') {
+        cursor += 1
+        break
+      }
+      const attributeName = readName()
+      attributeCount += 1
+      if (attributeCount > 10_000) xmlInvalid()
+      skipSpaces()
+      if (source[cursor] !== '=') xmlInvalid()
+      cursor += 1
+      skipSpaces()
+      const quote = source[cursor]
+      if (quote !== '"' && quote !== "'") xmlInvalid()
+      cursor += 1
+      const valueStart = cursor
+      const valueEnd = source.indexOf(quote!, valueStart)
+      if (valueEnd < 0) xmlInvalid()
+      cursor = valueEnd + 1
+      const value = decodeXmlAttribute(source.slice(valueStart, valueEnd))
+      if (attributes.has(attributeName)) xmlInvalid()
+      if (attributeName === 'xmlns') namespaces.set('', value)
+      else if (attributeName.startsWith('xmlns:')) namespaces.set(attributeName.slice(6), value)
+      else attributes.set(attributeName, value)
+    }
+    const prefixEnd = name.indexOf(':')
+    const prefix = prefixEnd < 0 ? '' : name.slice(0, prefixEnd)
+    const localName = prefixEnd < 0 ? name : name.slice(prefixEnd + 1)
+    const namespaceURI = namespaces.get(prefix) ?? ''
+    if (prefix && !namespaceURI) xmlInvalid()
+    const node: XmlNode = { name, localName, namespaceURI, attributes, children: [] }
+    nodeCount += 1
+    if (nodeCount > 10_000 || stack.length >= 128) xmlInvalid()
+    if (stack.length) stack.at(-1)!.node.children.push(node)
+    else if (root) xmlInvalid()
+    else root = node
+    if (!selfClosing) stack.push({ node, namespaces })
+  }
+  if (!root || stack.length) xmlInvalid()
+  return root!
+}
+
+const attr = (node: XmlNode, name: string) => node.attributes.get(name)
+const contentTypesNamespace = 'http://schemas.openxmlformats.org/package/2006/content-types'
+const relationshipsNamespace = 'http://schemas.openxmlformats.org/package/2006/relationships'
+const officeDocumentRelationshipTypes = new Set([
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument',
+  'http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument',
+])
+const wordprocessingNamespaces = new Set([
+  'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+  'http://purl.oclc.org/ooxml/wordprocessingml/main',
+])
+
+const relationshipSourcePart = (relationshipName: string) => {
+  if (relationshipName === '_rels/.rels') return ''
+  const match = /^(.*)\/_rels\/([^/]+)\.rels$/u.exec(relationshipName)
+  return match ? `${match[1]}/${match[2]}` : undefined
+}
+
+const resolveRelationshipTarget = (sourcePart: string, targetValue: string) => {
+  let decoded = ''
+  try {
+    decoded = decodeURIComponent(targetValue.split('#', 1)[0]!)
+  } catch {
+    xmlInvalid()
+  }
+  if (
+    decoded.length === 0
+    || decoded.includes('\\')
+    || decoded.includes('\0')
+    || decoded.startsWith('/')
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(decoded)
+  ) xmlInvalid()
+  const base = sourcePart ? posix.dirname(sourcePart) : ''
+  const resolved = posix.normalize(posix.join(base, decoded))
+  if (resolved === '..' || resolved.startsWith('../') || resolved.startsWith('/')) xmlInvalid()
+  return resolved
+}
+
+const validateRelationships = (name: string, content: Buffer) => {
+  const sourcePart = relationshipSourcePart(name)
+  if (sourcePart === undefined) xmlInvalid()
+  const safeSourcePart = sourcePart!
+  const relationships = parseXml(content)
+  if (relationships.localName !== 'Relationships' || relationships.namespaceURI !== relationshipsNamespace) xmlInvalid()
+  const ids = new Set<string>()
+  for (const node of relationships.children) {
+    if (node.localName !== 'Relationship' || node.namespaceURI !== relationshipsNamespace) xmlInvalid()
+    const id = attr(node, 'Id')
+    const type = attr(node, 'Type')
+    const target = attr(node, 'Target')
+    const mode = attr(node, 'TargetMode')
+    if (!id || !type || !target || ids.has(id) || (mode !== undefined && mode.toLowerCase() !== 'internal')) xmlInvalid()
+    ids.add(id!)
+    resolveRelationshipTarget(safeSourcePart, target!)
+  }
+  return relationships
+}
+
+const validateDocxXml = (entries: Map<string, Buffer>) => {
+  const contentTypes = parseXml(entries.get('[Content_Types].xml')!)
+  if (contentTypes.localName !== 'Types' || contentTypes.namespaceURI !== contentTypesNamespace) xmlInvalid()
+  const documentContentType = contentTypes.children.find((node) => (
+    node.localName === 'Override'
+      && node.namespaceURI === contentTypesNamespace
+      && attr(node, 'PartName') === '/word/document.xml'
+      && attr(node, 'ContentType') === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'
+  ))
+  if (!documentContentType) throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 缺少文档内容声明')
+
+  const relationships = validateRelationships('_rels/.rels', entries.get('_rels/.rels')!)
+  const officeDocument = relationships.children.find((node) => (
+    node.localName === 'Relationship'
+      && node.namespaceURI === relationshipsNamespace
+      && officeDocumentRelationshipTypes.has(attr(node, 'Type') ?? '')
+      && resolveRelationshipTarget('', attr(node, 'Target') ?? '') === 'word/document.xml'
+      && (attr(node, 'TargetMode') === undefined || attr(node, 'TargetMode')?.toLowerCase() === 'internal')
+  ))
+  if (!officeDocument || !attr(officeDocument, 'Id')) throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 缺少文档关系声明')
+
+  const document = parseXml(entries.get('word/document.xml')!)
+  if (document.localName !== 'document' || !wordprocessingNamespaces.has(document.namespaceURI)) xmlInvalid()
+  const body = document.children.find((node) => node.localName === 'body' && node.namespaceURI === document.namespaceURI)
+  if (!body) throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 文档主体无效')
+
+  for (const [name, content] of entries) {
+    if (name.endsWith('.rels') && name !== '_rels/.rels') validateRelationships(name, content)
   }
 }
 
@@ -114,7 +494,8 @@ const crc32 = (input: Buffer) => {
   return (crc ^ 0xffffffff) >>> 0
 }
 
-const validateDocx = (content: Buffer, compressedLimit: number) => {
+const validateDocx = (content: Buffer, maxBytes: number) => {
+  if (content.length > maxBytes) throw new FileValidationError('FILE_TOO_LARGE', '文件超过大小限制')
   if (content.length < 22 || content.readUInt32LE(0) !== 0x04034b50) {
     throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX ZIP 签名无效')
   }
@@ -129,12 +510,13 @@ const validateDocx = (content: Buffer, compressedLimit: number) => {
   const centralSize = content.readUInt32LE(eocd + 12)
   const centralOffset = content.readUInt32LE(eocd + 16)
   const commentLength = content.readUInt16LE(eocd + 20)
+  const maxEntries = Math.min(1_000, Math.max(16, Math.floor(maxBytes / 512)))
   if (
     disk !== 0
     || centralDisk !== 0
     || entriesOnDisk !== totalEntries
     || totalEntries < 3
-    || totalEntries > 1_000
+    || totalEntries > maxEntries
     || eocd + 22 + commentLength !== content.length
     || centralOffset + centralSize !== eocd
   ) {
@@ -142,9 +524,9 @@ const validateDocx = (content: Buffer, compressedLimit: number) => {
   }
 
   const names = new Set<string>()
+  const requiredEntries = new Map<string, Buffer>()
   let cursor = centralOffset
   let totalUncompressed = 0
-  const uncompressedLimit = Math.min(100 * 1_024 * 1_024, Math.max(16 * 1_024 * 1_024, compressedLimit * 20))
   for (let index = 0; index < totalEntries; index += 1) {
     if (cursor + 46 > eocd || content.readUInt32LE(cursor) !== 0x02014b50) {
       throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 中央目录损坏')
@@ -182,14 +564,13 @@ const validateDocx = (content: Buffer, compressedLimit: number) => {
     }
     if (names.has(name)) throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 包含重复条目')
     names.add(name)
-    totalUncompressed += uncompressedSize
-    if (
-      uncompressedSize > uncompressedLimit
-      || totalUncompressed > uncompressedLimit
-      || (uncompressedSize > 1_048_576 && (compressedSize === 0 || uncompressedSize / compressedSize > 100))
-    ) {
+    if (uncompressedSize > maxBytes || totalUncompressed > maxBytes - uncompressedSize) {
       throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 压缩比例或展开大小异常')
     }
+    if (uncompressedSize > 65_536 && (compressedSize === 0 || uncompressedSize / compressedSize > 100)) {
+      throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 压缩比例或展开大小异常')
+    }
+    totalUncompressed += uncompressedSize
     if (localOffset + 30 > centralOffset || content.readUInt32LE(localOffset) !== 0x04034b50) {
       throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 本地文件头损坏')
     }
@@ -224,12 +605,15 @@ const validateDocx = (content: Buffer, compressedLimit: number) => {
     try {
       uncompressed = method === 0
         ? compressed
-        : inflateRawSync(compressed, { maxOutputLength: uncompressedLimit })
+        : inflateRawSync(compressed, { maxOutputLength: Math.min(maxBytes + 1, uncompressedSize + 1) })
     } catch {
       throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 条目解压失败')
     }
     if (uncompressed.length !== uncompressedSize || crc32(uncompressed) !== expectedCrc) {
       throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 条目校验失败')
+    }
+    if (['[Content_Types].xml', 'word/document.xml'].includes(name) || name.endsWith('.rels')) {
+      requiredEntries.set(name, uncompressed)
     }
     cursor = next
   }
@@ -237,9 +621,17 @@ const validateDocx = (content: Buffer, compressedLimit: number) => {
   for (const required of ['[Content_Types].xml', '_rels/.rels', 'word/document.xml']) {
     if (!names.has(required)) throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX 缺少必要的 OpenXML 条目')
   }
+  try {
+    validateDocxXml(requiredEntries)
+  } catch (error) {
+    if (error instanceof FileValidationError) throw error
+    throw new FileValidationError('FILE_CONTENT_INVALID', 'DOCX XML 结构无效')
+  }
 }
 
 export const validateStoredFileContent = (content: Buffer, mime: string, maxBytes: number): void => {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new FileValidationError('FILE_SIZE_INVALID', '文件大小限制无效')
+  if (content.length > maxBytes) throw new FileValidationError('FILE_TOO_LARGE', '文件超过大小限制')
   if (mime === PDF_MIME) {
     validatePdf(content)
     return

@@ -25,7 +25,30 @@ const origin = 'https://camp.example'
 const studentId = '00000000-0000-4000-8000-000000000101'
 const otherId = '00000000-0000-4000-8000-000000000102'
 const adminId = '00000000-0000-4000-8000-000000000103'
-const PDF = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n')
+const buildPdf = () => {
+  const header = Buffer.from('%PDF-1.7\n%\u00e2\u00e3\u00cf\u00d3\n')
+  const objects = [
+    Buffer.from('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'),
+    Buffer.from('2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n'),
+  ]
+  const offsets: number[] = []
+  let cursor = header.length
+  for (const object of objects) {
+    offsets.push(cursor)
+    cursor += object.length
+  }
+  const xrefOffset = cursor
+  return Buffer.concat([
+    header,
+    ...objects,
+    Buffer.from(
+      `xref\n0 3\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, '0')} 00000 n `).join('\n')}\n`
+      + `trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`,
+    ),
+  ])
+}
+
+const PDF = buildPdf()
 let uploadRoot = ''
 
 const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -136,6 +159,7 @@ describe('protected file PostgreSQL integration', () => {
 
   it.each([
     ['伪装.pdf', 'application/pdf', Buffer.from('not a pdf'), 422, 'FILE_CONTENT_INVALID'],
+    ['最小伪造.pdf', 'application/pdf', Buffer.from('%PDF-1.7\n%%EOF\n'), 422, 'FILE_CONTENT_INVALID'],
     ['简历.pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', PDF, 415, 'FILE_MIME_MISMATCH'],
     ['简历.pdf', 'application/pdf', Buffer.concat([PDF, Buffer.alloc(2048)]), 413, 'FILE_TOO_LARGE'],
   ])('rejects unsafe upload %s with a stable non-leaking code', async (name, type, body, status, code) => {

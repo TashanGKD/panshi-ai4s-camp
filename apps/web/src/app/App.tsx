@@ -12,6 +12,8 @@ import { PreviewPage } from '../pages/PreviewPage'
 import { RegisterPage } from '../pages/RegisterPage'
 import { LoginPage } from '../pages/LoginPage'
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage'
+import { RegistrationPage } from '../pages/RegistrationPage'
+import { AccountPage } from '../pages/AccountPage'
 import { PublicShell } from './PublicShell'
 import { SkipLink } from './SkipLink'
 import '../styles/public.css'
@@ -24,8 +26,6 @@ const LoadingOrError = ({ error = false }: { error?: boolean }) => <div classNam
     {error ? <p role="alert">活动信息暂时无法加载，请稍后重试。</p> : <p role="status">正在加载活动信息</p>}
   </main>
 </div>
-
-const PlaceholderPage = ({ title }: { title: string }) => <section className="public-page__section"><h2>{title}</h2><p>本页面尚未开放。</p></section>
 
 const PreviewRoute = ({ site }: { site: PublicSiteResponse['data'] }) => {
   const parsed = ContentModuleKeySchema.safeParse(useParams().module)
@@ -58,7 +58,8 @@ export function App() {
     <Route path="/register" element={<PublicShell site={site}><RegisterPage /></PublicShell>} />
     <Route path="/login" element={<PublicShell site={site}><LoginPage /></PublicShell>} />
     <Route path="/forgot-password" element={<PublicShell site={site}><ForgotPasswordPage /></PublicShell>} />
-    <Route path="/account" element={<PublicShell site={site}><PlaceholderPage title="个人中心" /></PublicShell>} />
+    <Route path="/application" element={<PublicShell site={site}><RegistrationPage /></PublicShell>} />
+    <Route path="/account" element={<PublicShell site={site}><AccountPage /></PublicShell>} />
     <Route path="/preview/:module" element={<PreviewRoute site={site} />} />
   </Routes>
 }

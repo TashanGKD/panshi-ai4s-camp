@@ -25,7 +25,7 @@ export function LoginPage() {
       <AuthField label="密码" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
       <AuthActions><button disabled={pending} type="submit">{pending ? '正在登录' : '登录'}</button></AuthActions>
       {error ? <AuthMessage kind="error">{error}</AuthMessage> : null}
-      {success ? <AuthMessage kind="status">登录成功，可前往个人中心。</AuthMessage> : null}
+      {success ? <AuthMessage kind="status">登录成功，可<a href="/application">继续填写报名信息</a>。</AuthMessage> : null}
       <p className="auth-secondary"><Link to="/forgot-password">忘记密码</Link><span aria-hidden="true"> · </span><Link to="/register">注册账号</Link></p>
     </AuthForm>
   </AuthCard>

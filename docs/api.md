@@ -166,7 +166,17 @@ Cookie 和 session 实现必须满足以下安全底线：
 - `POST /api/v1/admin/registration-form/publish`：请求 `{ "expectedRevision": n }`，在事务中创建新不可变版本并更新草稿基线。
 - `GET /api/v1/admin/registration-form/history`：按版本号倒序读取原始表单快照。
 
-公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。Task 11 不提供答案保存/提交；附件接口如下。
+公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。
+
+### 学员报名
+
+- `GET /api/v1/me/application`：读取或初始化当前登录学员唯一报名，返回固定资料、当前表单版本、草稿答案、有效附件、状态时间线和补充要求占位；禁用账号返回 403 `ACCOUNT_DISABLED`。
+- `PUT /api/v1/me/application/draft`：按 `expectedRevision` 保存资料、答案和附件引用。草稿可不完整，但类型、长度、选项和附件归属必须有效；冲突返回 409 `APPLICATION_REVISION_CONFLICT`。手机号由会话账号写入，不接收客户端覆盖。
+- `POST /api/v1/me/application/submit`：按 `expectedRevision` 原子提交。服务端在事务内复核报名窗口、账号状态、表单版本、全部必填项及附件状态，写不可变快照、状态历史和脱敏审计；提交后锁定，重复提交返回 409。
+
+草稿在管理员发布新版表单后按稳定字段 ID 迁移到新版本，已有答案不删除，停用或移除字段 ID 通过 `retiredAnswerIds` 明示。已提交报名永久绑定提交时的表单和附件元数据快照。审计仅记录 revision、答案数、附件数和表单版本，不记录答案、手机号或文件名。
+
+附件接口如下。
 
 ### 受保护附件接口
 
@@ -176,6 +186,8 @@ Cookie 和 session 实现必须满足以下安全底线：
 - `GET /api/v1/files/:id/download`：仅文件所有者及有效管理员可下载，返回 `Content-Disposition: attachment`、`X-Content-Type-Options: nosniff`、`Cache-Control: private, no-store`。
 - `PATCH /api/v1/files/:id/hide`：文件所有者或有效管理员隐藏文件，成功返回 204；隐藏后所有下载立即失效。
 - `DELETE /api/v1/files/:id`：文件所有者或有效管理员删除文件。状态先进入 `deleting` 并立即停止下载，物理删除成功后进入 `deleted`；物理删除失败进入 `delete_failed`，返回 503 `FILE_DELETE_FAILED`，再次调用同一接口可重试。
+
+附件一旦进入已提交或后续状态，隐藏和删除接口均返回 409 `FILE_LOCKED_BY_APPLICATION`；只读下载仍按本人或管理员权限判断。
 
 上传仅允许 PDF 和 DOCX，稳定拒绝码包括 `FILE_REQUIRED`、`FILE_NAME_INVALID`、`FILE_EXTENSION_NOT_ALLOWED`、`FILE_MIME_MISMATCH`、`FILE_TOO_LARGE`、`FILE_CONTENT_INVALID`、`FILE_MULTIPART_INVALID`、`FILE_PURPOSE_INVALID`、`FILE_ATTACHMENT_SLOT_INVALID`、`FILE_UPLOAD_CONCURRENCY_LIMITED`、`FILE_UPLOAD_GLOBAL_RATE_LIMITED` 和 `FILE_UPLOAD_RATE_LIMITED`。错误响应不包含物理路径、文件内容或底层解析器消息。Task 13 绑定报名附件时必须同时验证文件处于 `active`、所有者是当前申请人、`purpose=registration_attachment`，且附件 `slot` 与提交所用表单快照一致；每个报名附件项只能绑定一个有效文件。
 

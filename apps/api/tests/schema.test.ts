@@ -51,6 +51,7 @@ const requiredTables = [
   'resources',
   'sessions',
   'system_settings',
+  'user_profiles',
   'users',
   'verification_codes',
 ] as const
@@ -70,11 +71,13 @@ const expectedPrimaryKeys = [
   { tableName: 'resources', constraintName: 'resources_pkey', columns: ['id'] },
   { tableName: 'sessions', constraintName: 'sessions_pkey', columns: ['id'] },
   { tableName: 'system_settings', constraintName: 'system_settings_pkey', columns: ['key'] },
+  { tableName: 'user_profiles', constraintName: 'user_profiles_pkey', columns: ['user_id'] },
   { tableName: 'users', constraintName: 'users_pkey', columns: ['id'] },
   { tableName: 'verification_codes', constraintName: 'verification_codes_pkey', columns: ['id'] },
 ] as const
 
 const expectedUniqueConstraints = [
+  { tableName: 'application_files', constraintName: 'application_files_application_slot_unique', columns: ['application_id', 'attachment_slot'] },
   { tableName: 'applications', constraintName: 'applications_user_id_unique', columns: ['user_id'] },
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_id_unique', columns: ['module_key', 'id'] },
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_version_unique', columns: ['module_key', 'version'] },
@@ -107,11 +110,13 @@ const expectedForeignKeys = [
   { tableName: 'resources', constraintName: 'resources_file_id_files_id_fk', columns: ['file_id'], referencedTableName: 'files', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'sessions', constraintName: 'sessions_user_id_users_id_fk', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'cascade' },
   { tableName: 'system_settings', constraintName: 'system_settings_updated_by_users_id_fk', columns: ['updated_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'set null' },
+  { tableName: 'user_profiles', constraintName: 'user_profiles_user_id_fkey', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'cascade' },
 ] as const
 
 const expectedChecks = [
   { constraintName: 'application_status_history_from_status_check', tokens: ['from_status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
   { constraintName: 'application_status_history_to_status_check', tokens: ['to_status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
+  { constraintName: 'applications_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'applications_status_check', tokens: ['status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
   { constraintName: 'content_modules_draft_revision_check', tokens: ['draft_revision', '>= 0'] },
   { constraintName: 'content_versions_version_check', tokens: ['version', '> 0'] },
@@ -348,6 +353,8 @@ describe('initial PostgreSQL schema', () => {
     `)
 
     expect(triggers.rows.map(({ trigger_name }) => trigger_name)).toEqual([
+      'application_versions_immutable_delete',
+      'application_versions_immutable_update',
       'audit_logs_append_only',
       'content_versions_immutable',
       'registration_form_versions_immutable',
@@ -599,6 +606,7 @@ describe('initial PostgreSQL schema', () => {
       '0009_registration_form_latest_draft.sql',
       '0010_secure_file_metadata.sql',
       '0011_recoverable_file_lifecycle.sql',
+      '0012_application_submission.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

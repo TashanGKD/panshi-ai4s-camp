@@ -20,6 +20,8 @@ import { createRegistrationFormPublicRouter, createAdminRegistrationFormRouter }
 import type { RegistrationFormService } from './modules/registration/form.service.js'
 import { createFileRouter } from './modules/files/file.routes.js'
 import type { FileService } from './modules/files/file.service.js'
+import { createApplicationRouter } from './modules/registration/application.routes.js'
+import type { ApplicationService } from './modules/registration/application.service.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -48,6 +50,7 @@ export type AppDependencies = {
   adminSummaryService?: AdminSummaryService
   registrationFormService?: RegistrationFormService
   fileService?: FileService
+  applicationService?: ApplicationService
   config: ApiRuntimeConfig
 }
 
@@ -101,6 +104,7 @@ export const createApp = ({
   adminSummaryService,
   registrationFormService,
   fileService,
+  applicationService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -123,6 +127,7 @@ export const createApp = ({
     }
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
     if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
+    if (applicationService) app.use('/api/v1/me/application', createApplicationRouter(sessions, applicationService))
     if (fileService) {
       if (!config.fileUploadTempDirectory) throw new Error('File upload temporary directory is required')
       app.use('/api/v1/files', createFileRouter(sessions, fileService, {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants, createReadStream, createWriteStream, openSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { Transform } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+import { finished, pipeline } from 'node:stream/promises'
 import { Router, type RequestHandler } from 'express'
 import multer from 'multer'
 import { z } from 'zod'
@@ -236,14 +236,18 @@ export const createFileRouter = (
           return
         }
         const temporaryPath = request.file?.path
+        let source: ReturnType<typeof createReadStream> | undefined
         try {
           if (!request.file) throw new HttpError(400, 'FILE_REQUIRED', '请选择要上传的文件')
           const purpose = typeof request.body.purpose === 'string' ? request.body.purpose : ''
           const attachmentSlot = typeof request.body.attachmentSlot === 'string' && request.body.attachmentSlot !== ''
             ? request.body.attachmentSlot
             : undefined
+          source = createReadStream(request.file.path)
+          // A service may reject metadata before consuming the stream; keep its asynchronous open error observed.
+          source.on('error', () => undefined)
           const file = await service.upload({
-            stream: createReadStream(request.file.path),
+            stream: source,
             originalName: request.file.originalname,
             mimeType: request.file.mimetype,
             sizeBytes: request.file.size,
@@ -255,6 +259,8 @@ export const createFileRouter = (
           next(toHttpError(error))
         } finally {
           release?.()
+          source?.destroy()
+          if (source) await finished(source).catch(() => undefined)
           if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
         }
       })

@@ -252,3 +252,94 @@ export const RegistrationSnapshotSchema = z.object({
 
 export type ApplicationStatus = z.infer<typeof ApplicationStatusSchema>
 export type RegistrationSnapshot = z.infer<typeof RegistrationSnapshotSchema>
+
+const CoreFieldValueSchema = z.string().trim().max(500)
+export const ApplicationCoreFieldsSchema = z.object({
+  name: CoreFieldValueSchema,
+  phone: z.string().min(1).max(32),
+  email: z.union([z.literal(''), z.string().trim().email().max(320)]),
+  organization: CoreFieldValueSchema,
+  department: CoreFieldValueSchema,
+  identityType: CoreFieldValueSchema,
+  educationStage: CoreFieldValueSchema,
+  majorResearchDirection: z.string().trim().max(2_000),
+}).strict()
+
+export const ApplicationAnswersSchema = z.record(UuidSchema, z.union([
+  z.string().max(REGISTRATION_FORM_LIMITS.textMaxLength),
+  z.array(z.string().max(REGISTRATION_FORM_LIMITS.optionValueMaxLength)).max(REGISTRATION_FORM_LIMITS.maxOptionsPerQuestion),
+])).refine((value) => Object.keys(value).length <= REGISTRATION_FORM_LIMITS.maxQuestions, 'too many answers')
+
+export const ApplicationAttachmentReferenceSchema = z.object({
+  slotId: UuidSchema,
+  fileId: UuidSchema,
+}).strict()
+
+export const ApplicationDraftSaveRequestSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+  profile: ApplicationCoreFieldsSchema.omit({ phone: true }),
+  answers: ApplicationAnswersSchema,
+  attachments: z.array(ApplicationAttachmentReferenceSchema).max(REGISTRATION_FORM_LIMITS.maxAttachments),
+}).strict()
+
+const ApplicationFileSchema = z.object({
+  id: UuidSchema,
+  slotId: UuidSchema,
+  originalName: z.string().min(1).max(255),
+  mimeType: z.enum(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']),
+  sizeBytes: z.number().int().nonnegative(),
+  downloadUrl: z.string().startsWith('/api/v1/files/'),
+}).strict()
+
+export const ApplicationTimelineEntrySchema = z.object({
+  status: ApplicationStatusSchema,
+  createdAt: z.iso.datetime(),
+  publicReason: z.string().max(2_000).nullable(),
+}).strict()
+
+export const MyApplicationResponseSchema = z.object({
+  apiVersion: z.literal('v1'),
+  data: z.object({
+    application: z.object({
+      id: UuidSchema,
+      status: ApplicationStatusSchema,
+      revision: z.number().int().nonnegative(),
+      locked: z.boolean(),
+      formVersionId: UuidSchema,
+      formVersion: z.number().int().positive(),
+      form: RegistrationFormSchema,
+      profile: ApplicationCoreFieldsSchema,
+      answers: ApplicationAnswersSchema,
+      attachments: z.array(ApplicationFileSchema),
+      retiredAnswerIds: z.array(UuidSchema),
+      submittedAt: z.iso.datetime().nullable(),
+      updatedAt: z.iso.datetime(),
+    }).strict(),
+    timeline: z.array(ApplicationTimelineEntrySchema),
+    supplementRequest: z.object({
+      message: z.string(),
+      editableFieldIds: z.array(UuidSchema),
+      editableAttachmentIds: z.array(UuidSchema),
+    }).strict().nullable(),
+    accessibleResources: z.array(z.object({ id: UuidSchema, title: z.string(), downloadUrl: z.string() }).strict()),
+  }).strict(),
+}).strict()
+
+export const ApplicationSubmitRequestSchema = z.object({
+  expectedRevision: z.number().int().nonnegative(),
+}).strict()
+
+export const ApplicationSubmitResponseSchema = z.object({
+  apiVersion: z.literal('v1'),
+  data: z.object({
+    applicationId: UuidSchema,
+    status: z.literal('submitted'),
+    submittedAt: z.iso.datetime(),
+    versionId: UuidSchema,
+  }).strict(),
+}).strict()
+
+export type ApplicationCoreFields = z.infer<typeof ApplicationCoreFieldsSchema>
+export type ApplicationAnswers = z.infer<typeof ApplicationAnswersSchema>
+export type ApplicationDraftSaveRequest = z.infer<typeof ApplicationDraftSaveRequestSchema>
+export type MyApplicationResponse = z.infer<typeof MyApplicationResponseSchema>

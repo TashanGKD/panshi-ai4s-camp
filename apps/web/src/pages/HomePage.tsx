@@ -3,7 +3,7 @@ import type { BasicContent } from '@panshi/contracts'
 import { RichText } from '../components/RichText'
 
 export const navigationItems = [
-  { label: '首页', to: '/' }, { label: '实训日程', to: '/schedule' }, { label: '在线注册', to: '/register' },
+  { label: '首页', to: '/' }, { label: '实训日程', to: '/schedule' }, { label: '在线注册', to: '/application' },
   { label: '住宿交通', to: '/travel' }, { label: '联系我们', to: '/contact' }, { label: '相关资料', to: '/resources' },
   { label: '个人中心', to: '/account' },
 ] as const

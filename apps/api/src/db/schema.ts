@@ -49,6 +49,18 @@ export const users = pgTable('users', {
   check('users_role_check', sql`${table.role} in ('user', 'admin')`),
 ])
 
+export const userProfiles = pgTable('user_profiles', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  organization: text('organization').notNull(),
+  department: text('department').notNull(),
+  identityType: text('identity_type').notNull(),
+  educationStage: text('education_stage').notNull(),
+  majorResearchDirection: text('major_research_direction').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   tokenHash: text('token_hash').notNull().unique('sessions_token_hash_unique'),
@@ -146,6 +158,7 @@ export const applications = pgTable('applications', {
     { onDelete: 'restrict' },
   ),
   status: text('status').$type<ApplicationStatus>().notNull().default('draft'),
+  revision: integer('revision').notNull().default(0),
   coreFields: jsonb('core_fields').$type<JsonObject>().notNull().default(sql`'{}'::jsonb`),
   answers: jsonb('answers').$type<JsonObject>().notNull().default(sql`'{}'::jsonb`),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
@@ -155,6 +168,7 @@ export const applications = pgTable('applications', {
   check('applications_status_check', sql`${table.status} in (
     'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'
   )`),
+  check('applications_revision_check', sql`${table.revision} >= 0`),
   index('applications_status_idx').on(table.status),
 ])
 
@@ -208,7 +222,7 @@ export const files = pgTable('files', {
   check('files_sha256_check', sql`${table.sha256} ~ '^[a-f0-9]{64}$'`),
   check('files_purpose_check', sql`${table.purpose} in ('registration_attachment', 'resource', 'legacy')`),
   check('files_visibility_check', sql`${table.visibility} in ('owner_admin', 'public', 'authenticated', 'admitted')`),
-  check('files_attachment_slot_check', sql`${table.attachmentSlot} is null or ${table.attachmentSlot} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+  check('files_attachment_slot_check', sql`${table.attachmentSlot} is null or ${table.attachmentSlot} ~ '^(?:[a-z][a-z0-9_-]{0,63}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$'`),
   check('files_lifecycle_state_check', sql`${table.lifecycleState} in ('active', 'deleting', 'delete_failed', 'deleted')`),
   check('files_delete_failure_state_check', sql`(${table.lifecycleState} = 'delete_failed') = (${table.deleteFailureCode} is not null)`),
   check('files_deleted_state_check', sql`(${table.lifecycleState} = 'deleted') = (${table.deletedAt} is not null)`),
@@ -237,9 +251,11 @@ export const applicationFiles = pgTable('application_files', {
   applicationId: uuid('application_id').notNull().references(() => applications.id, { onDelete: 'cascade' }),
   fileId: uuid('file_id').notNull().references(() => files.id, { onDelete: 'restrict' }),
   purpose: text('purpose').notNull(),
+  attachmentSlot: uuid('attachment_slot').notNull(),
   createdAt: createdAt(),
 }, (table) => [
   primaryKey({ name: 'application_files_pkey', columns: [table.applicationId, table.fileId] }),
+  unique('application_files_application_slot_unique').on(table.applicationId, table.attachmentSlot),
   index('application_files_file_id_idx').on(table.fileId),
 ])
 

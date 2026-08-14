@@ -11,6 +11,7 @@
     "e2e:publishing-fixture": "tsx src/cli/content-publishing-e2e-fixture.ts",
     "e2e:visual-fixture": "tsx src/cli/visual-e2e-fixture.ts",
     "e2e:student-auth-fixture": "tsx src/cli/student-auth-e2e-fixture.ts",
+    "e2e:application-fixture": "tsx src/cli/application-e2e-fixture.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
     "test": "vitest run --exclude 'tests/*.integration.test.ts' --exclude 'tests/schema.test.ts'",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",
@@ -20,6 +21,7 @@
     "test:integration:student-auth": "node tests/require-student-auth-integration-env.mjs && vitest run tests/student-auth.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:registration": "node tests/require-registration-integration-env.mjs && vitest run tests/registration-form.integration.test.ts tests/registration-form-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:files": "node tests/require-files-integration-env.mjs && vitest run tests/files.integration.test.ts tests/files-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
+    "test:integration:application": "node tests/require-registration-integration-env.mjs && vitest run tests/application.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

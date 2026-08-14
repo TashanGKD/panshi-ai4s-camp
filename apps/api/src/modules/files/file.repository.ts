@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type * as schema from '../../db/schema.js'
-import { auditLogs, files, fileStorageRecoveries } from '../../db/schema.js'
+import { applications, applicationFiles, auditLogs, files, fileStorageRecoveries } from '../../db/schema.js'
 
 export type FileLifecycleState = 'active' | 'deleting' | 'delete_failed' | 'deleted'
 
@@ -33,6 +33,7 @@ export type FileRepository = {
   recordUploadStorageFailure: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   markUploadCleanupFailed: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   findById: (id: string) => Promise<FileRecord | null>
+  isLockedApplicationFile?: (id: string) => Promise<boolean>
   hideWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
   beginDeleteWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
   markDeleteFailedWithAudit: (id: string, actorUserId: string, failureCode: string) => Promise<FileRecord | null>
@@ -106,6 +107,13 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
   findById: async (id) => {
     const [record] = await db.select().from(files).where(eq(files.id, id)).limit(1)
     return record ?? null
+  },
+
+  isLockedApplicationFile: async (id) => {
+    const [record] = await db.select({ fileId: applicationFiles.fileId }).from(applicationFiles)
+      .innerJoin(applications, eq(applications.id, applicationFiles.applicationId))
+      .where(and(eq(applicationFiles.fileId, id), ne(applications.status, 'draft'))).limit(1)
+    return record !== undefined
   },
 
   hideWithAudit: (id, actorUserId) => db.transaction(async (transaction) => {

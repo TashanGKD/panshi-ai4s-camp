@@ -36,7 +36,7 @@ export const createFileService = (repository: FileRepository, storage: FileStora
     if (input.purpose !== 'registration_attachment') {
       throw new FileServiceError(422, 'FILE_PURPOSE_INVALID', '附件用途无效')
     }
-    if (input.attachmentSlot !== undefined && !/^[a-z][a-z0-9_-]{0,63}$/u.test(input.attachmentSlot)) {
+    if (input.attachmentSlot !== undefined && !/^(?:[a-z][a-z0-9_-]{0,63}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u.test(input.attachmentSlot)) {
       throw new FileServiceError(422, 'FILE_ATTACHMENT_SLOT_INVALID', '附件项标识无效')
     }
 
@@ -120,12 +120,14 @@ export const createFileService = (repository: FileRepository, storage: FileStora
   hide: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
     if (!record || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    if (await repository.isLockedApplicationFile?.(id)) throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
     if (!await repository.hideWithAudit(id, actor.id)) throw unavailable()
   },
 
   remove: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
     if (!record || record.lifecycleState === 'deleted' || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    if (await repository.isLockedApplicationFile?.(id)) throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
     const deleting = await repository.beginDeleteWithAudit(id, actor.id)
     if (!deleting) throw unavailable()
     try {

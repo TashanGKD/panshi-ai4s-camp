@@ -45,7 +45,7 @@ describe('public event shell', () => {
     renderRoute()
     const links = within(await screen.findByRole('navigation')).getAllByRole('link')
     expect(links.map((link) => link.textContent)).toEqual(['首页', '实训日程', '在线注册', '住宿交通', '联系我们', '相关资料', '个人中心'])
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/schedule', '/register', '/travel', '/contact', '/resources', '/account'])
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/schedule', '/application', '/travel', '/contact', '/resources', '/account'])
     expect(links[0]).toHaveAttribute('aria-current', 'page')
     expect(links.slice(1).every((link) => !link.hasAttribute('aria-current'))).toBe(true)
   })

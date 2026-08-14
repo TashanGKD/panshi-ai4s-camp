@@ -15,6 +15,8 @@ import { createRegistrationFormService } from './modules/registration/form.servi
 import { createFileRepository } from './modules/files/file.repository.js'
 import { createFileService } from './modules/files/file.service.js'
 import { createLocalFileStorage } from './modules/files/local-file-storage.js'
+import { createApplicationRepository } from './modules/registration/application.repository.js'
+import { createApplicationService } from './modules/registration/application.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -243,6 +245,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
   const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
+  const applicationService = createApplicationService(createApplicationRepository(database.db))
   const fileService = createFileService(
     createFileRepository(database.db),
     createLocalFileStorage({ root: env.FILE_STORAGE_ROOT, maxBytes: env.FILE_UPLOAD_MAX_BYTES }),
@@ -256,6 +259,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     verificationService,
     contentPublishingService,
     registrationFormService,
+    applicationService,
     fileService,
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {

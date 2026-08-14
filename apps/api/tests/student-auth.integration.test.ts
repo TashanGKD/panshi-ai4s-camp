@@ -100,4 +100,42 @@ describe('student authentication PostgreSQL integration', () => {
     }))
     expect(JSON.stringify(await database.db.select().from(auditLogs))).not.toMatch(/13800138000|246810|password-[12]/u)
   })
+
+  it('does not let the public reset flow change an administrator password or sessions', async () => {
+    const originalPasswordHash = await hashPassword('admin-password-1')
+    const [admin] = await database.db.insert(users).values({
+      displayName: '管理员',
+      phoneNormalized: '+8613900139000',
+      passwordHash: originalPasswordHash,
+      role: 'admin',
+    }).returning({ id: users.id })
+    if (!admin) throw new Error('Missing test administrator')
+    await database.db.insert(sessions).values({
+      userId: admin.id,
+      tokenHash: 'c'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    await send('13900139000', 'reset_password')
+
+    const reset = await request(app).post('/api/v1/auth/password/reset').set('Origin', origin)
+      .send({ phone: '13900139000', code: testCode, newPassword: 'admin-password-2' })
+
+    expect(reset.status).toBe(400)
+    expect(reset.body).toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: 'PASSWORD_RESET_FAILED' }),
+    }))
+    expect(JSON.stringify(reset.body)).not.toMatch(/admin|13900139000|\+8613900139000/u)
+
+    const [storedAdmin] = await database.db.select().from(users).where(eq(users.id, admin.id))
+    const [storedSession] = await database.db.select().from(sessions).where(eq(sessions.userId, admin.id))
+    const [storedCode] = await database.db.select().from(verificationCodes)
+      .where(eq(verificationCodes.phoneNormalized, '+8613900139000'))
+    expect(storedAdmin?.passwordHash).toBe(originalPasswordHash)
+    expect(storedSession?.revokedAt).toBeNull()
+    expect(storedCode).toMatchObject({ failedAttempts: 0 })
+    expect(storedCode?.consumedAt).toBeInstanceOf(Date)
+
+    expect((await request(app).post('/api/v1/auth/admin/login').set('Origin', origin)
+      .send({ phone: '13900139000', password: 'admin-password-1' })).status).toBe(200)
+  })
 })

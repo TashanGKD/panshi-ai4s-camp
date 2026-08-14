@@ -240,7 +240,7 @@ export const createIdentityRepository = (
       .where(eq(verificationCodes.id, record.id))
     const [user] = await transaction.select(userSelection).from(users)
       .where(eq(users.phoneNormalized, input.phoneNormalized)).limit(1).for('update')
-    if (!user) return 'invalid_account' as const
+    if (!user || user.role !== 'user' || user.disabledAt !== null) return 'invalid_account' as const
 
     await transaction.update(users).set({ passwordHash: input.passwordHash }).where(eq(users.id, user.id))
     await transaction.update(sessions).set({ revokedAt: input.consumedAt })

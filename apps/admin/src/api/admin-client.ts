@@ -18,6 +18,13 @@ import {
   type JsonObject,
   type LoginResponse,
   type ProfileResponse,
+  RegistrationFormDraftResponseSchema,
+  RegistrationFormHistoryResponseSchema,
+  RegistrationFormPublishResponseSchema,
+  type RegistrationForm,
+  type RegistrationFormDraftResponse,
+  type RegistrationFormHistoryResponse,
+  type RegistrationFormPublishResponse,
 } from '@panshi/contracts'
 
 export class AdminApiError extends Error {
@@ -68,6 +75,11 @@ export type AdminClient = {
   publish: (key: ContentModuleKey, expectedRevision: number) => Promise<ContentPublishResponse>
   getHistory: (key: ContentModuleKey) => Promise<AdminContentHistoryResponse>
   rollback: (key: ContentModuleKey, version: number) => Promise<ContentPublishResponse>
+  getRegistrationFormDraft: () => Promise<RegistrationFormDraftResponse>
+  saveRegistrationFormDraft: (form: RegistrationForm, expectedRevision: number) => Promise<RegistrationFormDraftResponse>
+  previewRegistrationForm: () => Promise<RegistrationFormDraftResponse>
+  publishRegistrationForm: (expectedRevision: number) => Promise<RegistrationFormPublishResponse>
+  getRegistrationFormHistory: () => Promise<RegistrationFormHistoryResponse>
 }
 
 export const createAdminClient = (apiBaseUrl: string | undefined, runtime: AdminClientRuntime): AdminClient => {
@@ -107,6 +119,15 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     rollback: async (key, version) => ContentPublishResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/rollback`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }),
     })).json()),
+    getRegistrationFormDraft: async () => RegistrationFormDraftResponseSchema.parse(await (await send('/api/v1/admin/registration-form/draft')).json()),
+    saveRegistrationFormDraft: async (form, expectedRevision) => RegistrationFormDraftResponseSchema.parse(await (await send('/api/v1/admin/registration-form/draft', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, expectedRevision }),
+    })).json()),
+    previewRegistrationForm: async () => RegistrationFormDraftResponseSchema.parse(await (await send('/api/v1/admin/registration-form/preview')).json()),
+    publishRegistrationForm: async (expectedRevision) => RegistrationFormPublishResponseSchema.parse(await (await send('/api/v1/admin/registration-form/publish', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
+    })).json()),
+    getRegistrationFormHistory: async () => RegistrationFormHistoryResponseSchema.parse(await (await send('/api/v1/admin/registration-form/history')).json()),
   }
 }
 

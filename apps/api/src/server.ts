@@ -10,6 +10,8 @@ import { createAdminSummaryRepository } from './modules/admin-summary/admin-summ
 import { createAdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 import { createMockVerificationProvider } from './modules/identity/mock-verification-provider.js'
 import { createVerificationService } from './modules/identity/verification.service.js'
+import { createRegistrationFormRepository } from './modules/registration/form.repository.js'
+import { createRegistrationFormService } from './modules/registration/form.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -237,6 +239,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     })
     : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
+  const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
   const app = createApp({
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
@@ -245,6 +248,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     studentIdentityRepository: identityRepository,
     verificationService,
     contentPublishingService,
+    registrationFormService,
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {
       allowedOrigins: env.CORS_ORIGINS,

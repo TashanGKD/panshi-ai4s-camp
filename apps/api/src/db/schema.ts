@@ -14,7 +14,7 @@ import {
   uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
-import type { JsonObject } from '@panshi/contracts'
+import type { JsonObject, RegistrationForm } from '@panshi/contracts'
 
 type UserRole = 'user' | 'admin'
 type ApplicationStatus =
@@ -112,9 +112,25 @@ export const contentVersions = pgTable('content_versions', {
 export const registrationFormVersions = pgTable('registration_form_versions', {
   id: uuid('id').primaryKey().defaultRandom(),
   schema: jsonb('schema').$type<JsonObject>().notNull(),
+  version: integer('version').notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
   publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
   createdAt: createdAt(),
-})
+}, (table) => [
+  unique('registration_form_versions_version_unique').on(table.version),
+  check('registration_form_versions_version_check', sql`${table.version} > 0`),
+])
+
+export const registrationFormDrafts = pgTable('registration_form_drafts', {
+  id: uuid('id').primaryKey(),
+  schema: jsonb('schema').$type<RegistrationForm>().notNull(),
+  revision: integer('revision').notNull().default(0),
+  baseVersionId: uuid('base_version_id').references(() => registrationFormVersions.id, { onDelete: 'restrict' }),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check('registration_form_drafts_revision_check', sql`${table.revision} >= 0`),
+])
 
 export const applications = pgTable('applications', {
   id: uuid('id').primaryKey().defaultRandom(),

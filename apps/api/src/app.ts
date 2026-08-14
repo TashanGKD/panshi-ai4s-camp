@@ -16,6 +16,8 @@ import { createAdminContentRouter } from './modules/content/admin-content.routes
 import type { ContentPublishingService } from './modules/content/publish.service.js'
 import { createAdminSummaryRouter } from './modules/admin-summary/admin-summary.routes.js'
 import type { AdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
+import { createRegistrationFormPublicRouter, createAdminRegistrationFormRouter } from './modules/registration/form.routes.js'
+import type { RegistrationFormService } from './modules/registration/form.service.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -34,6 +36,7 @@ export type AppDependencies = {
   verificationService?: VerificationService
   contentPublishingService?: ContentPublishingService
   adminSummaryService?: AdminSummaryService
+  registrationFormService?: RegistrationFormService
   config: ApiRuntimeConfig
 }
 
@@ -85,6 +88,7 @@ export const createApp = ({
   verificationService,
   contentPublishingService,
   adminSummaryService,
+  registrationFormService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -106,7 +110,9 @@ export const createApp = ({
       app.use('/api/v1/admin/content', createAdminContentRouter(sessions, contentPublishingService))
     }
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
+    if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
   }
+  if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
     findPublishedByKeys: async () => [],
   })))

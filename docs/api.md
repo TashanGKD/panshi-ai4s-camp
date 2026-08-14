@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份、内容草稿／预览／发布／历史／回退，以及 Task 9 的后台摘要边界；报名和资源下载路由仍属于后续任务。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份、内容草稿／预览／发布／历史／回退、Task 9 的后台摘要边界和 Task 11 的报名表配置；报名答案、附件上传和资源下载仍属于后续任务。
 
 ## API 范围
 
@@ -153,6 +153,20 @@ Cookie 和 session 实现必须满足以下安全底线：
 ## 已冻结的共享契约
 
 `@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、管理员与学员登录请求/响应、独立注册响应、验证码用途和请求、注册与密码重置请求、profile 响应和提交报名快照。
+
+### 报名表配置接口
+
+共享 `RegistrationFormSchema` 固定 `name`、`phone`、`email`、`organization`、`department`、`identityType`、`educationStage`、`majorResearchDirection` 八个核心字段；手机号字段始终 `readOnly: true`。动态问题仅接受 `short_text`、`long_text`、`single_choice`、`multiple_choice`，每题和每个选项均要求稳定 UUID，题目和附件 order 必须从零连续。附件是独立数组，默认种子为 UUID `00000000-0000-4000-8000-000000000001` 的非必填“个人简历／补充材料”，格式为 `pdf`、`docx`。
+
+管理员接口均要求 `panshi_session` Cookie 和管理员角色；匿名请求返回 401，普通学员返回 403：
+
+- `GET /api/v1/admin/registration-form/draft`：读取草稿、`revision`、`baseVersion` 和 `publishedVersionId`。
+- `PUT /api/v1/admin/registration-form/draft`：请求 `{ "form": {...}, "expectedRevision": n }`；校验失败返回 422 `REGISTRATION_FORM_VALIDATION_FAILED`，字段位于 `error.details.fields`，revision 冲突返回 409 `REGISTRATION_FORM_CONFLICT`。
+- `GET /api/v1/admin/registration-form/preview`：读取当前草稿供后台预览。
+- `POST /api/v1/admin/registration-form/publish`：请求 `{ "expectedRevision": n }`，在事务中创建新不可变版本并更新草稿基线。
+- `GET /api/v1/admin/registration-form/history`：按版本号倒序读取原始表单快照。
+
+公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。Task 11 不提供答案保存/提交或文件上传 endpoint。
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 

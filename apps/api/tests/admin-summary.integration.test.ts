@@ -22,7 +22,7 @@ describe('administrator summary PostgreSQL aggregation', () => {
       { displayName: '管理员', phoneNormalized: '+8613900000001', passwordHash: 'x', role: 'admin' },
       { displayName: '学员', phoneNormalized: '+8613900000002', passwordHash: 'x', role: 'user' },
     ]).returning({ id: users.id })
-    const [form] = await database.db.insert(registrationFormVersions).values({ schema: {}, publishedAt: new Date() }).returning({ id: registrationFormVersions.id })
+    const [form] = await database.db.insert(registrationFormVersions).values({ schema: {}, version: 1, publishedAt: new Date() }).returning({ id: registrationFormVersions.id })
     await database.db.insert(applications).values({ userId: student!.id, formVersionId: form!.id, status: 'submitted' })
     await database.db.insert(contentModules).values({ key: 'basic', draft: { title: '未公开正文' }, draftRevision: 2 })
     await database.db.insert(contentModules).values({ key: 'importantDates', draft: {}, draftRevision: 0 })

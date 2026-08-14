@@ -45,6 +45,7 @@ const requiredTables = [
   'content_modules',
   'content_versions',
   'files',
+  'registration_form_drafts',
   'registration_form_versions',
   'resources',
   'sessions',
@@ -62,6 +63,7 @@ const expectedPrimaryKeys = [
   { tableName: 'content_modules', constraintName: 'content_modules_pkey', columns: ['key'] },
   { tableName: 'content_versions', constraintName: 'content_versions_pkey', columns: ['id'] },
   { tableName: 'files', constraintName: 'files_pkey', columns: ['id'] },
+  { tableName: 'registration_form_drafts', constraintName: 'registration_form_drafts_pkey', columns: ['id'] },
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_pkey', columns: ['id'] },
   { tableName: 'resources', constraintName: 'resources_pkey', columns: ['id'] },
   { tableName: 'sessions', constraintName: 'sessions_pkey', columns: ['id'] },
@@ -76,6 +78,7 @@ const expectedUniqueConstraints = [
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_version_unique', columns: ['module_key', 'version'] },
   { tableName: 'files', constraintName: 'files_storage_key_unique', columns: ['storage_key'] },
   { tableName: 'resources', constraintName: 'resources_key_unique', columns: ['key'] },
+  { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_version_unique', columns: ['version'] },
   { tableName: 'sessions', constraintName: 'sessions_token_hash_unique', columns: ['token_hash'] },
   { tableName: 'users', constraintName: 'users_phone_normalized_unique', columns: ['phone_normalized'] },
 ] as const
@@ -92,6 +95,9 @@ const expectedForeignKeys = [
   { tableName: 'content_modules', constraintName: 'content_modules_published_version_content_versions_fk', columns: ['key', 'published_version_id'], referencedTableName: 'content_versions', referencedColumns: ['module_key', 'id'], deleteAction: 'restrict' },
   { tableName: 'content_versions', constraintName: 'content_versions_created_by_users_id_fk', columns: ['created_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_content_modules_key_fk', columns: ['module_key'], referencedTableName: 'content_modules', referencedColumns: ['key'], deleteAction: 'restrict' },
+  { tableName: 'registration_form_drafts', constraintName: 'registration_form_drafts_base_version_fk', columns: ['base_version_id'], referencedTableName: 'registration_form_versions', referencedColumns: ['id'], deleteAction: 'restrict' },
+  { tableName: 'registration_form_drafts', constraintName: 'registration_form_drafts_updated_by_users_id_fk', columns: ['updated_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'set null' },
+  { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_created_by_users_id_fk', columns: ['created_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'resources', constraintName: 'resources_file_id_files_id_fk', columns: ['file_id'], referencedTableName: 'files', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'sessions', constraintName: 'sessions_user_id_users_id_fk', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'cascade' },
   { tableName: 'system_settings', constraintName: 'system_settings_updated_by_users_id_fk', columns: ['updated_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'set null' },
@@ -104,6 +110,8 @@ const expectedChecks = [
   { constraintName: 'content_modules_draft_revision_check', tokens: ['draft_revision', '>= 0'] },
   { constraintName: 'content_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'files_size_bytes_check', tokens: ['size_bytes', '>= 0'] },
+  { constraintName: 'registration_form_drafts_revision_check', tokens: ['revision', '>= 0'] },
+  { constraintName: 'registration_form_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'resources_access_level_check', tokens: ['access_level', 'public', 'authenticated', 'admitted'] },
   { constraintName: 'resources_sort_order_check', tokens: ['sort_order', '>= 0'] },
   { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
@@ -132,6 +140,7 @@ const createUser = async () => {
 const createFormVersion = async () => {
   const [formVersion] = await db.insert(registrationFormVersions).values({
     schema: { fields: [] },
+    version: 1,
     publishedAt: new Date(),
   }).returning({ id: registrationFormVersions.id })
 
@@ -325,6 +334,7 @@ describe('initial PostgreSQL schema', () => {
     expect(triggers.rows.map(({ trigger_name }) => trigger_name)).toEqual([
       'audit_logs_append_only',
       'content_versions_immutable',
+      'registration_form_versions_immutable',
     ])
   })
 
@@ -568,6 +578,7 @@ describe('initial PostgreSQL schema', () => {
       '0004_user_identity_invariants.sql',
       '0005_verification_code_purpose.sql',
       '0006_verification_delivery_state.sql',
+      '0007_registration_form_drafts.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

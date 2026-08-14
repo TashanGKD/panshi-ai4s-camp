@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { ProfileResponseSchema } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, ProfileResponseSchema } from '@panshi/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 import { AdminApiError, type AdminClient } from '../src/api/admin-client'
@@ -30,6 +30,11 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   publish: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, version: 1 } }),
   getHistory: async () => ({ apiVersion: 'v1', data: { key: 'basic', publishedVersion: null, versions: [] } }),
   rollback: async (_key, version) => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, version: 2, sourceVersion: version } }),
+  getRegistrationFormDraft: async () => ({ apiVersion: 'v1', data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+  saveRegistrationFormDraft: async (form) => ({ apiVersion: 'v1', data: { form, revision: 1, baseVersion: null, publishedVersionId: null } }),
+  previewRegistrationForm: async () => ({ apiVersion: 'v1', data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+  publishRegistrationForm: async () => ({ apiVersion: 'v1', data: { formVersionId: '00000000-0000-4000-8000-000000000020', revision: 0, version: 1 } }),
+  getRegistrationFormHistory: async () => ({ apiVersion: 'v1', data: { publishedVersion: null, versions: [] } }),
   ...overrides,
 })
 

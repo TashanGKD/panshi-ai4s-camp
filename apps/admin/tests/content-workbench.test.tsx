@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { JsonObject } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, type JsonObject } from '@panshi/contracts'
 import type { AdminClient } from '../src/api/admin-client'
 import { AdminApiError } from '../src/api/admin-client'
 import { AdminApp } from '../src/app/AdminApp'
@@ -40,6 +40,11 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   publish: async (key) => ({ apiVersion: 'v1', data: { key, revision: 1, version: 2 } }),
   getHistory: async (key) => ({ apiVersion: 'v1', data: { key, publishedVersion: 1, versions: [] } }),
   rollback: async (key, version) => ({ apiVersion: 'v1', data: { key, revision: 1, version: 2, sourceVersion: version } }),
+  getRegistrationFormDraft: async () => ({ apiVersion: 'v1', data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+  saveRegistrationFormDraft: async (form) => ({ apiVersion: 'v1', data: { form, revision: 1, baseVersion: null, publishedVersionId: null } }),
+  previewRegistrationForm: async () => ({ apiVersion: 'v1', data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+  publishRegistrationForm: async () => ({ apiVersion: 'v1', data: { formVersionId: '00000000-0000-4000-8000-000000000020', revision: 0, version: 1 } }),
+  getRegistrationFormHistory: async () => ({ apiVersion: 'v1', data: { publishedVersion: null, versions: [] } }),
   ...overrides,
 })
 
@@ -66,9 +71,11 @@ describe('content workbench', () => {
   it('provides the complete business navigation and a truthful resource placeholder', async () => {
     renderAdmin()
     expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
-    for (const name of ['基本信息', '实训特色', '组织单位', '重要日期', '实训日程与师资', '住宿交通', '联系方式', '相关资料', '展示设置']) {
+    for (const name of ['基本信息', '实训特色', '组织单位', '重要日期', '实训日程与师资', '住宿交通', '联系方式', '相关资料', '展示设置', '表单配置']) {
       expect(screen.getByRole('link', { name })).toBeVisible()
     }
+    fireEvent.click(screen.getByRole('link', { name: '表单配置' }))
+    expect(await screen.findByRole('heading', { name: '表单配置' })).toBeVisible()
     fireEvent.click(screen.getByRole('link', { name: '相关资料' }))
     expect(await screen.findByText('资料管理将在 Task 15 建设')).toBeVisible()
   })

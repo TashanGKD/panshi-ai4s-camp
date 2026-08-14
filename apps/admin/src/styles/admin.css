@@ -81,4 +81,15 @@ button:disabled { opacity: .65; cursor: wait; }
 .check-field { display: flex; align-items: center; gap: .55rem; }
 .check-field input { width: auto; }
 .empty-panel { max-width: 40rem; }
+.registration-form-tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, .7fr); gap: 1rem; margin-bottom: 1rem; }
+.registration-form-tools ul, .registration-editor-item ul { display: grid; gap: .5rem; padding: 0; list-style: none; }
+.registration-form-tools li { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-bottom: 1px solid #edf0f2; }
+.registration-editor { margin-top: 1rem; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.section-heading h2 { margin: 0; }
+.registration-editor-item { margin-top: 1rem; }
+.registration-editor-item textarea { min-height: 5rem; }
+.choice-options { display: grid; gap: .5rem; margin-top: 1rem; }
+.dirty-hint { align-self: center; color: #8a5d18; }
+@media (max-width: 900px) { .registration-form-tools { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .admin-layout { grid-template-columns: 1fr; } .admin-sidebar { position: static; } .dashboard-grid, .form-grid { grid-template-columns: 1fr; } .admin-main main { padding: 1rem; } }

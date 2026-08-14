@@ -114,12 +114,31 @@ export const ScheduleContentSchema = z.object({
   }).strict()),
 }).strict()
 
+const LegacyContactItemSchema = z.object({
+  label: NonEmptyTextSchema,
+  value: NonEmptyTextSchema,
+  href: ContactHrefSchema.optional(),
+}).strict()
+
+const PhoneValueSchema = NonEmptyTextSchema.superRefine((value, context) => {
+  const digits = value.replace(/\D/gu, '')
+  if (!/^\+?[0-9][0-9(). -]*$/u.test(value) || digits.length < 3) {
+    context.addIssue({ code: 'custom', message: 'must contain a valid telephone number' })
+  }
+})
+
+const StructuredContactItemSchema = z.object({
+  name: NonEmptyTextSchema,
+  responsibility: NonEmptyTextSchema,
+  methods: z.array(z.discriminatedUnion('type', [
+    z.object({ type: z.literal('phone'), value: PhoneValueSchema }).strict(),
+    z.object({ type: z.literal('email'), value: z.string().trim().email() }).strict(),
+  ])).min(1),
+  consultationNote: NonEmptyTextSchema.optional(),
+}).strict()
+
 export const ContactsContentSchema = z.object({
-  items: z.array(z.object({
-    label: NonEmptyTextSchema,
-    value: NonEmptyTextSchema,
-    href: ContactHrefSchema.optional(),
-  }).strict()),
+  items: z.array(z.union([LegacyContactItemSchema, StructuredContactItemSchema])),
 }).strict()
 
 export const TravelContentSchema = z.object({

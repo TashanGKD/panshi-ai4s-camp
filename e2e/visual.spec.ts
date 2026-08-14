@@ -24,6 +24,8 @@ const legacyReference = `<!doctype html><html><head><meta charset="utf-8"><style
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: '磐石·科学智能（AI for Science）实训营' })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
   await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}html{scroll-behavior:auto!important}' })
   await page.evaluate(() => document.fonts.ready)
 })
@@ -148,8 +150,8 @@ test('source-aligned common values are exact', async ({ page }) => {
       sectionFontSize: style('.content-section__title').fontSize,
       markerWidth: style('.content-section__title', '::before').width,
       markerRadius: style('.content-section__title', '::before').borderRadius,
-      cardBorder: style('.info-card--compact').border,
-      cardRadius: style('.info-card--compact').borderRadius,
+      cardBorder: style('.public-sidebar .info-card').border,
+      cardRadius: style('.public-sidebar .info-card').borderRadius,
       cardShadow: style('.public-sidebar .info-card').boxShadow,
       navLinkPadding: style('.event-navigation__link').padding,
       sectionPaddingTop: style('.content-section').paddingTop,

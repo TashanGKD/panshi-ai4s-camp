@@ -55,7 +55,11 @@ const schemaIssues = (key: ContentModuleKey, payload: JsonObject): FieldIssue[] 
 type ImportantDateItem = { value: string, machineKey?: 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd' }
 type ImportantDatesPayload = { items: ImportantDateItem[] }
 
-const validateImportantDates = (payload: ImportantDatesPayload, basic: JsonObject | null): FieldIssue[] => {
+const validateImportantDates = (
+  payload: ImportantDatesPayload,
+  basic: JsonObject | null,
+  options: { requireComplete?: boolean } = {},
+): FieldIssue[] => {
   const issues: FieldIssue[] = []
   const indexed = new Map<string, { item: ImportantDateItem, index: number }>()
 
@@ -71,6 +75,12 @@ const validateImportantDates = (payload: ImportantDatesPayload, basic: JsonObjec
     }
   })
 
+  for (const machineKey of ['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'] as const) {
+    if (options.requireComplete !== false && !indexed.has(machineKey)) {
+      issues.push({ path: `items.${machineKey}`, code: 'MACHINE_DATE_REQUIRED', message: '发布时必须提供完整的机器日期' })
+    }
+  }
+
   const registrationOpen = indexed.get('registrationOpen')
   const registrationDeadline = indexed.get('registrationDeadline')
   if (
@@ -82,6 +92,20 @@ const validateImportantDates = (payload: ImportantDatesPayload, basic: JsonObjec
       path: `items.${registrationDeadline.index}.value`,
       code: 'INVALID_REGISTRATION_WINDOW',
       message: '报名截止时间必须晚于报名开放时间',
+    })
+  }
+
+  const campStart = indexed.get('campStart')
+  const campEnd = indexed.get('campEnd')
+  if (
+    campStart && campEnd
+    && isRealDate(campStart.item.value) && isRealDate(campEnd.item.value)
+    && campStart.item.value > campEnd.item.value
+  ) {
+    issues.push({
+      path: `items.${campEnd.index}.value`,
+      code: 'INVALID_CAMP_WINDOW',
+      message: '实训结束日期不能早于开始日期',
     })
   }
 
@@ -105,7 +129,6 @@ type SchedulePayload = {
 
 const validateSchedule = (payload: SchedulePayload): FieldIssue[] => {
   const issues: FieldIssue[] = []
-  const registryDeclared = payload.speakers !== undefined
   const speakerIds = new Set<string>()
   payload.speakers?.forEach((speaker, index) => {
     if (speakerIds.has(speaker.id)) {
@@ -116,7 +139,7 @@ const validateSchedule = (payload: SchedulePayload): FieldIssue[] => {
 
   payload.days.forEach((day, dayIndex) => day.sessions.forEach((session, sessionIndex) => {
     const base = `days.${dayIndex}.sessions.${sessionIndex}`
-    if (session.time && !session.timeRange) {
+    if (!session.timeRange) {
       issues.push({ path: `${base}.timeRange`, code: 'TIME_RANGE_REQUIRED', message: '新发布日程必须提供机器可读时间范围' })
     }
     if (session.timeRange) {
@@ -129,8 +152,8 @@ const validateSchedule = (payload: SchedulePayload): FieldIssue[] => {
       }
     }
 
-    if (registryDeclared && session.instructors?.length && !session.speakerIds?.length) {
-      issues.push({ path: `${base}.speakerIds`, code: 'SPEAKER_REFERENCES_REQUIRED', message: '声明讲师库后必须使用讲师 ID 引用' })
+    if (session.instructors?.length) {
+      issues.push({ path: `${base}.instructors`, code: 'LEGACY_INSTRUCTORS_FORBIDDEN', message: '新发布日程不能使用旧讲师文本' })
     }
     const seen = new Set<string>()
     session.speakerIds?.forEach((speakerId, speakerIndex) => {
@@ -142,6 +165,46 @@ const validateSchedule = (payload: SchedulePayload): FieldIssue[] => {
       seen.add(speakerId)
     })
   }))
+  return issues
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+const safePhone = (value: string) => /^\+?[0-9][0-9(). -]*$/u.test(value) && value.replace(/\D/gu, '').length >= 3
+const safeEmail = (value: string) => zEmailPattern.test(value)
+const zEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u
+
+const validateContacts = (payload: JsonObject): FieldIssue[] => {
+  const issues: FieldIssue[] = []
+  const items = Array.isArray(payload.items) ? payload.items : []
+  if (items.length === 0) {
+    issues.push({ path: 'items', code: 'CONTACT_REQUIRED', message: '发布时至少需要一位结构化联系人' })
+    return issues
+  }
+  items.forEach((item, itemIndex) => {
+    const record = isRecord(item) ? item : {}
+    if (!nonEmpty(record.name)) issues.push({ path: `items.${itemIndex}.name`, code: 'CONTACT_NAME_REQUIRED', message: '联系人姓名不能为空' })
+    if (!nonEmpty(record.responsibility)) issues.push({ path: `items.${itemIndex}.responsibility`, code: 'CONTACT_RESPONSIBILITY_REQUIRED', message: '联系人职责不能为空' })
+    const methods = Array.isArray(record.methods) ? record.methods : []
+    if (methods.length === 0) {
+      issues.push({ path: `items.${itemIndex}.methods`, code: 'CONTACT_METHOD_REQUIRED', message: '至少提供一个电话或邮箱' })
+    }
+    methods.forEach((method, methodIndex) => {
+      const methodRecord = isRecord(method) ? method : {}
+      const type = methodRecord.type
+      const value = methodRecord.value
+      if (type !== 'phone' && type !== 'email') {
+        issues.push({ path: `items.${itemIndex}.methods.${methodIndex}.type`, code: 'INVALID_CONTACT_METHOD_TYPE', message: '联系方式类型必须是电话或邮箱' })
+      } else if (!nonEmpty(value) || (type === 'phone' ? !safePhone(value) : !safeEmail(value))) {
+        issues.push({ path: `items.${itemIndex}.methods.${methodIndex}.value`, code: 'INVALID_CONTACT_METHOD', message: '联系方式格式不安全或不完整' })
+      }
+    })
+    if (record.consultationNote !== undefined && !nonEmpty(record.consultationNote)) {
+      issues.push({ path: `items.${itemIndex}.consultationNote`, code: 'INVALID_CONSULTATION_NOTE', message: '咨询说明不能为空' })
+    }
+  })
   return issues
 }
 
@@ -160,10 +223,15 @@ export const validateContentForPublication = async (
     const related = await repository.findPublishedPayload('importantDates')
     if (related) {
       const parsedRelated = PublicContentPayloadSchemas.importantDates.safeParse(related)
-      if (parsedRelated.success) issues.push(...validateImportantDates(parsedRelated.data as ImportantDatesPayload, parsed.data as JsonObject))
+      if (parsedRelated.success) issues.push(...validateImportantDates(
+        parsedRelated.data as ImportantDatesPayload,
+        parsed.data as JsonObject,
+        { requireComplete: false },
+      ))
     }
   }
   if (parsed.success && key === 'schedule') issues.push(...validateSchedule(parsed.data as SchedulePayload))
+  if (key === 'contacts') issues.push(...validateContacts(payload))
 
   for (const resource of await repository.findPublicResourcesMissingFiles()) {
     issues.push({

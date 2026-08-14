@@ -23,6 +23,14 @@ const oldBasic = {
   intro: ['第一版敏感正文'],
 }
 const newBasic = { ...oldBasic, title: '第二版标题', intro: ['第二版敏感正文'] }
+const publishableImportantDates = {
+  items: [
+    { label: '开放', value: '2026-07-01', machineKey: 'registrationOpen' },
+    { label: '截止', value: '2026-07-31', machineKey: 'registrationDeadline' },
+    { label: '开始', value: '2026-08-23', machineKey: 'campStart' },
+    { label: '结束', value: '2026-08-27', machineKey: 'campEnd' },
+  ],
+}
 let adminA: string
 let adminB: string
 
@@ -82,6 +90,18 @@ describe('content publishing PostgreSQL transactions', () => {
     expect(afterVersions).toEqual(beforeVersions)
   })
 
+  it('allows incomplete important-date drafts but rejects publishing them with field details', async () => {
+    const saved = await service.saveDraft('importantDates', { items: [] }, 0, adminA)
+    expect(saved.data.payload).toEqual({ items: [] })
+    await expect(service.publish('importantDates', 1, adminA)).rejects.toMatchObject({
+      details: { fields: expect.arrayContaining([
+        expect.objectContaining({ path: 'items.registrationOpen', code: 'MACHINE_DATE_REQUIRED' }),
+        expect.objectContaining({ path: 'items.campEnd', code: 'MACHINE_DATE_REQUIRED' }),
+      ]) },
+    })
+    expect((await service.getHistory('importantDates')).data.versions).toHaveLength(0)
+  })
+
   it('serializes concurrent publishes and allocates unique increasing versions', async () => {
     await service.saveDraft('basic', oldBasic, 0, adminA)
     const results = await Promise.all([
@@ -115,6 +135,21 @@ describe('content publishing PostgreSQL transactions', () => {
       'delete from content_versions where module_key = $1 and version = $2',
       ['basic', 1],
     )).rejects.toThrow(/immutable/u)
+  })
+
+  it('validates rollback payload and preserves pointer/history when a legacy version is no longer publishable', async () => {
+    const [legacy] = await database.db.insert(contentVersions).values({
+      moduleKey: 'importantDates', version: 1, payload: { items: [] }, createdBy: adminA,
+    }).returning({ id: contentVersions.id })
+    await database.db.update(contentModules).set({ publishedVersionId: legacy!.id }).where(eq(contentModules.key, 'importantDates'))
+    await service.saveDraft('importantDates', publishableImportantDates, 0, adminA)
+    await service.publish('importantDates', 1, adminA)
+
+    const before = await service.getHistory('importantDates')
+    await expect(service.rollback('importantDates', 1, adminB)).rejects.toBeInstanceOf(ContentValidationError)
+    const after = await service.getHistory('importantDates')
+    expect(after.data.publishedVersion).toBe(2)
+    expect(after.data.versions).toEqual(before.data.versions)
   })
 
   it('audits save, publish and rollback with redacted structural summaries', async () => {

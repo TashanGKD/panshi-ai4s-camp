@@ -39,37 +39,70 @@ const fields = async (key: ContentModuleKey, payload: JsonObject, validationRepo
 }
 
 describe('content publication validation', () => {
-  it('does not infer registration relations from arbitrary Chinese labels', async () => {
-    await expect(validateContentForPublication('importantDates', {
+  const completeImportantDates = {
+    items: [
+      { label: '开放', value: '2026-07-01', machineKey: 'registrationOpen' },
+      { label: '截止', value: '2026-07-31', machineKey: 'registrationDeadline' },
+      { label: '开始', value: '2026-08-23', machineKey: 'campStart' },
+      { label: '结束', value: '2026-08-27', machineKey: 'campEnd' },
+    ],
+  } as const
+
+  it('requires all four machine dates without inferring arbitrary Chinese labels', async () => {
+    const issues = await fields('importantDates', {
       items: [
         { label: '报名开始', value: '任意说明' },
         { label: '报名截止', value: '仍是显示文本' },
       ],
-    }, repository())).resolves.toBeUndefined()
+    })
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'items.registrationOpen', code: 'MACHINE_DATE_REQUIRED' }),
+      expect.objectContaining({ path: 'items.registrationDeadline', code: 'MACHINE_DATE_REQUIRED' }),
+      expect.objectContaining({ path: 'items.campStart', code: 'MACHINE_DATE_REQUIRED' }),
+      expect.objectContaining({ path: 'items.campEnd', code: 'MACHINE_DATE_REQUIRED' }),
+    ]))
   })
 
   it('requires machine registration dates to be real and strictly ordered', async () => {
-    const malformed = await fields('importantDates', {
-      items: [{ label: '报名开放', value: '八月一日', machineKey: 'registrationOpen' }],
-    })
+    const malformed = await fields('importantDates', { items: completeImportantDates.items.map((item) => (
+      item.machineKey === 'registrationOpen' ? { ...item, value: '八月一日' } : item
+    )) })
     const reversed = await fields('importantDates', {
-      items: [
-        { label: '报名开放', value: '2026-08-20', machineKey: 'registrationOpen' },
-        { label: '报名截止', value: '2026-08-20', machineKey: 'registrationDeadline' },
-      ],
+      items: completeImportantDates.items.map((item) => (
+        item.machineKey === 'registrationDeadline' ? { ...item, value: '2026-07-01' } : item
+      )),
     })
 
     expect(malformed).toContainEqual(expect.objectContaining({ path: 'items.0.value', code: 'INVALID_MACHINE_DATE' }))
     expect(reversed).toContainEqual(expect.objectContaining({ path: 'items.1.value', code: 'INVALID_REGISTRATION_WINDOW' }))
   })
 
-  it('validates machine camp dates against published basic dates only when present', async () => {
+  it('requires ordered camp dates and aligns them with published basic dates when available', async () => {
     const issues = await fields('importantDates', {
-      items: [{ label: '实训开始', value: '2026-08-22', machineKey: 'campStart' }],
+      items: completeImportantDates.items.map((item) => (
+        item.machineKey === 'campStart' ? { ...item, value: '2026-08-22' }
+          : item.machineKey === 'campEnd' ? { ...item, value: '2026-08-21' } : item
+      )),
     }, repository({ basic }))
-    expect(issues).toContainEqual(expect.objectContaining({ path: 'items.0.value', code: 'CAMP_DATE_MISMATCH' }))
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'INVALID_CAMP_WINDOW' }),
+      expect.objectContaining({ code: 'CAMP_DATE_MISMATCH' }),
+    ]))
 
-    await expect(validateContentForPublication('importantDates', { items: [] }, repository({ basic }))).resolves.toBeUndefined()
+    await expect(validateContentForPublication('importantDates', completeImportantDates, repository({ basic }))).resolves.toBeUndefined()
+  })
+
+  it('does not let legacy important dates block unrelated basic publication but checks typed camp dates', async () => {
+    await expect(validateContentForPublication('basic', basic, repository({
+      importantDates: { items: [{ label: '历史实训时间', value: '显示文本' }] },
+    }))).resolves.toBeUndefined()
+    await expect(validateContentForPublication('basic', basic, repository({
+      importantDates: { items: completeImportantDates.items.map((item) => (
+        item.machineKey === 'campStart' ? { ...item, value: '2026-08-22' } : item
+      )) },
+    }))).rejects.toMatchObject({ details: { fields: expect.arrayContaining([
+      expect.objectContaining({ code: 'CAMP_DATE_MISMATCH' }),
+    ]) } })
   })
 
   it.each([
@@ -96,6 +129,18 @@ describe('content publication validation', () => {
     expect(issues).toContainEqual(expect.objectContaining({ path: 'days.0.sessions.0.timeRange', code: 'TIME_RANGE_REQUIRED' }))
   })
 
+  it('requires a machine time range for every actual session even without legacy display time', async () => {
+    const issues = await fields('schedule', {
+      days: [{ date: '2026-08-23', label: '第一天', theme: '主题', sessions: [{ title: '课程' }] }],
+    })
+    expect(issues).toContainEqual(expect.objectContaining({
+      path: 'days.0.sessions.0.timeRange', code: 'TIME_RANGE_REQUIRED',
+    }))
+    await expect(validateContentForPublication('schedule', {
+      days: [{ date: '2026-08-23', label: '第一天', theme: '主题', sessions: [] }],
+    }, repository())).resolves.toBeUndefined()
+  })
+
   it('rejects duplicate speaker IDs, dangling references, and duplicate session references', async () => {
     const issues = await fields('schedule', {
       speakers: [{ id: 'speaker-a', name: '甲' }, { id: 'speaker-a', name: '乙' }],
@@ -111,25 +156,37 @@ describe('content publication validation', () => {
     ]))
   })
 
-  it('requires speaker references instead of display-only instructors when a registry is declared', async () => {
+  it('forbids legacy instructor strings in every new schedule publication', async () => {
     const issues = await fields('schedule', {
-      speakers: [{ id: 'speaker-a', name: '甲' }],
       days: [{
         date: '2026-08-23', label: '第一天', theme: '主题',
-        sessions: [{ title: '课程', instructors: ['甲'] }],
+        sessions: [{ title: '课程', timeRange: { start: '09:00', end: '10:00' }, instructors: ['甲'] }],
       }],
     })
     expect(issues).toContainEqual(expect.objectContaining({
-      path: 'days.0.sessions.0.speakerIds', code: 'SPEAKER_REFERENCES_REQUIRED',
+      path: 'days.0.sessions.0.instructors', code: 'LEGACY_INSTRUCTORS_FORBIDDEN',
     }))
   })
 
-  it('returns field paths for incomplete and unsafe contacts without exposing Zod internals', async () => {
-    const incomplete = await fields('contacts', { items: [{ label: '', value: '张老师' }] })
-    const unsafe = await fields('contacts', { items: [{ label: '联系', value: '张老师', href: 'javascript:alert(1)' }] })
-    expect(incomplete).toContainEqual(expect.objectContaining({ path: 'items.0.label' }))
-    expect(unsafe).toContainEqual(expect.objectContaining({ path: 'items.0.href' }))
-    expect(JSON.stringify([...incomplete, ...unsafe])).not.toContain('ZodError')
+  it('requires at least one complete structured contact with a safe phone or email', async () => {
+    const empty = await fields('contacts', { items: [] })
+    const legacy = await fields('contacts', { items: [{ label: '联系', value: '历史展示值', href: 'mailto:legacy@example.com' }] })
+    const unsafe = await fields('contacts', { items: [{
+      name: '测试联系人', responsibility: '课程咨询', methods: [{ type: 'phone', value: 'call-me' }],
+    }] })
+    expect(empty).toContainEqual(expect.objectContaining({ path: 'items', code: 'CONTACT_REQUIRED' }))
+    expect(legacy).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'items.0.name' }),
+      expect.objectContaining({ path: 'items.0.responsibility' }),
+      expect.objectContaining({ path: 'items.0.methods' }),
+    ]))
+    expect(unsafe).toContainEqual(expect.objectContaining({ path: 'items.0.methods.0.value', code: 'INVALID_CONTACT_METHOD' }))
+    expect(JSON.stringify([...empty, ...legacy, ...unsafe])).not.toContain('ZodError')
+
+    await expect(validateContentForPublication('contacts', { items: [{
+      name: '测试联系人', responsibility: '课程咨询', methods: [{ type: 'email', value: 'test@example.com' }],
+      consultationNote: '测试说明',
+    }] }, repository())).resolves.toBeUndefined()
   })
 
   it('checks real public resource records through the injected repository', async () => {
@@ -172,14 +229,17 @@ const authenticatedApp = (service: ContentPublishingService = publishingService(
 }
 
 describe('administrator content routes', () => {
-  it('returns 401 for missing sessions and 403 for authenticated non-admins', async () => {
+  it('returns 403 for preview without an admin session and for authenticated non-admins while profile stays 401', async () => {
     const app = authenticatedApp()
     const missing = await request(app).get('/api/v1/admin/content/basic/preview')
     const student = await request(app).get('/api/v1/admin/content/basic/preview').set('Cookie', `panshi_session=${studentToken}`)
-    expect(missing.status).toBe(401)
-    expect(missing.body.error.code).toBe('UNAUTHORIZED')
+    const profile = await request(app).get('/api/v1/me/profile')
+    expect(missing.status).toBe(403)
+    expect(missing.body.error.code).toBe('FORBIDDEN')
     expect(student.status).toBe(403)
     expect(student.body.error.code).toBe('FORBIDDEN')
+    expect(profile.status).toBe(401)
+    expect(profile.body.error.code).toBe('UNAUTHORIZED')
     expect(JSON.stringify(missing.body)).not.toContain('正式简介')
   })
 

@@ -22,8 +22,11 @@ test.afterAll(() => runFixture('cleanup'))
 
 test('authenticated draft save -> preview -> publish -> rollback/audit and unauthorized preview', async ({ browser, page }) => {
   const anonymous = await browser.newPage()
+  const anonymousApi = await anonymous.request.get('http://127.0.0.1:3001/api/v1/admin/content/basic/preview')
+  expect(anonymousApi.status()).toBe(403)
+  expect((await anonymousApi.json()).error.code).toBe('FORBIDDEN')
   await anonymous.goto('http://127.0.0.1:4173/preview/basic')
-  await expect(anonymous.getByRole('alert')).toContainText('请先登录管理后台')
+  await expect(anonymous.getByRole('alert')).toContainText('无权预览该草稿')
   await expect(anonymous.getByText('E2E 草稿标题')).toHaveCount(0)
   await anonymous.close()
 

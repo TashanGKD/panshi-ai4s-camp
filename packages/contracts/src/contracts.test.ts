@@ -106,6 +106,23 @@ describe('contracts', () => {
     }
   })
 
+  it('keeps legacy contacts readable and accepts structured publishable contacts', () => {
+    expect(PublicContentPayloadSchemas.contacts.safeParse({
+      items: [{ label: '联系方式', value: '历史展示值', href: 'mailto:legacy@example.com' }],
+    }).success).toBe(true)
+    expect(PublicContentPayloadSchemas.contacts.safeParse({
+      items: [{
+        name: '测试联系人',
+        responsibility: '课程咨询',
+        methods: [
+          { type: 'phone', value: '+8613800138000' },
+          { type: 'email', value: 'test@example.com' },
+        ],
+        consultationNote: '仅用于测试',
+      }],
+    }).success).toBe(true)
+  })
+
   it.each([
     'javascript:alert(1)',
     'data:text/html,<script>alert(1)</script>',

@@ -31,10 +31,10 @@
 
 - `GET /api/v1/admin/content/:key/draft`：读取草稿 payload、当前 `revision` 和已发布版本号。
 - `PUT /api/v1/admin/content/:key/draft`：请求 `{ "expectedRevision": n, "payload": {} }`。数据库使用单条 `UPDATE ... WHERE draft_revision = expectedRevision RETURNING` 完成 compare-and-swap；过期 revision 返回 409 `CONTENT_CONFLICT`。
-- `GET /api/v1/admin/content/:key/preview`：为公共 Web `/preview/:module` 返回受保护草稿。该 GET 只接受管理员 Cookie，不签发公开 token，不生成可转发预览链接。
+- `GET /api/v1/admin/content/:key/preview`：为公共 Web `/preview/:module` 返回受保护草稿。该 GET 只接受管理员 Cookie；无会话、无效会话和非管理员均返回 403 `FORBIDDEN`，不签发公开 token，不生成可转发预览链接。该特殊边界不改变 `GET /api/v1/me/profile` 无会话时的 401 `UNAUTHORIZED` 语义。
 - `POST /api/v1/admin/content/:key/publish`：请求 `{ "expectedRevision": n }`。事务按模块行加锁，在事务内校验草稿、分配递增版本、插入不可变版本、更新发布指针并写审计。
 - `GET /api/v1/admin/content/:key/versions`：按版本号倒序返回不可变历史 payload、创建人和时间。
-- `POST /api/v1/admin/content/:key/rollback`：请求 `{ "version": n }`；复制历史 payload 创建一个新版本并移动指针，不修改历史行。
+- `POST /api/v1/admin/content/:key/rollback`：请求 `{ "version": n }`；在模块锁定事务内重新执行当前发布校验，通过后复制历史 payload 创建一个新版本并移动指针，不修改历史行。历史版本若只满足旧版读取契约但不满足当前发布规则，回退会以 422 拒绝且 pointer/history 不变。
 
 管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
 
@@ -44,12 +44,12 @@ Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由�
 
 发布校验返回 422 `CONTENT_VALIDATION_FAILED`，`error.details.fields` 为稳定的 `{ path, code, message }[]`，不直接返回 Zod issue、stack 或无清洗的输入。关联规则如下：
 
-- `importantDates.items[].machineKey` 可选值为 `registrationOpen`、`registrationDeadline`、`campStart`、`campEnd`。只有机器键参与关联校验，不从中文 label 猜测；两项报名边界同时存在时必须为真实日期且开放日严格早于截止日，机器实训日期必须与已发布 `basic.dates` 一致。
-- `schedule.days[].sessions[].timeRange` 使用 `{ start: "HH:mm", end: "HH:mm" }` 且 start 严格早于 end。公共读取仍兼容历史 `time` 显示字符串；新发布若携带该历史显示字段则必须同时提供机器范围。
-- `schedule.speakers` 使用稳定 `id`，session 使用 `speakerIds`；讲师 ID、单节引用不得重复，每个引用必须存在。历史 `instructors` 字符串只保留公共显示兼容；声明 speaker registry 后的新发布必须使用引用。
-- 联系项继续校验非空 `label`/`value` 以及仅允许安全的 `https:`、`mailto:`、`tel:` href，并返回具体字段路径。
+- `importantDates.items[].machineKey` 可选值为 `registrationOpen`、`registrationDeadline`、`campStart`、`campEnd`。旧版无机器键 payload 仍可公开读取，草稿也可不完整保存；但发布或回退必须四键各恰好一项，不从中文 label 猜测。日期必须真实，报名开放日严格早于截止日，实训开始日不得晚于结束日，且实训日期在已发布 `basic.dates` 可用时必须一致。缺项、重复和关系错误均返回具体字段路径。
+- `schedule.days[].sessions[].timeRange` 使用 `{ start: "HH:mm", end: "HH:mm" }` 且 start 严格早于 end。空 `sessions` 合法；每个实际 session 都必须提供机器范围。公共读取仍兼容历史 `time` 显示字符串，但它不能替代新发布所需的 `timeRange`。
+- `schedule.speakers` 使用稳定 `id`，session 使用 `speakerIds`；讲师 ID、单节引用不得重复，每个非空引用必须存在。无讲师课程可省略或使用空 `speakerIds`。历史非空 `instructors` 字符串只保留公共显示兼容，任何新发布或回退都拒绝该字段中的非空值。
+- `contacts` 公开读取继续兼容历史 `{ label, value, href? }` 项和空列表；新发布或回退则至少需要一项 `{ name, responsibility, methods, consultationNote? }`。`methods` 至少含一个安全的 `{ type: "phone" | "email", value }`，所有联系人都必须完整结构化，错误返回 `items.n...` 字段路径。初始 seed 仍为空，不虚构联系人。
 - 发布通过注入的 validation repository 查询真实 `resources` 表；存在 `access_level='public'` 且 `file_id is null` 的记录时拒绝发布。Task 8 不新增资源 API 或 UI，它们仍由 Task 15 负责。
-- 可选关联域完全缺失时不阻塞无关模块；一旦相应机器字段或数据库记录存在，就执行完整校验。
+- legacy 关联域缺失不会阻塞其他模块发布；例如旧版无机器键的重要日期不会阻塞 `basic`。但发布 `importantDates`、`schedule` 或 `contacts` 自身时必须满足上述当前规则，一旦相关机器字段或资源记录存在则完整校验。
 
 ## API 运行基线
 

@@ -26,7 +26,7 @@ const handleContentError = (error: unknown): never => {
 
 export const createAdminContentRouter = (sessions: SessionService, service: ContentPublishingService) => {
   const router = Router()
-  router.use(createRequireUser(sessions), requireAdmin)
+  router.use(createRequireUser(sessions, { unauthenticatedStatus: 403 }), requireAdmin)
   router.param('key', (request, _response, next, key) => {
     const parsed = ContentModuleKeySchema.safeParse(key)
     if (!parsed.success) return next(new HttpError(404, 'CONTENT_NOT_FOUND', '内容不存在'))

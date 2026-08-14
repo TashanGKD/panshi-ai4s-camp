@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { SkipLink } from './SkipLink'
 import { navigationItems } from '../pages/HomePage'
 import { ImportantDatesContent } from '../renderers/ContentModuleRenderer'
+import { ContactList } from '../pages/ContactPage'
 
 export function PublicShell({ children, site, sidebar = false }: {
   children: ReactNode
@@ -29,7 +30,7 @@ export function PublicShell({ children, site, sidebar = false }: {
           <ImportantDatesContent importantDates={site.importantDates} />
         </InfoCard> : null}
         {site.contacts.items.length > 0 ? <InfoCard title="联系我们">
-          <dl className="contact-list">{site.contacts.items.map((item) => <div key={`${item.label}:${item.value}`}><dt>{item.label}</dt><dd>{item.href ? <a href={item.href}>{item.value}</a> : item.value}</dd></div>)}</dl>
+          <ContactList contacts={site.contacts} />
         </InfoCard> : null}
       </aside>
     </div> : <div className="event-container public-page">{content}</div>}

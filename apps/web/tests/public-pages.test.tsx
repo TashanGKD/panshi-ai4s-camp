@@ -127,6 +127,28 @@ describe('API-driven public pages', () => {
     expect(screen.queryByText(/138\d{8}|@|报名截止.*2026/u)).not.toBeInTheDocument()
   })
 
+  it('renders structured contact names, responsibilities, methods, and consultation notes', async () => {
+    installFetch({ site: {
+      ...siteResponse,
+      data: {
+        ...siteResponse.data,
+        contacts: { items: [{
+          name: '测试联系人', responsibility: '课程咨询',
+          methods: [{ type: 'phone', value: '+8613800138000' }, { type: 'email', value: 'test@example.com' }],
+          consultationNote: '工作日回复',
+        }] },
+      },
+    } })
+
+    renderRoute('/contact')
+
+    expect(await screen.findByText('测试联系人')).toBeVisible()
+    expect(screen.getByText('课程咨询')).toBeVisible()
+    expect(screen.getByRole('link', { name: '+8613800138000' })).toHaveAttribute('href', 'tel:+8613800138000')
+    expect(screen.getByRole('link', { name: 'test@example.com' })).toHaveAttribute('href', 'mailto:test@example.com')
+    expect(screen.getByText('工作日回复')).toBeVisible()
+  })
+
   it('does not render ResourcesPage until the shared site request succeeds', async () => {
     let resolveSite: ((response: Response) => void) | undefined
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise((resolve) => {

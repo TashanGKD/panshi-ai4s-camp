@@ -42,7 +42,7 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 最小后台当前只挂载 `basic` 的通用 JSON `ContentEditor` 和 `VersionHistory`，用于验证 Task 8 的完整能力；按业务对象组织的导航、表单和完整工作台属于 Task 9。保存必须提交加载时的 `expectedRevision`，冲突返回 `CONTENT_CONFLICT`。公共 Web 的 `/preview/:module` 使用管理员 HttpOnly Cookie 读取受保护草稿，并通过与正式页面相同的模块渲染组件和 `PublicShell` 展示；未登录或无权限时只显示登录／禁止状态。
 
-发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退复制历史 payload 产生新版本。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
+发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退会先按当前规则重新校验历史 payload，再复制为新版本。旧版 importantDates、schedule 和 contacts 仍可公开读取，草稿允许不完整保存，但新发布/回退必须满足完整机器日期、课程时间与 speaker 引用、结构化联系人规则。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
 
 ## PostgreSQL 与迁移
 
@@ -170,15 +170,23 @@ E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
 
 根目录 workspace 检查、typecheck、lint、build、`git diff --check` 均通过；`npm audit --omit=dev` 为 0 个漏洞。完整 `npm audit` 仍报告 `drizzle-kit` 开发依赖链旧版 esbuild 的 4 个 moderate 漏洞，自动修复会强制降级到 breaking 版本，未执行 `npm audit fix --force`。无环境变量运行 E2E fixture 会按安全门禁非零退出。
 
-既有 `visual:test` 已实际运行但未通过：原配置没有 API server，当前公共页落入错误壳，结果为 15/24 通过；诊断性注入当前正式 seed 后为 18/24 通过，并确认剩余失败来自 Task 6 之后未更新的 public-home 图片高度和仍查询 `.info-card--compact` 的旧 selector。Task 8 没有改写视觉基线或这组旧断言。Docker Compose 本次未运行；数据库、API、Web、admin 的 Task 8 流由本机 PostgreSQL 和 Playwright 进程完成。
+Task 8 规格复核修订后，标准视觉配置只接受显式 `VISUAL_E2E=1` 和精确本机测试库 URL。它先迁移专用测试库，以初始公开内容 seed 建立确定性 API fixture，待 API 健康后再启动 Web，并在全局 teardown 及 API 进程退出 trap 中安全清理。视觉用例会先断言真实活动标题且无错误壳，再执行截图和样式检查；`.public-sidebar .info-card` 使用当前生产 selector。三张 `public-home` macOS 基线只在检查 API 驱动 actual 后更新，截图阈值仍为零差异，同轮 source/migrated RGBA 比较仍要求零通道差异。
+
+本次规格复核的分层结果为：contracts 78 项；API 无数据库单元 121 项通过、3 项 PostgreSQL 用例按设计跳过；精确测试库的发布事务集成 8 项；admin 38 项；Web 46 项；发布 Playwright E2E 1 项；三平台视觉回归 24/24。workspace 结构、typecheck、lint、build、`npm audit --omit=dev` 与 `git diff --check` 纳入最终门禁。完整 `npm audit` 仍是既有 `drizzle-kit` 开发依赖链的 4 个 moderate 漏洞，自动修复需要 breaking 版本变更，未强制修改。两套浏览器 fixture 结束后均确认专用库已清空；未运行 Docker Compose。
 
 公开站点的 Playwright 视觉测试使用本机已安装的 Chromium，并按操作系统保存快照：
 
 ```bash
-npm run visual:test
-npm run visual:update
+VISUAL_E2E=1 \
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+  npm run visual:test
+
+# 只在人工检查稳定 actual 后使用；不得用于掩盖失败。
+VISUAL_E2E=1 \
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+  npm run visual:update
 ```
 
-`visual:test` 只比较当前平台已有的基线，不会改写图片；`visual:update` 才生成或更新当前平台基线。快照文件名包含 Playwright 的 `{platform}` 值（例如 `darwin` 或 `linux`），因此 macOS 与 Linux CI 各自维护对应基线。首次在新平台运行时，应在固定 Node、Playwright/Chromium、字体和视口环境中执行 `visual:update`，人工检查生成图片后再提交。测试中的 source-vs-migrated 直接 PNG 对比始终要求零个 RGBA 通道差异，但该比较只在同一次运行、同一渲染环境内成立，不跨操作系统复用像素结果。
+`visual:test` 只比较当前平台已有的基线，不会改写图片；`visual:update` 才生成或更新当前平台基线。两个命令都会拒绝缺少显式开关或不精确的测试数据库，并在结束时清空 fixture 数据，不得指向开发或生产数据库。快照文件名包含 Playwright 的 `{platform}` 值（例如 `darwin` 或 `linux`），因此 macOS 与 Linux CI 各自维护对应基线。首次在新平台运行时，应在固定 Node、Playwright/Chromium、字体和视口环境中执行 `visual:update`，人工检查生成图片后再提交。测试中的 source-vs-migrated 直接 PNG 对比始终要求零个 RGBA 通道差异，但该比较只在同一次运行、同一渲染环境内成立，不跨操作系统复用像素结果。
 
 环境变量从 `.env.example` 复制后按本机环境填写；示例文件不保存真实凭据。

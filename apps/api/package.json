@@ -9,6 +9,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:content": "tsx src/db/seeds/initial-content.ts",
     "e2e:publishing-fixture": "tsx src/cli/content-publishing-e2e-fixture.ts",
+    "e2e:visual-fixture": "tsx src/cli/visual-e2e-fixture.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
     "test": "vitest run --passWithNoTests",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",

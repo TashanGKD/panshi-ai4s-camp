@@ -195,6 +195,7 @@ export const createContentPublishingRepository = (
         eq(contentVersions.moduleKey, key), eq(contentVersions.version, sourceVersion),
       )).limit(1)
       if (!source) return null
+      await validateContentForPublication(key, source.payload, validationRepository(executor))
       const version = await nextVersion(executor, key)
       const [created] = await transaction.insert(contentVersions).values({
         moduleKey: key,

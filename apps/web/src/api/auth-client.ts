@@ -1,7 +1,9 @@
 import {
   ApiErrorSchema,
   LoginResponseSchema,
+  RegistrationResponseSchema,
   type LoginResponse,
+  type RegistrationResponse,
   type VerificationPurpose,
 } from '@panshi/contracts'
 import { resolveApiBaseUrl } from './public-client'
@@ -33,7 +35,7 @@ export const createAuthClient = (apiBaseUrl?: string, runtime: { production: boo
   }
   return {
     sendVerificationCode: (phone: string, purpose: VerificationPurpose) => request('/api/v1/auth/verification/send', { phone, purpose }),
-    register: async (phone: string, code: string, password: string): Promise<LoginResponse> => LoginResponseSchema.parse(
+    register: async (phone: string, code: string, password: string): Promise<RegistrationResponse> => RegistrationResponseSchema.parse(
       await request('/api/v1/auth/register', { phone, code, password }),
     ),
     login: async (phone: string, password: string): Promise<LoginResponse> => LoginResponseSchema.parse(

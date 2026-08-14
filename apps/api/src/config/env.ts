@@ -51,7 +51,7 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(604_800).default(28_800),
   VERIFICATION_PROVIDER: z.enum(['disabled', 'mock']).default('disabled'),
-  VERIFICATION_SECRET: z.string().optional(),
+  VERIFICATION_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(1_800).default(300),
   VERIFICATION_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
@@ -60,8 +60,8 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   if (env.NODE_ENV === 'production' && env.VERIFICATION_PROVIDER === 'mock') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_PROVIDER'], message: 'mock provider is forbidden in production' })
   }
-  if (env.VERIFICATION_PROVIDER === 'mock' && Buffer.byteLength(env.VERIFICATION_SECRET ?? '', 'utf8') < 32) {
-    context.addIssue({ code: 'custom', path: ['VERIFICATION_SECRET'], message: 'verification secret must be at least 32 UTF-8 bytes' })
+  if (env.VERIFICATION_PROVIDER === 'mock' && env.VERIFICATION_SECRET === undefined) {
+    context.addIssue({ code: 'custom', path: ['VERIFICATION_SECRET'], message: 'verification secret must be 64 hexadecimal characters' })
   }
   if (env.VERIFICATION_MOCK_CODE !== undefined && env.NODE_ENV !== 'test') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_MOCK_CODE'], message: 'fixed mock codes are test-only' })

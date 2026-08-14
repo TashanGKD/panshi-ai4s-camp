@@ -76,6 +76,13 @@ export const LoginResponseSchema = z.object({
   }),
 })
 
+export const RegistrationResponseSchema = z.object({
+  apiVersion: z.literal('v1'),
+  data: z.object({
+    user: AuthenticatedUserSchema,
+  }),
+})
+
 export const ProfileResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
@@ -92,7 +99,9 @@ export type SendVerificationCodeRequest = z.infer<typeof SendVerificationCodeReq
 export type StudentRegistrationRequest = z.infer<typeof StudentRegistrationRequestSchema>
 export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
+export type RegistrationResponse = z.infer<typeof RegistrationResponseSchema>
 export type ProfileResponse = z.infer<typeof ProfileResponseSchema>
 
 export const serializeLoginResponse = (input: unknown): LoginResponse => LoginResponseSchema.parse(input)
+export const serializeRegistrationResponse = (input: unknown): RegistrationResponse => RegistrationResponseSchema.parse(input)
 export const serializeProfileResponse = (input: unknown): ProfileResponse => ProfileResponseSchema.parse(input)

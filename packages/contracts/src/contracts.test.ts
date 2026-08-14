@@ -12,6 +12,7 @@ import {
   ContentModuleKeySchema,
   LoginResponseSchema,
   ProfileResponseSchema,
+  RegistrationResponseSchema,
   PaginationMetaSchema,
   PublicContentPayloadSchemas,
   PublicContentModuleResponseSchema,
@@ -21,6 +22,7 @@ import {
   ResourceAccessSchema,
   UserRoleSchema,
   serializeLoginResponse,
+  serializeRegistrationResponse,
   type JsonObject,
 } from './index.js'
 
@@ -293,6 +295,22 @@ describe('contracts', () => {
       data: { user: { id: 'u1', displayName: '张三', role: 'user' } },
     })
     expect(JSON.stringify(serialized)).not.toMatch(/top-secret|session-secret|refresh-secret/)
+  })
+
+  it('serializes registration independently from login without session fields', () => {
+    const serialized = serializeRegistrationResponse({
+      apiVersion: 'v1',
+      sessionToken: 'must-not-be-returned',
+      data: {
+        user: { id: 'u1', displayName: '实训营学员', role: 'user' },
+      },
+    })
+
+    expect(RegistrationResponseSchema.parse(serialized)).toEqual({
+      apiVersion: 'v1',
+      data: { user: { id: 'u1', displayName: '实训营学员', role: 'user' } },
+    })
+    expect(JSON.stringify(serialized)).not.toContain('must-not-be-returned')
   })
 
   it('accepts a forward-compatible authenticated profile without credential fields', () => {

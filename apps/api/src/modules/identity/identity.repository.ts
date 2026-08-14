@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { UserRole } from '@panshi/contracts'
 import { auditLogs, sessions, users, verificationCodes } from '../../db/schema.js'
@@ -29,6 +29,7 @@ export type NewAdmin = {
 }
 
 export type VerificationPurpose = 'register' | 'reset_password'
+export type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 
 type VerificationAttemptInput = {
   phoneNormalized: string
@@ -46,10 +47,16 @@ export type StudentIdentityRepository = {
     expiresAt: Date
     createdAt: Date
     cooldownSeconds: number
-  }) => Promise<'stored' | 'rate_limited'>
+  }) => Promise<{ status: 'stored', id: string } | 'rate_limited'>
+  setVerificationDeliveryState: (input: {
+    id: string
+    phoneNormalized: string
+    purpose: VerificationPurpose
+    deliveryState: Exclude<VerificationDeliveryState, 'pending'>
+  }) => Promise<'updated' | 'not_pending'>
   registerStudentWithVerification: (input: VerificationAttemptInput & {
     displayName: string
-    passwordHash: string
+    createPasswordHash: () => Promise<string>
   }) => Promise<
     | { status: 'created', user: IdentityUser }
     | 'invalid_code'
@@ -59,7 +66,7 @@ export type StudentIdentityRepository = {
     | 'conflict'
   >
   resetPasswordWithVerification: (input: VerificationAttemptInput & {
-    passwordHash: string
+    createPasswordHash: () => Promise<string>
   }) => Promise<'reset' | 'invalid_code' | 'expired' | 'attempts_exceeded' | 'consumed' | 'invalid_account'>
 }
 
@@ -146,21 +153,36 @@ export const createIdentityRepository = (
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${input.phoneNormalized}))`)
     const [latest] = await transaction.select({ createdAt: verificationCodes.createdAt })
       .from(verificationCodes)
-      .where(eq(verificationCodes.phoneNormalized, input.phoneNormalized))
+      .where(and(
+        eq(verificationCodes.phoneNormalized, input.phoneNormalized),
+        inArray(verificationCodes.deliveryState, ['pending', 'sent']),
+      ))
       .orderBy(desc(verificationCodes.createdAt))
       .limit(1)
     if (latest && input.createdAt.getTime() - latest.createdAt.getTime() < input.cooldownSeconds * 1_000) {
       return 'rate_limited' as const
     }
-    await transaction.insert(verificationCodes).values({
+    const [record] = await transaction.insert(verificationCodes).values({
       phoneNormalized: input.phoneNormalized,
       purpose: input.purpose,
       codeHash: input.codeHash,
       expiresAt: input.expiresAt,
       createdAt: input.createdAt,
-    })
-    return 'stored' as const
+      deliveryState: 'pending',
+    }).returning({ id: verificationCodes.id })
+    if (!record) throw new Error('Verification code insert did not return a record')
+    return { status: 'stored' as const, id: record.id }
   }),
+
+  setVerificationDeliveryState: async (input) => {
+    const [updated] = await db.update(verificationCodes).set({ deliveryState: input.deliveryState }).where(and(
+      eq(verificationCodes.id, input.id),
+      eq(verificationCodes.phoneNormalized, input.phoneNormalized),
+      eq(verificationCodes.purpose, input.purpose),
+      eq(verificationCodes.deliveryState, 'pending'),
+    )).returning({ id: verificationCodes.id })
+    return updated ? 'updated' as const : 'not_pending' as const
+  },
 
   registerStudentWithVerification: async (input) => {
     try {
@@ -175,6 +197,7 @@ export const createIdentityRepository = (
         }).from(verificationCodes).where(and(
           eq(verificationCodes.phoneNormalized, input.phoneNormalized),
           eq(verificationCodes.purpose, input.purpose),
+          eq(verificationCodes.deliveryState, 'sent'),
         )).orderBy(desc(verificationCodes.createdAt)).limit(1).for('update')
         if (!record) return 'invalid_code' as const
         if (record.consumedAt !== null) return 'consumed' as const
@@ -190,10 +213,11 @@ export const createIdentityRepository = (
           .where(eq(users.phoneNormalized, input.phoneNormalized)).limit(1)
         if (existing) return 'conflict' as const
 
+        const passwordHash = await input.createPasswordHash()
         const [user] = await transaction.insert(users).values({
           displayName: input.displayName,
           phoneNormalized: input.phoneNormalized,
-          passwordHash: input.passwordHash,
+          passwordHash,
           role: 'user',
         }).returning(userSelection)
         if (!user) throw new Error('Student account creation did not return a user')
@@ -225,6 +249,7 @@ export const createIdentityRepository = (
     }).from(verificationCodes).where(and(
       eq(verificationCodes.phoneNormalized, input.phoneNormalized),
       eq(verificationCodes.purpose, input.purpose),
+      eq(verificationCodes.deliveryState, 'sent'),
     )).orderBy(desc(verificationCodes.createdAt)).limit(1).for('update')
     if (!record) return 'invalid_code' as const
     if (record.consumedAt !== null) return 'consumed' as const
@@ -242,7 +267,8 @@ export const createIdentityRepository = (
       .where(eq(users.phoneNormalized, input.phoneNormalized)).limit(1).for('update')
     if (!user || user.role !== 'user' || user.disabledAt !== null) return 'invalid_account' as const
 
-    await transaction.update(users).set({ passwordHash: input.passwordHash }).where(eq(users.id, user.id))
+    const passwordHash = await input.createPasswordHash()
+    await transaction.update(users).set({ passwordHash }).where(eq(users.id, user.id))
     await transaction.update(sessions).set({ revokedAt: input.consumedAt })
       .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)))
     await transaction.insert(auditLogs).values({

@@ -369,7 +369,7 @@ describe('API runtime configuration', () => {
   it('accepts mock verification only in development or test with a strong local secret', () => {
     const base = {
       DATABASE_URL: 'postgresql://localhost/panshi', API_PORT: '3001', CORS_ORIGINS: '',
-      VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'local-verification-secret-at-least-32-bytes',
+      VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32),
     }
     expect(getApiEnv({ ...base, NODE_ENV: 'development' })).toMatchObject({
       VERIFICATION_PROVIDER: 'mock', VERIFICATION_TTL_SECONDS: 300,
@@ -380,10 +380,11 @@ describe('API runtime configuration', () => {
   })
 
   it.each([
-    { NODE_ENV: 'production', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32) },
+    { NODE_ENV: 'production', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32) },
     { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'too-short' },
-    { NODE_ENV: 'development', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32), VERIFICATION_MOCK_CODE: '246810' },
-    { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'x'.repeat(32), VERIFICATION_MOCK_CODE: '12345' },
+    { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'g'.repeat(64) },
+    { NODE_ENV: 'development', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32), VERIFICATION_MOCK_CODE: '246810' },
+    { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32), VERIFICATION_MOCK_CODE: '12345' },
     { NODE_ENV: 'test', VERIFICATION_TTL_SECONDS: '59' },
     { NODE_ENV: 'test', VERIFICATION_COOLDOWN_SECONDS: '9' },
     { NODE_ENV: 'test', VERIFICATION_MAX_ATTEMPTS: '11' },

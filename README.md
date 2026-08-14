@@ -109,9 +109,11 @@ CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何�
 
 ## 学员手机号账号
 
-学员使用 `/register`、`/login` 和 `/forgot-password` 完成三步注册、登录和密码重置。手机号与管理员共用 `users` 表，以 `role=user` 区分；`GET /api/v1/me/profile` 对任意有效登录账号开放，而所有 `/api/v1/admin/*` 接口仍由后端管理员守卫拒绝普通学员。学员登录会轮换该用户会话；密码重置在一个事务中消费验证码、更新 bcrypt hash、撤销该用户全部旧会话并写脱敏审计。
+学员使用 `/register`、`/login` 和 `/forgot-password` 完成三步注册、登录和密码重置。手机号与管理员共用 `users` 表，以 `role=user` 区分；`GET /api/v1/me/profile` 对任意有效登录账号开放，而所有 `/api/v1/admin/*` 接口仍由后端管理员守卫拒绝普通学员。注册成功只返回注册结果，不设置会话 Cookie，学员须回到登录页重新登录。学员登录会轮换该用户会话；密码重置仅面向未禁用的学员账号，并在一个事务中消费验证码、生成和更新 bcrypt hash、撤销该用户全部旧会话并写脱敏审计。无记录、错误、过期、已消费、尝试耗尽以及目标账号不符合重置条件时均不会执行 bcrypt。
 
-验证码通过 `VerificationProvider` 适配。数据库仅保存带服务端 secret 的 HMAC-SHA256 摘要、用途、过期时间、失败次数和消费时间，不保存明文。发送阶段按手机号执行 cooldown，且不会查询或泄露账号是否存在。`VERIFICATION_PROVIDER` 安全默认值为 `disabled`，此时发送接口返回 503；`mock` 只允许 `development` 或 `test`，生产配置为 `mock` 会在启动配置解析阶段失败。启用 mock 时必须在未跟踪的本地环境中提供至少 32 UTF-8 字节的 `VERIFICATION_SECRET`；固定 `VERIFICATION_MOCK_CODE` 只允许 `NODE_ENV=test`。
+验证码通过 `VerificationProvider` 适配。数据库仅保存以 32 个随机字节为密钥的 HMAC-SHA256 摘要、用途、投递状态、过期时间、失败次数和消费时间，不保存明文。记录先以 `pending` 创建，provider 成功后转为 `sent`，明确失败后转为 `failed`；冷却只计入 `pending` 和 `sent`，核验只读取最新 `sent`，因此失败投递不能核验，也不会遮蔽较早的已发送验证码。发送阶段不会查询或泄露账号是否存在。`VERIFICATION_PROVIDER` 安全默认值为 `disabled`，此时发送接口返回 503；`mock` 只允许 `development` 或 `test`，生产配置为 `mock` 会在启动配置解析阶段失败。启用 mock 时必须在未跟踪的本地环境中提供恰好 64 位十六进制的 `VERIFICATION_SECRET`（可通过 `openssl rand -hex 32` 生成）；固定 `VERIFICATION_MOCK_CODE` 只允许 `NODE_ENV=test`。
+
+Future：接入真实短信 provider 前，必须补充 IP 维度限流、手机号累计发送限额和全局费用熔断；这些能力当前未实现。
 
 student-auth 浏览器测试只接受精确专用测试库，并要求所有测试手机号、密码、验证码和 HMAC secret 由运行环境显式提供。fixture 会先迁移、清空、建立公开内容和密码重置测试账号，退出 trap 与全局 teardown 均执行清理：
 
@@ -124,7 +126,7 @@ E2E_REGISTER_PASSWORD='<dedicated-register-password>' \
 E2E_RESET_PHONE='<dedicated-reset-phone>' \
 E2E_RESET_PASSWORD='<dedicated-reset-password>' \
 E2E_RESET_NEW_PASSWORD='<dedicated-new-password>' \
-VERIFICATION_SECRET='<test-only-hmac-secret-at-least-32-bytes>' \
+VERIFICATION_SECRET='<64-hex-characters-from-32-random-bytes>' \
   npm run e2e:student-auth
 ```
 

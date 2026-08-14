@@ -22,7 +22,7 @@ const database = createDatabaseClient(databaseUrl)
 const repository = createIdentityRepository(database.db)
 const origin = 'https://camp.example'
 const testCode = '246810'
-const secret = 'integration-only-verification-secret-32-bytes'
+const secret = 'cd'.repeat(32)
 const sent: string[] = []
 const verificationService = createVerificationService(
   repository,
@@ -35,6 +35,43 @@ const app = createApp({
   authTransactionRepository: repository,
   studentIdentityRepository: repository,
   verificationService,
+  config: {
+    allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576, sessionTtlSeconds: 28_800,
+  },
+})
+
+const createAppWithPasswordHasher = (createPasswordHash: (password: string) => Promise<string>) => {
+  const serviceOptions = {
+    secret,
+    ttlSeconds: 300,
+    cooldownSeconds: 60,
+    maxAttempts: 3,
+    createPasswordHash,
+  }
+  return createApp({
+    checkDatabase: database.checkHealth,
+    identityRepository: repository,
+    authTransactionRepository: repository,
+    studentIdentityRepository: repository,
+    verificationService: createVerificationService(
+      repository,
+      createMockVerificationProvider({ code: testCode }),
+      serviceOptions,
+    ),
+    config: {
+      allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576, sessionTtlSeconds: 28_800,
+    },
+  })
+}
+
+const createAppWithProvider = (provider: { createCode: () => string, sendCode: () => Promise<void> }) => createApp({
+  checkDatabase: database.checkHealth,
+  identityRepository: repository,
+  authTransactionRepository: repository,
+  studentIdentityRepository: repository,
+  verificationService: createVerificationService(repository, provider, {
+    secret, ttlSeconds: 300, cooldownSeconds: 60, maxAttempts: 3,
+  }),
   config: {
     allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576, sessionTtlSeconds: 28_800,
   },
@@ -67,6 +104,76 @@ describe('student authentication PostgreSQL integration', () => {
     expect(JSON.stringify(record)).not.toContain(testCode)
   })
 
+  it('persists failed delivery, rejects its code, and permits an immediate retry', async () => {
+    let rejectDelivery = true
+    const provider = {
+      createCode: () => testCode,
+      sendCode: async () => {
+        if (rejectDelivery) throw new Error('provider rejected delivery')
+      },
+    }
+    const providerApp = createAppWithProvider(provider)
+
+    const rejected = await request(providerApp).post('/api/v1/auth/verification/send').set('Origin', origin)
+      .send({ phone: '13800138000', purpose: 'register' })
+    expect(rejected.status).toBe(503)
+    expect((await database.db.select().from(verificationCodes))[0]?.deliveryState).toBe('failed')
+    expect((await request(providerApp).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: testCode, password: 'password-1' })).status).toBe(400)
+
+    rejectDelivery = false
+    expect((await request(providerApp).post('/api/v1/auth/verification/send').set('Origin', origin)
+      .send({ phone: '13800138000', purpose: 'register' })).status).toBe(204)
+    expect((await database.db.select().from(verificationCodes)).map(({ deliveryState }) => deliveryState).sort())
+      .toEqual(['failed', 'sent'])
+    expect(JSON.stringify(await database.db.select().from(verificationCodes))).not.toContain(testCode)
+  })
+
+  it('keeps the latest sent code usable when a newer delivery fails', async () => {
+    let code = testCode
+    let rejectDelivery = false
+    const provider = {
+      createCode: () => code,
+      sendCode: async () => {
+        if (rejectDelivery) throw new Error('provider rejected delivery')
+      },
+    }
+    const providerApp = createAppWithProvider(provider)
+    expect((await request(providerApp).post('/api/v1/auth/verification/send').set('Origin', origin)
+      .send({ phone: '13800138000', purpose: 'register' })).status).toBe(204)
+    const [sentRecord] = await database.db.select().from(verificationCodes)
+    if (!sentRecord) throw new Error('Missing sent verification code')
+    await database.db.update(verificationCodes)
+      .set({ createdAt: new Date(Date.now() - 61_000) }).where(eq(verificationCodes.id, sentRecord.id))
+
+    code = '135790'
+    rejectDelivery = true
+    expect((await request(providerApp).post('/api/v1/auth/verification/send').set('Origin', origin)
+      .send({ phone: '13800138000', purpose: 'register' })).status).toBe(503)
+    expect((await request(providerApp).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: testCode, password: 'password-1' })).status).toBe(201)
+  })
+
+  it('binds delivery-state transitions to the pending record identity', async () => {
+    await send('13800138000', 'register')
+    const [record] = await database.db.select().from(verificationCodes)
+    if (!record) throw new Error('Missing verification code')
+
+    expect(await repository.setVerificationDeliveryState({
+      id: record.id,
+      phoneNormalized: '+8613900139000',
+      purpose: 'register',
+      deliveryState: 'failed',
+    })).toBe('not_pending')
+    expect(await repository.setVerificationDeliveryState({
+      id: record.id,
+      phoneNormalized: record.phoneNormalized,
+      purpose: record.purpose,
+      deliveryState: 'failed',
+    })).toBe('not_pending')
+    expect((await database.db.select().from(verificationCodes))[0]?.deliveryState).toBe('sent')
+  })
+
   it('atomically consumes one registration code under concurrent submissions', async () => {
     await send('13800138000', 'register')
     const calls = await Promise.all([
@@ -78,6 +185,36 @@ describe('student authentication PostgreSQL integration', () => {
     expect(calls.map(({ status }) => status).sort()).toEqual([201, 400])
     expect(await database.db.select().from(users)).toHaveLength(1)
     expect((await database.db.select().from(verificationCodes))[0]?.consumedAt).toBeInstanceOf(Date)
+  })
+
+  it('runs one deferred password hash for concurrent valid registration submissions', async () => {
+    let hashCalls = 0
+    const deferredApp = createAppWithPasswordHasher(async () => {
+      hashCalls += 1
+      return 'deferred-registration-hash'
+    })
+    await send('13800138000', 'register')
+
+    const calls = await Promise.all([
+      request(deferredApp).post('/api/v1/auth/register').set('Origin', origin)
+        .send({ phone: '13800138000', code: testCode, password: 'password-1' }),
+      request(deferredApp).post('/api/v1/auth/register').set('Origin', origin)
+        .send({ phone: '13800138000', code: testCode, password: 'password-1' }),
+    ])
+
+    expect(calls.map(({ status }) => status).sort()).toEqual([201, 400])
+    expect(hashCalls).toBe(1)
+  })
+
+  it('increments failed attempts atomically under concurrent wrong submissions', async () => {
+    await send('13800138000', 'register')
+    const calls = await Promise.all(Array.from({ length: 5 }, () => (
+      request(app).post('/api/v1/auth/register').set('Origin', origin)
+        .send({ phone: '13800138000', code: '111111', password: 'password-1' })
+    )))
+
+    expect(calls.every(({ status }) => status === 400)).toBe(true)
+    expect((await database.db.select().from(verificationCodes))[0]?.failedAttempts).toBe(3)
   })
 
   it('resets password and revokes all existing sessions in one transaction', async () => {
@@ -99,6 +236,29 @@ describe('student authentication PostgreSQL integration', () => {
       actorUserId: user.id, action: 'auth.password_reset', entityType: 'user', entityId: user.id,
     }))
     expect(JSON.stringify(await database.db.select().from(auditLogs))).not.toMatch(/13800138000|246810|password-[12]/u)
+  })
+
+  it('runs one deferred password hash for concurrent valid password resets', async () => {
+    const [user] = await database.db.insert(users).values({
+      displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: 'old-hash', role: 'user',
+    }).returning({ id: users.id })
+    if (!user) throw new Error('Missing test user')
+    let hashCalls = 0
+    const deferredApp = createAppWithPasswordHasher(async () => {
+      hashCalls += 1
+      return 'deferred-reset-hash'
+    })
+    await send('13800138000', 'reset_password')
+
+    const calls = await Promise.all([
+      request(deferredApp).post('/api/v1/auth/password/reset').set('Origin', origin)
+        .send({ phone: '13800138000', code: testCode, newPassword: 'password-2' }),
+      request(deferredApp).post('/api/v1/auth/password/reset').set('Origin', origin)
+        .send({ phone: '13800138000', code: testCode, newPassword: 'password-2' }),
+    ])
+
+    expect(calls.map(({ status }) => status).sort()).toEqual([204, 400])
+    expect(hashCalls).toBe(1)
   })
 
   it('does not let the public reset flow change an administrator password or sessions', async () => {

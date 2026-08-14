@@ -19,7 +19,7 @@ export class VerificationError extends Error {
 }
 
 const createCodeHash = (
-  secret: string,
+  secret: Buffer,
   phoneNormalized: string,
   purpose: VerificationPurpose,
   code: string,
@@ -35,20 +35,23 @@ export const createVerificationService = (
     maxAttempts: number
     now?: () => Date
     createCode?: () => string
+    createPasswordHash?: (password: string) => Promise<string>
   },
 ) => {
-  if (Buffer.byteLength(options.secret, 'utf8') < 32) {
-    throw new Error('Verification secret must be at least 32 UTF-8 bytes')
+  if (!/^[a-f0-9]{64}$/iu.test(options.secret)) {
+    throw new Error('Verification secret must be exactly 64 hexadecimal characters')
   }
+  const secret = Buffer.from(options.secret, 'hex')
   const now = options.now ?? (() => new Date())
   const providerCodeFactory = provider && 'createCode' in provider && typeof provider.createCode === 'function'
     ? provider.createCode as () => string
     : undefined
   const createCode = options.createCode ?? providerCodeFactory ?? (() => randomInt(0, 1_000_000).toString().padStart(6, '0'))
+  const createPasswordHash = options.createPasswordHash ?? hashPassword
 
   const normalize = (phone: string) => normalizeMainlandChinaMobile(phone)
   const hashCode = (phoneNormalized: string, purpose: VerificationPurpose, code: string) => (
-    createCodeHash(options.secret, phoneNormalized, purpose, code)
+    createCodeHash(secret, phoneNormalized, purpose, code)
   )
 
   return {
@@ -67,12 +70,28 @@ export const createVerificationService = (
         cooldownSeconds: options.cooldownSeconds,
       })
       if (stored === 'rate_limited') throw new VerificationError('rate_limited')
-      await provider.sendCode({ phone: phoneNormalized, code, purpose })
+      try {
+        await provider.sendCode({ phone: phoneNormalized, code, purpose })
+      } catch {
+        await repository.setVerificationDeliveryState({
+          id: stored.id,
+          phoneNormalized,
+          purpose,
+          deliveryState: 'failed',
+        }).catch(() => undefined)
+        throw new VerificationError('unavailable')
+      }
+      const markedSent = await repository.setVerificationDeliveryState({
+        id: stored.id,
+        phoneNormalized,
+        purpose,
+        deliveryState: 'sent',
+      })
+      if (markedSent !== 'updated') throw new VerificationError('unavailable')
     },
 
     register: async (phone: string, code: string, password: string) => {
       const phoneNormalized = normalize(phone)
-      const passwordHash = await hashPassword(password)
       const consumedAt = now()
       const result = await repository.registerStudentWithVerification({
         phoneNormalized,
@@ -81,7 +100,7 @@ export const createVerificationService = (
         consumedAt,
         maxAttempts: options.maxAttempts,
         displayName: '实训营学员',
-        passwordHash,
+        createPasswordHash: () => createPasswordHash(password),
       })
       if (result === 'conflict') throw new VerificationError('conflict')
       if (typeof result === 'string') throw new VerificationError('invalid_code')
@@ -90,14 +109,13 @@ export const createVerificationService = (
 
     resetPassword: async (phone: string, code: string, newPassword: string) => {
       const phoneNormalized = normalize(phone)
-      const passwordHash = await hashPassword(newPassword)
       const result = await repository.resetPasswordWithVerification({
         phoneNormalized,
         purpose: 'reset_password',
         codeHash: hashCode(phoneNormalized, 'reset_password', code),
         consumedAt: now(),
         maxAttempts: options.maxAttempts,
-        passwordHash,
+        createPasswordHash: () => createPasswordHash(newPassword),
       })
       if (result === 'invalid_account') throw new VerificationError('password_reset_failed')
       if (result !== 'reset') throw new VerificationError('invalid_code')

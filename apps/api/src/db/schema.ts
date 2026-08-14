@@ -27,6 +27,7 @@ type ApplicationStatus =
   | 'rejected'
 type ResourceAccess = 'public' | 'authenticated' | 'admitted'
 type VerificationPurpose = 'register' | 'reset_password'
+type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
@@ -60,6 +61,7 @@ export const verificationCodes = pgTable('verification_codes', {
   id: uuid('id').primaryKey().defaultRandom(),
   phoneNormalized: text('phone_normalized').notNull(),
   purpose: text('purpose').$type<VerificationPurpose>().notNull(),
+  deliveryState: text('delivery_state').$type<VerificationDeliveryState>().notNull().default('pending'),
   codeHash: text('code_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
@@ -67,9 +69,14 @@ export const verificationCodes = pgTable('verification_codes', {
   createdAt: createdAt(),
 }, (table) => [
   check('verification_codes_purpose_check', sql`${table.purpose} in ('register', 'reset_password')`),
+  check('verification_codes_delivery_state_check', sql`${table.deliveryState} in ('pending', 'sent', 'failed')`),
   check('verification_codes_failed_attempts_check', sql`${table.failedAttempts} >= 0`),
-  index('verification_codes_phone_purpose_created_idx').on(table.phoneNormalized, table.purpose, table.createdAt),
-  index('verification_codes_phone_created_idx').on(table.phoneNormalized, table.createdAt),
+  index('verification_codes_phone_active_created_idx')
+    .on(table.phoneNormalized, table.createdAt.desc())
+    .where(sql`${table.deliveryState} in ('pending', 'sent')`),
+  index('verification_codes_phone_purpose_sent_created_idx')
+    .on(table.phoneNormalized, table.purpose, table.createdAt.desc())
+    .where(sql`${table.deliveryState} = 'sent'`),
 ])
 
 export const contentModules = pgTable('content_modules', {

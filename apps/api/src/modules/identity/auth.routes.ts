@@ -5,6 +5,7 @@ import {
   StudentLoginRequestSchema,
   StudentRegistrationRequestSchema,
   serializeLoginResponse,
+  serializeRegistrationResponse,
   serializeProfileResponse,
 } from '@panshi/contracts'
 import { Router, type CookieOptions, type Response } from 'express'
@@ -82,7 +83,7 @@ export const createAuthRouter = (
     if (!input.success) throw new HttpError(400, 'INVALID_REQUEST', '注册请求格式错误')
     try {
       const user = await requireVerification().register(input.data.phone, input.data.code, input.data.password)
-      response.status(201).json(serializeLoginResponse({ apiVersion: 'v1', data: { user } }))
+      response.status(201).json(serializeRegistrationResponse({ apiVersion: 'v1', data: { user } }))
     } catch (error) {
       handleVerificationError(error)
     }

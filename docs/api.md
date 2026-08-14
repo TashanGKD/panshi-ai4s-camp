@@ -23,10 +23,10 @@
 
 已实现的身份接口为：
 
-- `POST /api/v1/auth/verification/send`：请求体含 `phone` 和 `purpose`（`register` 或 `reset_password`）。成功统一返回 204；发送过频返回 429 `VERIFICATION_RATE_LIMITED`；未配置可用 provider 返回 503 `VERIFICATION_UNAVAILABLE`。发送阶段不公开账号是否存在，也不返回验证码。
-- `POST /api/v1/auth/register`：请求体含手机号、6 位验证码和 8–72 UTF-8 字节密码；成功创建 `role=user` 账号并返回 201 用户摘要。重复手机号最终返回 409 `ACCOUNT_EXISTS`；验证码错误、过期、用途不匹配、尝试超限或已消费统一返回 400 `VERIFICATION_INVALID`。
+- `POST /api/v1/auth/verification/send`：请求体含 `phone` 和 `purpose`（`register` 或 `reset_password`）。数据库先创建 `pending` 记录，provider 成功后转为 `sent`，明确拒绝则转为 `failed` 并返回 503 `VERIFICATION_UNAVAILABLE`。冷却只计入 `pending`、`sent`，核验只读取最新 `sent`。成功统一返回 204；发送过频返回 429 `VERIFICATION_RATE_LIMITED`。发送阶段不公开账号是否存在，也不返回验证码。
+- `POST /api/v1/auth/register`：请求体含手机号、6 位验证码和 8–72 UTF-8 字节密码；成功创建 `role=user` 账号并通过独立的 `RegistrationResponseSchema` 返回 201 用户摘要，不设置会话 Cookie，后续须调用登录接口。重复手机号最终返回 409 `ACCOUNT_EXISTS`；验证码错误、过期、用途不匹配、尝试超限或已消费统一返回 400 `VERIFICATION_INVALID`。
 - `POST /api/v1/auth/login`：学员手机号和密码登录。未知手机号、错误密码、停用账号或管理员账号均返回相同的 401 `INVALID_CREDENTIALS`；成功轮换会话并设置安全 Cookie。
-- `POST /api/v1/auth/password/reset`：手机号、6 位验证码和新密码。成功在同一事务消费验证码、更新密码、撤销该用户全部旧会话并写脱敏审计，返回 204；不存在账号的最终失败使用克制的 400 `PASSWORD_RESET_FAILED`。
+- `POST /api/v1/auth/password/reset`：手机号、6 位验证码和新密码。仅未禁用的 `role=user` 账号可通过公共流程重置；管理员、禁用账号和不存在账号统一返回克制的 400 `PASSWORD_RESET_FAILED`。成功在同一事务消费验证码、生成并更新密码哈希、撤销该用户全部旧会话并写脱敏审计，返回 204。密码 bcrypt 只会在验证码、账号存在性、角色和状态全部通过后，于持有 advisory lock 和行锁的事务内执行。
 - `POST /api/v1/auth/logout`：学员通用幂等退出并清除 Cookie。
 - `POST /api/v1/auth/admin/login`：请求体含 `phone` 和 `password`；手机号只接受完整的 `1[3-9]` 加 9 位数字或精确 `+86` 等价值并规范化为 E.164，密码必须为 8–72 UTF-8 字节。仅有效且未停用的 `admin` 可成功，错误凭据返回 401，普通用户或停用管理员返回 403。
 - `POST /api/v1/auth/admin/logout`：若 Cookie 中存在 token，按 SHA-256 hash 幂等撤销；无论 token 缺失、未知、过期、已撤销或已轮换，都用匹配属性清除 Cookie 并返回 204。Origin 保护仍先于路由执行。
@@ -68,7 +68,9 @@ Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由�
 
 API 进程读取并校验 `DATABASE_URL`、`API_PORT`、`NODE_ENV`、`SESSION_TTL_SECONDS` 和逗号分隔的 `CORS_ORIGINS`。`SESSION_TTL_SECONDS` 默认 28800 秒（八小时），允许 300–604800 秒，不提供 remember-me。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；重复项会去重，空值表示不允许任何跨源状态变更请求。
 
-验证码配置包括 `VERIFICATION_PROVIDER`（默认 `disabled`）、`VERIFICATION_SECRET`、`VERIFICATION_TTL_SECONDS`（60–1800，默认 300）、`VERIFICATION_COOLDOWN_SECONDS`（10–600，默认 60）和 `VERIFICATION_MAX_ATTEMPTS`（1–10，默认 5）。mock provider 只允许 development/test，且必须提供至少 32 UTF-8 字节的 HMAC secret；production 配置 mock 会拒绝启动。`VERIFICATION_MOCK_CODE` 只允许 test 且须为 6 位数字。disabled 模式保留接口但发送返回 503，不回退为固定验证码。
+验证码配置包括 `VERIFICATION_PROVIDER`（默认 `disabled`）、`VERIFICATION_SECRET`、`VERIFICATION_TTL_SECONDS`（60–1800，默认 300）、`VERIFICATION_COOLDOWN_SECONDS`（10–600，默认 60）和 `VERIFICATION_MAX_ATTEMPTS`（1–10，默认 5）。mock provider 只允许 development/test；`VERIFICATION_SECRET` 必须是 64 位十六进制字符串，解析为 32 个随机字节后作为 HMAC 密钥，不能用字符种类猜测熵。production 配置 mock 会拒绝启动。`VERIFICATION_MOCK_CODE` 只允许 test 且须为 6 位数字。disabled 模式保留接口但发送返回 503，不回退为固定验证码。
+
+Future：接入真实短信 provider 前须实现 IP 维度限流、手机号累计发送限额和全局费用熔断；当前版本不提供这些控制。
 
 中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。独立 CSRF token 和登录限流尚未实现。
 
@@ -120,7 +122,7 @@ JSON parser 的稳定客户端错误由统一错误层转换：格式错误返�
 
 ## Session 与身份
 
-登录态使用 Cookie-based session。登录成功响应只返回版本化的用户摘要，不返回 bearer token 或 session secret；浏览器在后续请求中携带服务端设置的 session Cookie。服务端 handler 必须将输入交给 `serializeLoginResponse`，并发送它返回的解析结果；不得只校验后发送仍可能携带 `token`、`sessionToken` 或 `refreshToken` 的原始对象。
+登录态使用 Cookie-based session。登录成功响应只返回版本化的用户摘要，不返回 bearer token 或 session secret；浏览器在后续请求中携带服务端设置的 session Cookie。登录 handler 必须将输入交给 `serializeLoginResponse`，注册 handler 必须使用独立的 `serializeRegistrationResponse`；两者都必须发送解析结果，不得只校验后发送仍可能携带 `token`、`sessionToken` 或 `refreshToken` 的原始对象。
 
 Cookie 和 session 实现必须满足以下安全底线：
 
@@ -150,7 +152,7 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 ## 已冻结的共享契约
 
-`@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、管理员与学员登录请求/响应、验证码用途和请求、注册与密码重置请求、profile 响应和提交报名快照。
+`@panshi/contracts` 当前定义并导出：统一错误、分页元数据、用户角色、报名状态、公开内容模块、资源访问级别、公开站点响应、管理员与学员登录请求/响应、独立注册响应、验证码用途和请求、注册与密码重置请求、profile 响应和提交报名快照。
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 

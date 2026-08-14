@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -109,6 +109,7 @@ const expectedChecks = [
   { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
   { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
   { constraintName: 'users_role_check', tokens: ['role', 'user', 'admin'] },
+  { constraintName: 'verification_codes_delivery_state_check', tokens: ['delivery_state', 'pending', 'sent', 'failed'] },
   { constraintName: 'verification_codes_failed_attempts_check', tokens: ['failed_attempts', '>= 0'] },
   { constraintName: 'verification_codes_purpose_check', tokens: ['purpose', 'register', 'reset_password'] },
 ] as const
@@ -291,6 +292,26 @@ describe('initial PostgreSQL schema', () => {
         expect(actual?.definition).toContain(token)
       }
     }
+  })
+
+  it('uses descending partial indexes for verification delivery and sent-code lookup', async () => {
+    const indexes = await pool.query<{ indexname: string, indexdef: string }>(`
+      select indexname, indexdef
+      from pg_indexes
+      where schemaname = 'public'
+        and tablename = 'verification_codes'
+        and indexname <> 'verification_codes_pkey'
+      order by indexname
+    `)
+
+    expect(indexes.rows.map(({ indexname }) => indexname)).toEqual([
+      'verification_codes_phone_active_created_idx',
+      'verification_codes_phone_purpose_sent_created_idx',
+    ])
+    const active = indexes.rows.find(({ indexname }) => indexname === 'verification_codes_phone_active_created_idx')?.indexdef
+    const sent = indexes.rows.find(({ indexname }) => indexname === 'verification_codes_phone_purpose_sent_created_idx')?.indexdef
+    expect(active).toMatch(/phone_normalized, created_at DESC.*delivery_state.*pending.*sent/iu)
+    expect(sent).toMatch(/phone_normalized, purpose, created_at DESC.*delivery_state.*sent/iu)
   })
 
   it('creates exactly the intended domain immutability triggers', async () => {
@@ -546,10 +567,48 @@ describe('initial PostgreSQL schema', () => {
       '0003_user_display_name.sql',
       '0004_user_identity_invariants.sql',
       '0005_verification_code_purpose.sql',
+      '0006_verification_delivery_state.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {
       expect(migration.sha256).toMatch(/^[a-f0-9]{64}$/u)
+    }
+  })
+
+  it('backfills old verification records as sent before defaulting new records to pending', async () => {
+    const migration = await readFile(new URL('../drizzle/0006_verification_delivery_state.sql', import.meta.url), 'utf8')
+    const schemaName = `verification_migration_${randomUUID().replaceAll('-', '')}`
+    const client = await pool.connect()
+    try {
+      await client.query(`create schema "${schemaName}"`)
+      await client.query(`set search_path to "${schemaName}"`)
+      await client.query(`
+        create table verification_codes (
+          id uuid primary key,
+          phone_normalized text not null,
+          purpose text not null,
+          created_at timestamptz not null
+        );
+        create index verification_codes_phone_purpose_created_idx
+          on verification_codes (phone_normalized, purpose, created_at desc);
+        create index verification_codes_phone_created_idx
+          on verification_codes (phone_normalized, created_at desc);
+        insert into verification_codes (id, phone_normalized, purpose, created_at)
+          values ('00000000-0000-0000-0000-000000000001', '+8613800138000', 'register', now());
+      `)
+      await client.query(migration)
+      await client.query(`
+        insert into verification_codes (id, phone_normalized, purpose, created_at)
+          values ('00000000-0000-0000-0000-000000000002', '+8613900139000', 'register', now());
+      `)
+      const states = await client.query<{ id: string, delivery_state: string }>(
+        'select id, delivery_state from verification_codes order by id',
+      )
+      expect(states.rows.map(({ delivery_state }) => delivery_state)).toEqual(['sent', 'pending'])
+    } finally {
+      await client.query('set search_path to public')
+      await client.query(`drop schema if exists "${schemaName}" cascade`)
+      client.release()
     }
   })
 

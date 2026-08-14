@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import request from 'supertest'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import type { AuditEntry } from '../src/modules/audit/audit.repository.js'
 import type {
@@ -11,6 +11,7 @@ import type {
   VerificationPurpose,
 } from '../src/modules/identity/identity.repository.js'
 import { createMockVerificationProvider } from '../src/modules/identity/mock-verification-provider.js'
+import type { VerificationProvider } from '../src/modules/identity/verification-provider.js'
 import { createVerificationService } from '../src/modules/identity/verification.service.js'
 
 type TestUser = {
@@ -34,6 +35,7 @@ type TestCode = {
   phoneNormalized: string
   purpose: VerificationPurpose
   codeHash: string
+  deliveryState: 'pending' | 'sent' | 'failed'
   expiresAt: Date
   failedAttempts: number
   consumedAt: Date | null
@@ -82,7 +84,9 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
 
   storeVerificationCode = async (input: Parameters<StudentIdentityRepository['storeVerificationCode']>[0]) => {
     const latest = [...this.codes]
-      .filter(({ phoneNormalized }) => phoneNormalized === input.phoneNormalized)
+      .filter(({ phoneNormalized, deliveryState }) => (
+        phoneNormalized === input.phoneNormalized && deliveryState !== 'failed'
+      ))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
     if (latest && input.createdAt.getTime() - latest.createdAt.getTime() < input.cooldownSeconds * 1_000) {
       return 'rate_limited' as const
@@ -92,12 +96,25 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
       phoneNormalized: input.phoneNormalized,
       purpose: input.purpose,
       codeHash: input.codeHash,
+      deliveryState: 'pending',
       expiresAt: input.expiresAt,
       failedAttempts: 0,
       consumedAt: null,
       createdAt: input.createdAt,
     })
-    return 'stored' as const
+    return { status: 'stored' as const, id: this.codes.at(-1)!.id }
+  }
+
+  setVerificationDeliveryState = async (input: Parameters<StudentIdentityRepository['setVerificationDeliveryState']>[0]) => {
+    const record = this.codes.find((candidate) => (
+      candidate.id === input.id
+      && candidate.phoneNormalized === input.phoneNormalized
+      && candidate.purpose === input.purpose
+      && candidate.deliveryState === 'pending'
+    ))
+    if (!record) return 'not_pending' as const
+    record.deliveryState = input.deliveryState
+    return 'updated' as const
   }
 
   registerStudentWithVerification = async (input: Parameters<StudentIdentityRepository['registerStudentWithVerification']>[0]) => {
@@ -108,7 +125,7 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
       id: `user-${this.nextUser++}`,
       displayName: input.displayName,
       phoneNormalized: input.phoneNormalized,
-      passwordHash: input.passwordHash,
+      passwordHash: await input.createPasswordHash(),
       role: 'user' as const,
       disabledAt: null,
     }
@@ -121,8 +138,8 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
     const verified = this.consume(input)
     if (verified !== 'verified') return verified
     const user = this.users.find(({ phoneNormalized }) => phoneNormalized === input.phoneNormalized)
-    if (!user) return 'invalid_account' as const
-    user.passwordHash = input.passwordHash
+    if (!user || user.role !== 'user' || user.disabledAt !== null) return 'invalid_account' as const
+    user.passwordHash = await input.createPasswordHash()
     for (const session of this.sessions) {
       if (session.userId === user.id && session.revokedAt === null) session.revokedAt = input.consumedAt
     }
@@ -144,7 +161,9 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
     maxAttempts: number
   }) {
     const record = [...this.codes]
-      .filter(({ phoneNormalized, purpose }) => phoneNormalized === input.phoneNormalized && purpose === input.purpose)
+      .filter(({ phoneNormalized, purpose, deliveryState }) => (
+        phoneNormalized === input.phoneNormalized && purpose === input.purpose && deliveryState === 'sent'
+      ))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
     if (!record) return 'invalid_code' as const
     if (record.consumedAt) return 'consumed' as const
@@ -170,15 +189,15 @@ describe('student phone authentication', () => {
     currentTime = new Date(now)
   })
 
-  const app = (options: { providerEnabled?: boolean, maxAttempts?: number } = {}) => {
-    const provider = options.providerEnabled === false
+  const app = (options: { providerEnabled?: boolean, maxAttempts?: number, provider?: VerificationProvider } = {}) => {
+    const provider = options.provider ?? (options.providerEnabled === false
       ? undefined
       : createMockVerificationProvider({
         code: '246810',
         logger: (message) => sentCodes.push(message),
-      })
+      }))
     const verificationService = createVerificationService(repository, provider, {
-      secret: 'test-only-verification-secret-at-least-32-bytes',
+      secret: 'ab'.repeat(32),
       ttlSeconds: 300,
       cooldownSeconds: 60,
       maxAttempts: options.maxAttempts ?? 3,
@@ -203,6 +222,12 @@ describe('student phone authentication', () => {
     .post('/api/v1/auth/verification/send')
     .set('Origin', origin)
     .send({ phone, purpose })
+
+  it('requires a 64-character hexadecimal HMAC secret', () => {
+    expect(() => createVerificationService(repository, undefined, {
+      secret: 'g'.repeat(64), ttlSeconds: 300, cooldownSeconds: 60, maxAttempts: 3,
+    })).toThrow('64 hexadecimal characters')
+  })
 
   it('rejects malformed phones before sending', async () => {
     const response = await sendCode(app(), 'phone=13800138000')
@@ -229,6 +254,46 @@ describe('student phone authentication', () => {
     expect(JSON.stringify(response.body)).not.toMatch(/246810|codeHash/u)
   })
 
+  it('marks rejected deliveries unusable and permits an immediate retry', async () => {
+    let rejectDelivery = true
+    const provider = {
+      createCode: () => '246810',
+      sendCode: async () => {
+        if (rejectDelivery) throw new Error('provider rejected delivery')
+      },
+    }
+    const authApp = app({ provider })
+
+    const rejected = await sendCode(authApp)
+    expect(rejected.status).toBe(503)
+    expect(rejected.body.error.code).toBe('VERIFICATION_UNAVAILABLE')
+    expect((await request(authApp).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: '246810', password: 'password-1' })).status).toBe(400)
+
+    rejectDelivery = false
+    expect((await sendCode(authApp)).status).toBe(204)
+  })
+
+  it('does not let a failed delivery shadow the latest sent code', async () => {
+    let code = '246810'
+    let rejectDelivery = false
+    const provider = {
+      createCode: () => code,
+      sendCode: async () => {
+        if (rejectDelivery) throw new Error('provider rejected delivery')
+      },
+    }
+    const authApp = app({ provider })
+    expect((await sendCode(authApp)).status).toBe(204)
+
+    currentTime = new Date(now.getTime() + 61_000)
+    code = '135790'
+    rejectDelivery = true
+    expect((await sendCode(authApp)).status).toBe(503)
+    expect((await request(authApp).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: '246810', password: 'password-1' })).status).toBe(201)
+  })
+
   it('does not accept a code issued for a different purpose', async () => {
     const authApp = app()
     await sendCode(authApp, '13800138000', 'reset_password')
@@ -237,6 +302,56 @@ describe('student phone authentication', () => {
     expect(response.status).toBe(400)
     expect(response.body.error.code).toBe('VERIFICATION_INVALID')
     expect(repository.users).toHaveLength(0)
+  })
+
+  it('does not hash a password before a verification record is accepted', async () => {
+    const hash = vi.spyOn(bcrypt, 'hash')
+    const response = await request(app()).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: '246810', password: 'password-1' })
+
+    expect(response.status).toBe(400)
+    expect(hash).not.toHaveBeenCalled()
+  })
+
+  it('skips password hashing for every rejected registration and reset state', async () => {
+    const hash = vi.spyOn(bcrypt, 'hash')
+    const attemptRegister = async (configure: (testRepository: TestRepository) => void) => {
+      repository = new TestRepository()
+      const authApp = app({ maxAttempts: 2 })
+      await sendCode(authApp)
+      configure(repository)
+      return request(authApp).post('/api/v1/auth/register').set('Origin', origin)
+        .send({ phone: '13800138000', code: '246810', password: 'password-1' })
+    }
+
+    repository = new TestRepository()
+    expect((await request(app()).post('/api/v1/auth/register').set('Origin', origin)
+      .send({ phone: '13800138000', code: '246810', password: 'password-1' })).status).toBe(400)
+    expect((await attemptRegister((candidate) => { candidate.codes[0]!.codeHash = 'wrong' })).status).toBe(400)
+    expect((await attemptRegister((candidate) => { candidate.codes[0]!.expiresAt = new Date(now.getTime() - 1) })).status).toBe(400)
+    expect((await attemptRegister((candidate) => { candidate.codes[0]!.consumedAt = now })).status).toBe(400)
+    expect((await attemptRegister((candidate) => { candidate.codes[0]!.failedAttempts = 2 })).status).toBe(400)
+    expect((await attemptRegister((candidate) => {
+      candidate.users.push({
+        id: 'existing', displayName: '已有学员', phoneNormalized: '+8613800138000',
+        passwordHash: 'existing-hash', role: 'user', disabledAt: null,
+      })
+    })).status).toBe(409)
+
+    const attemptReset = async (role: 'user' | 'admin', disabledAt: Date | null) => {
+      repository = new TestRepository()
+      repository.users.push({
+        id: 'target', displayName: '目标账号', phoneNormalized: '+8613800138000',
+        passwordHash: 'existing-hash', role, disabledAt,
+      })
+      const authApp = app()
+      await sendCode(authApp, '13800138000', 'reset_password')
+      return request(authApp).post('/api/v1/auth/password/reset').set('Origin', origin)
+        .send({ phone: '13800138000', code: '246810', newPassword: 'password-2' })
+    }
+    expect((await attemptReset('admin', null)).body.error.code).toBe('PASSWORD_RESET_FAILED')
+    expect((await attemptReset('user', now)).body.error.code).toBe('PASSWORD_RESET_FAILED')
+    expect(hash).not.toHaveBeenCalled()
   })
 
   it('rejects wrong purpose, wrong codes, exhausted attempts, expired codes, and consumed codes', async () => {
@@ -276,6 +391,7 @@ describe('student phone authentication', () => {
       .send({ phone: '13800138000', code: '246810', password: 'password-1' })
 
     expect(registered.status).toBe(201)
+    expect(registered.headers['set-cookie']).toBeUndefined()
     expect(registered.body.data.user).toMatchObject({ role: 'user', displayName: '实训营学员' })
     expect(registered.body.data.user).not.toHaveProperty('phoneNormalized')
     expect(await bcrypt.compare('password-1', repository.users[0]!.passwordHash)).toBe(true)

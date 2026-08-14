@@ -29,18 +29,18 @@
 
 已实现的管理员内容接口均要求真实 `panshi_session` Cookie 和 `admin` 角色：
 
-- `GET /api/v1/admin/content/:key/draft`：读取草稿 payload、当前 `revision` 和已发布版本号。
+- `GET /api/v1/admin/content/:key/draft`：读取草稿 payload、当前 `revision` 和已发布版本号。响应前按模块富文本白名单清洗历史数据库值。
 - `PUT /api/v1/admin/content/:key/draft`：请求 `{ "expectedRevision": n, "payload": {} }`。数据库使用单条 `UPDATE ... WHERE draft_revision = expectedRevision RETURNING` 完成 compare-and-swap；过期 revision 返回 409 `CONTENT_CONFLICT`。
-- `GET /api/v1/admin/content/:key/preview`：为公共 Web `/preview/:module` 返回受保护草稿。该 GET 只接受管理员 Cookie；无会话、无效会话和非管理员均返回 403 `FORBIDDEN`，不签发公开 token，不生成可转发预览链接。该特殊边界不改变 `GET /api/v1/me/profile` 无会话时的 401 `UNAUTHORIZED` 语义。
+- `GET /api/v1/admin/content/:key/preview`：为公共 Web `/preview/:module` 返回受保护草稿。响应前按模块富文本白名单清洗历史数据库值。该 GET 只接受管理员 Cookie；无会话、无效会话和非管理员均返回 403 `FORBIDDEN`，不签发公开 token，不生成可转发预览链接。该特殊边界不改变 `GET /api/v1/me/profile` 无会话时的 401 `UNAUTHORIZED` 语义。
 - `POST /api/v1/admin/content/:key/publish`：请求 `{ "expectedRevision": n }`。事务按模块行加锁，在事务内校验草稿、分配递增版本、插入不可变版本、更新发布指针并写审计。
 - `GET /api/v1/admin/content/:key/versions`：按版本号倒序返回不可变历史 payload、创建人和时间。
 - `POST /api/v1/admin/content/:key/rollback`：请求 `{ "version": n }`；在模块锁定事务内重新执行当前发布校验，通过后复制历史 payload 创建一个新版本并移动指针，不修改历史行。历史版本若只满足旧版读取契约但不满足当前发布规则，回退会以 422 拒绝且 pointer/history 不变。
 
 已实现的管理后台摘要接口同样要求真实管理员 Cookie：
 
-- `GET /api/v1/admin/summary`：从数据库实时返回报名总量、完整状态分布、待审核数量（`submitted + reviewing`）、未来最近五个机器日期、与当前发布版本不同的草稿，以及最近十条管理员操作。空库返回完整零值和空数组。最近操作只包含日志 ID、动作、操作者显示名和时间，不返回 audit metadata、正文、联系方式或其他敏感值。未登录返回 401，已登录非管理员返回 403。
+- `GET /api/v1/admin/summary`：从数据库实时返回报名总量、完整状态分布、待审核数量（`submitted + reviewing`）、未来最近五个机器日期、与当前发布版本不同的草稿，以及最近十条管理员操作。“今天”按 `Asia/Shanghai` 业务日期计算，并可通过 repository `todayProvider` 注入测试时间。空库返回完整零值和空数组。最近操作只包含日志 ID、动作、操作者显示名和时间，不返回 audit metadata、正文、联系方式或其他敏感值。未登录返回 401，已登录非管理员返回 403。
 
-Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；保存前再次清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。`相关资料` 仍无创建或上传接口，留待 Task 15。
+Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；服务端读取草稿、预览响应、编辑器写入 DOM 和保存前均执行清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。前端排序使用不进入业务 payload 的稳定编辑器 key。存在未保存编辑时，预览和发布不可用并提示先保存；保存、发布、回退共用单一同步操作锁，模块加载和写操作回调通过 generation guard 隔离。`相关资料` 仍无创建或上传接口，留待 Task 15。
 
 `display.homeSectionOrder` 是可选的首页模块顺序数组，允许值仅为 `intro`、`target`、`features`、`organizations`，且同一数组内不得重复。Task 9 已完成该字段的契约校验、后台排序和草稿保存；当前首页聚合接口尚未返回 `features` 与 `organizations`，因此公开首页暂不消费该字段，避免在 Task 9 中扩张公共聚合与页面发布边界。后续接入时应直接以该字段作为首页模块顺序信息真源。
 

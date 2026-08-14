@@ -8,7 +8,14 @@ import type { AdminSummaryRepository } from './admin-summary.service.js'
 
 const machineKeys = new Set(['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'])
 
-export const createAdminSummaryRepository = (db: NodePgDatabase<typeof schema>): AdminSummaryRepository => ({
+export const shanghaiBusinessDate = (instant: Date): string => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(instant)
+
+export const createAdminSummaryRepository = (
+  db: NodePgDatabase<typeof schema>,
+  { todayProvider = () => shanghaiBusinessDate(new Date()) }: { todayProvider?: () => string } = {},
+): AdminSummaryRepository => ({
   countApplicationsByStatus: async () => db.select({ status: applications.status, count: count() })
     .from(applications).groupBy(applications.status),
 
@@ -23,7 +30,7 @@ export const createAdminSummaryRepository = (db: NodePgDatabase<typeof schema>):
       .limit(1)
     const parsed = ImportantDatesContentSchema.safeParse(record?.payload)
     if (!parsed.success) return []
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayProvider()
     return parsed.data.items
       .filter((item): item is typeof item & { machineKey: 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd' } => (
         item.machineKey !== undefined && machineKeys.has(item.machineKey) && /^\d{4}-\d{2}-\d{2}$/u.test(item.value) && item.value >= today

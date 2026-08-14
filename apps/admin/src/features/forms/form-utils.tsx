@@ -56,7 +56,8 @@ export function RichTextField({ label, path, value, errors, onChange }: {
   const id = useId()
   const editor = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (editor.current && editor.current.innerHTML !== value) editor.current.innerHTML = value
+    const cleanValue = sanitizeRichText(value)
+    if (editor.current && editor.current.innerHTML !== cleanValue) editor.current.innerHTML = cleanValue
   }, [value])
   return <div className="form-field">
     <label id={`${id}-label`}>{label}</label>
@@ -66,6 +67,7 @@ export function RichTextField({ label, path, value, errors, onChange }: {
       role="textbox"
       aria-labelledby={`${id}-label`}
       aria-describedby={errorDescription(path, errors)}
+      aria-invalid={errors[path] ? true : undefined}
       aria-multiline="true"
       contentEditable
       suppressContentEditableWarning
@@ -87,7 +89,7 @@ export function TextField({ label, path, value, errors, type = 'text', onChange 
   const id = useId()
   return <div className="form-field">
     <label htmlFor={id}>{label}</label>
-    <input id={id} type={type} value={value} aria-describedby={errorDescription(path, errors)} onChange={(event) => onChange(event.target.value)} />
+    <input id={id} type={type} value={value} aria-describedby={errorDescription(path, errors)} aria-invalid={errors[path] ? true : undefined} onChange={(event) => onChange(event.target.value)} />
     <FieldError path={path} errors={errors} />
   </div>
 }
@@ -100,6 +102,21 @@ export const moveItem = <T,>(items: readonly T[], index: number, direction: -1 |
   next[index] = next[target]!
   next[target] = current
   return next
+}
+
+export function useEditorKeys(length: number) {
+  const prefix = useId()
+  const sequence = useRef(0)
+  const keysRef = useRef<string[]>([])
+  const createKey = () => `${prefix}-editor-${sequence.current++}`
+  while (keysRef.current.length < length) keysRef.current.push(createKey())
+  if (keysRef.current.length > length) keysRef.current = keysRef.current.slice(0, length)
+  return {
+    keys: keysRef.current,
+    move: (index: number, direction: -1 | 1) => { keysRef.current = moveItem(keysRef.current, index, direction) },
+    remove: (index: number) => { keysRef.current = keysRef.current.filter((_, itemIndex) => itemIndex !== index) },
+    append: () => { keysRef.current = [...keysRef.current, createKey()] },
+  }
 }
 
 export function CollectionActions({ label, index, length, onMove, onDelete }: {

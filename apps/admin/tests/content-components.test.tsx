@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContentEditor } from '../src/features/content/ContentEditor'
 import { VersionHistory } from '../src/features/content/VersionHistory'
 import { resolvePublicWebBaseUrl } from '../src/api/admin-client'
+import { RichTextField } from '../src/features/forms/form-utils'
 
 afterEach(() => {
   cleanup()
@@ -16,6 +17,12 @@ const draft = {
 }
 
 describe('minimal content publishing components', () => {
+  it('sanitizes rich text before writing a loaded value into the editor DOM', () => {
+    render(<RichTextField label="说明" path="body" value={'<p onclick="bad()"><strong>保留</strong></p><script>alert(1)</script><iframe src="https://evil.example"></iframe><a href="javascript:bad()">链接</a>'} errors={{}} onChange={() => undefined} />)
+    const editor = screen.getByRole('textbox', { name: '说明' })
+    expect(editor.innerHTML).toBe('<p><strong>保留</strong></p><a>链接</a>')
+    expect(editor.innerHTML).not.toMatch(/script|iframe|onclick|javascript:/iu)
+  })
   it('saves JSON with the loaded expected revision and reports malformed input locally', async () => {
     const onSave = vi.fn(async () => undefined)
     render(<ContentEditor draft={draft} publicWebBaseUrl="https://camp.example" onSave={onSave} onPublish={async () => undefined} />)
@@ -48,7 +55,7 @@ describe('minimal content publishing components', () => {
 
   it('renders immutable history and requests rollback by historical version', async () => {
     const onRollback = vi.fn(async () => undefined)
-    render(<VersionHistory publishedVersion={2} versions={[
+    render(<VersionHistory busy={false} publishedVersion={2} versions={[
       { version: 2, payload: { title: '第二版' }, createdBy: 'admin-2', createdAt: '2026-08-14T02:00:00.000Z' },
       { version: 1, payload: { title: '第一版' }, createdBy: 'admin-1', createdAt: '2026-08-14T01:00:00.000Z' },
     ]} onRollback={onRollback} />)
@@ -57,39 +64,33 @@ describe('minimal content publishing components', () => {
     await waitFor(() => expect(onRollback).toHaveBeenCalledWith(1))
   })
 
-  it('disables every rollback during a pending request and prevents duplicate versions', async () => {
-    let resolveRollback!: () => void
-    const onRollback = vi.fn(() => new Promise<void>((resolve) => { resolveRollback = resolve }))
-    render(<VersionHistory publishedVersion={3} versions={[
+  it('uses the parent-controlled busy state to disable every rollback', () => {
+    const onRollback = vi.fn()
+    const versions = [
       { version: 3, payload: {}, createdBy: 'a', createdAt: '2026-08-14T03:00:00.000Z' },
       { version: 2, payload: {}, createdBy: 'a', createdAt: '2026-08-14T02:00:00.000Z' },
       { version: 1, payload: {}, createdBy: 'a', createdAt: '2026-08-14T01:00:00.000Z' },
-    ]} onRollback={onRollback} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '回退到版本 2' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('正在回退到版本 2')
+    ]
+    const view = render(<VersionHistory busy={false} publishedVersion={3} versions={versions} onRollback={onRollback} />)
+    view.rerender(<VersionHistory busy publishedVersion={3} versions={versions} onRollback={onRollback} />)
     const buttons = screen.getAllByRole('button', { name: /回退到版本/u })
     expect(buttons.every((button) => button.hasAttribute('disabled'))).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: '回退到版本 1' }))
-    expect(onRollback).toHaveBeenCalledTimes(1)
-
-    resolveRollback()
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-    expect(buttons.every((button) => !button.hasAttribute('disabled'))).toBe(true)
+    expect(onRollback).not.toHaveBeenCalled()
+    view.rerender(<VersionHistory busy={false} publishedVersion={3} versions={versions} onRollback={onRollback} />)
+    fireEvent.click(screen.getByRole('button', { name: '回退到版本 1' }))
+    expect(onRollback).toHaveBeenCalledWith(1)
   })
 
-  it('catches rollback failures, shows an error, and re-enables actions', async () => {
-    const onRollback = vi.fn(async () => { throw new Error('network detail') })
-    render(<VersionHistory publishedVersion={2} versions={[
+  it('does not own rollback errors or operation state', () => {
+    const onRollback = vi.fn()
+    render(<VersionHistory busy={false} publishedVersion={2} versions={[
       { version: 2, payload: {}, createdBy: 'a', createdAt: '2026-08-14T02:00:00.000Z' },
       { version: 1, payload: {}, createdBy: 'a', createdAt: '2026-08-14T01:00:00.000Z' },
     ]} onRollback={onRollback} />)
-
-    const button = screen.getByRole('button', { name: '回退到版本 1' })
-    fireEvent.click(button)
-    expect(await screen.findByRole('alert')).toHaveTextContent('版本回退失败，请重试')
-    expect(button).toBeEnabled()
-    expect(screen.queryByText('network detail')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '回退到版本 1' }))
+    expect(onRollback).toHaveBeenCalledWith(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it.each([

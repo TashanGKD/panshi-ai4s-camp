@@ -1,11 +1,12 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { JsonObject } from '@panshi/contracts'
 import type { AdminClient } from '../src/api/admin-client'
 import { AdminApiError } from '../src/api/admin-client'
 import { AdminApp } from '../src/app/AdminApp'
+import { ContentPage } from '../src/pages/content/ContentPage'
 
 afterEach(cleanup)
 
@@ -54,6 +55,13 @@ const clientWithDraft = (key: Parameters<AdminClient['getDraft']>[0], payload: J
   saveDraft,
 })
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+  return { promise, resolve, reject }
+}
+
 describe('content workbench', () => {
   it('provides the complete business navigation and a truthful resource placeholder', async () => {
     renderAdmin()
@@ -82,6 +90,121 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('basic', expect.objectContaining({ title: '新标题' }), 1))
     expect(screen.queryByLabelText(/内容 JSON/u)).not.toBeInTheDocument()
+  })
+
+  it('blocks preview and publish while dirty, then publishes the saved revision', async () => {
+    const saveDraft = vi.fn(async (key: 'basic', payload: JsonObject) => ({
+      apiVersion: 'v1' as const,
+      data: { key, revision: 2, payload, publishedVersion: 1 },
+    }))
+    const publish = vi.fn(client().publish)
+    renderAdmin(client({ saveDraft: saveDraft as AdminClient['saveDraft'], publish }), '/content/basic')
+    fireEvent.change(await screen.findByLabelText('实训营名称'), { target: { value: '尚未保存的新标题' } })
+    expect(screen.getByRole('button', { name: '预览草稿' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发布当前草稿' })).toBeDisabled()
+    expect(screen.getByText('请先保存草稿')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('basic', expect.objectContaining({ title: '尚未保存的新标题' }), 1))
+    await waitFor(() => expect(screen.getByRole('button', { name: '发布当前草稿' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
+    await waitFor(() => expect(publish).toHaveBeenCalledWith('basic', 2))
+  })
+
+  it('ignores a stale module load that resolves after the current module', async () => {
+    const oldDraft = deferred<Awaited<ReturnType<AdminClient['getDraft']>>>()
+    const oldHistory = deferred<Awaited<ReturnType<AdminClient['getHistory']>>>()
+    const api = client({
+      getDraft: async (key) => key === 'basic' ? oldDraft.promise : client().getDraft(key),
+      getHistory: async (key) => key === 'basic' ? oldHistory.promise : client().getHistory(key),
+    })
+    const view = render(<ContentPage moduleKey="basic" client={api} publicWebBaseUrl="https://camp.example" />)
+    view.rerender(<ContentPage moduleKey="features" client={api} publicWebBaseUrl="https://camp.example" />)
+    expect(await screen.findByDisplayValue('系统课程')).toBeVisible()
+    await act(async () => {
+      oldDraft.resolve({ apiVersion: 'v1', data: { key: 'basic', revision: 9, payload: drafts.basic as unknown as JsonObject, publishedVersion: 1 } })
+      oldHistory.resolve({ apiVersion: 'v1', data: { key: 'basic', publishedVersion: 1, versions: [] } })
+      await Promise.all([oldDraft.promise, oldHistory.promise])
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(screen.getByRole('heading', { name: '实训特色' })).toBeVisible()
+    expect(screen.queryByLabelText('实训营名称')).not.toBeInTheDocument()
+  })
+
+  it('ignores a stale module failure after the next module has loaded', async () => {
+    const oldDraft = deferred<Awaited<ReturnType<AdminClient['getDraft']>>>()
+    const api = client({ getDraft: async (key) => key === 'basic' ? oldDraft.promise : client().getDraft(key) })
+    const view = render(<ContentPage moduleKey="basic" client={api} publicWebBaseUrl="https://camp.example" />)
+    view.rerender(<ContentPage moduleKey="contacts" client={api} publicWebBaseUrl="https://camp.example" />)
+    expect(await screen.findByLabelText('联系人姓名')).toBeVisible()
+    oldDraft.reject(new Error('旧模块失败'))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('heading', { name: '联系方式' })).toBeVisible()
+    expect(screen.queryByText('内容模块暂时无法加载')).not.toBeInTheDocument()
+  })
+
+  it('does not let a completed write from the previous module update the current module', async () => {
+    const oldSave = deferred<Awaited<ReturnType<AdminClient['saveDraft']>>>()
+    const api = client({ saveDraft: async (key, payload) => key === 'basic' ? oldSave.promise : client().saveDraft(key, payload, 1) })
+    const view = render(<ContentPage moduleKey="basic" client={api} publicWebBaseUrl="https://camp.example" />)
+    fireEvent.change(await screen.findByLabelText('实训营名称'), { target: { value: '旧模块编辑' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    view.rerender(<ContentPage moduleKey="features" client={api} publicWebBaseUrl="https://camp.example" />)
+    expect(await screen.findByDisplayValue('系统课程')).toBeVisible()
+    oldSave.resolve({ apiVersion: 'v1', data: { key: 'basic', revision: 2, payload: { ...drafts.basic, title: '旧模块编辑' }, publishedVersion: 1 } })
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('heading', { name: '实训特色' })).toBeVisible()
+    expect(screen.queryByText('草稿已保存。')).not.toBeInTheDocument()
+  })
+
+  it('uses one synchronous write lock across save, publish and rollback and releases it after failure', async () => {
+    const save = deferred<Awaited<ReturnType<AdminClient['saveDraft']>>>()
+    const saveDraft = vi.fn(() => save.promise)
+    const publish = vi.fn(client().publish)
+    const rollback = vi.fn(client().rollback)
+    const api = client({
+      saveDraft,
+      publish,
+      rollback,
+      getHistory: async (key) => ({ apiVersion: 'v1', data: { key, publishedVersion: 2, versions: [
+        { version: 2, payload: {}, createdBy: 'a', createdAt: '2026-08-14T02:00:00.000Z' },
+        { version: 1, payload: {}, createdBy: 'a', createdAt: '2026-08-14T01:00:00.000Z' },
+      ] } }),
+    })
+    render(<ContentPage moduleKey="basic" client={api} publicWebBaseUrl="https://camp.example" />)
+    await screen.findByLabelText('实训营名称')
+    const saveButton = screen.getByRole('button', { name: '保存草稿' })
+    const rollbackButton = screen.getByRole('button', { name: '回退到版本 1' })
+    act(() => {
+      fireEvent.click(saveButton)
+      fireEvent.click(rollbackButton)
+      fireEvent.click(saveButton)
+    })
+    expect(saveDraft).toHaveBeenCalledTimes(1)
+    expect(rollback).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '发布当前草稿' })).toBeDisabled()
+    expect(rollbackButton).toBeDisabled()
+    save.reject(new Error('保存失败'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存失败')
+    await waitFor(() => expect(rollbackButton).toBeEnabled())
+    fireEvent.click(rollbackButton)
+    await waitFor(() => expect(rollback).toHaveBeenCalledTimes(1))
+  })
+
+  it('routes rollback failures through the parent error mapper and releases the shared lock', async () => {
+    const rollback = vi.fn(async () => { throw new AdminApiError(409, '冲突', 'CONTENT_CONFLICT') })
+    const api = client({
+      rollback,
+      getHistory: async (key) => ({ apiVersion: 'v1', data: { key, publishedVersion: 2, versions: [
+        { version: 2, payload: {}, createdBy: 'a', createdAt: '2026-08-14T02:00:00.000Z' },
+        { version: 1, payload: {}, createdBy: 'a', createdAt: '2026-08-14T01:00:00.000Z' },
+      ] } }),
+    })
+    render(<ContentPage moduleKey="basic" client={api} publicWebBaseUrl="https://camp.example" />)
+    const rollbackButton = await screen.findByRole('button', { name: '回退到版本 1' })
+    fireEvent.click(rollbackButton)
+    expect(await screen.findByRole('alert')).toHaveTextContent('其他管理员修改')
+    await waitFor(() => expect(rollbackButton).toBeEnabled())
+    expect(rollback).toHaveBeenCalledTimes(1)
   })
 
   it('supports accessible collection ordering, adding and deletion', async () => {
@@ -146,6 +269,30 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
     const error = await screen.findByText('开始日期无效')
     expect(field).toHaveAttribute('aria-describedby', error.id)
+    expect(field).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('marks rich text and select controls invalid while retaining error descriptions', async () => {
+    const publish = vi.fn(async () => { throw new AdminApiError(422, '校验失败', 'CONTENT_VALIDATION_FAILED', { fields: [
+      { path: 'items.0.description', code: 'INVALID', message: '特色说明无效' },
+    ] }) })
+    renderAdmin(client({ publish }), '/content/features')
+    const richText = (await screen.findAllByRole('textbox', { name: '特色说明' }))[0]!
+    fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
+    const error = await screen.findByText('特色说明无效')
+    expect(richText).toHaveAttribute('aria-invalid', 'true')
+    expect(richText).toHaveAttribute('aria-describedby', error.id)
+
+    cleanup()
+    const contactPublish = vi.fn(async () => { throw new AdminApiError(422, '校验失败', 'CONTENT_VALIDATION_FAILED', { fields: [
+      { path: 'items.0.methods.0.type', code: 'INVALID', message: '联系方式类型无效' },
+    ] }) })
+    renderAdmin(client({ publish: contactPublish }), '/content/contacts')
+    const select = await screen.findByLabelText('联系人 1 的联系方式 1 类型')
+    fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
+    const selectError = await screen.findByText('联系方式类型无效')
+    expect(select).toHaveAttribute('aria-invalid', 'true')
+    expect(select).toHaveAttribute('aria-describedby', selectError.id)
   })
 
   it('round-trips multiple intro paragraphs while editing, adding, deleting and sorting independently', async () => {
@@ -162,6 +309,21 @@ describe('content workbench', () => {
     await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('basic', expect.objectContaining({
       intro: ['<p>第二段（修改）</p>', '<p>第三段</p>', '<p></p>'],
     }), 7))
+  })
+
+  it('preserves intro and feature editor DOM identity when items are reordered', async () => {
+    const introApi = clientWithDraft('basic', { ...drafts.basic, intro: ['<p>第一段</p>', '<p>第二段</p>'] }).api
+    renderAdmin(introApi, '/content/basic')
+    const introBefore = (await screen.findAllByRole('textbox', { name: /简介段落/u })).find((node) => node.innerHTML.includes('第一段'))
+    fireEvent.click(screen.getByRole('button', { name: '下移“简介段落 1”' }))
+    const introAfter = screen.getAllByRole('textbox', { name: /简介段落/u }).find((node) => node.innerHTML.includes('第一段'))
+    expect(introAfter).toBe(introBefore)
+
+    cleanup()
+    renderAdmin(client(), '/content/features')
+    const featureBefore = await screen.findByDisplayValue('系统课程')
+    fireEvent.click(screen.getByRole('button', { name: '下移“系统课程”' }))
+    expect(screen.getByDisplayValue('系统课程')).toBe(featureBefore)
   })
 
   it('edits and sorts organization records before saving without a JSON escape hatch', async () => {
@@ -219,6 +381,22 @@ describe('content workbench', () => {
     ] }, 7))
   })
 
+  it('preserves contact and method editor DOM identity when nested items are reordered', async () => {
+    const { api } = clientWithDraft('contacts', { items: [
+      { name: '会务组', responsibility: '报名咨询', methods: [
+        { type: 'email', value: 'first@example.com' }, { type: 'phone', value: '010-12345678' },
+      ] },
+      { name: '课程组', responsibility: '课程咨询', methods: [{ type: 'email', value: 'course@example.com' }] },
+    ] })
+    renderAdmin(api, '/content/contacts')
+    const methodBefore = await screen.findByDisplayValue('first@example.com')
+    fireEvent.click(screen.getAllByRole('button', { name: '下移“联系方式 1”' })[0]!)
+    expect(screen.getByDisplayValue('first@example.com')).toBe(methodBefore)
+    const contactBefore = screen.getByDisplayValue('会务组')
+    fireEvent.click(screen.getByRole('button', { name: '下移“会务组”' }))
+    expect(screen.getByDisplayValue('会务组')).toBe(contactBefore)
+  })
+
   it('round-trips speaker references, legacy instructors and multiple session details independently', async () => {
     const { api, saveDraft } = clientWithDraft('schedule', {
       speakers: [{ id: 'speaker-1', name: '张老师' }, { id: 'speaker-2', name: '李老师' }],
@@ -239,6 +417,29 @@ describe('content workbench', () => {
         time: '上午课程', details: ['案例二', '概念一（修改）'], speakerIds: ['speaker-1'], instructors: ['旧讲师'],
       })] })],
     }), 7))
+  })
+
+  it('preserves schedule day, session and detail DOM identity through nested sorting', async () => {
+    const { api } = clientWithDraft('schedule', {
+      speakers: [],
+      days: [
+        { date: '2026-08-23', label: '第一天', theme: '主题一', sessions: [
+          { title: '课程甲', timeRange: { start: '09:00', end: '10:00' }, details: ['要点甲', '要点乙'], speakerIds: [] },
+          { title: '课程乙', timeRange: { start: '10:00', end: '11:00' }, details: [], speakerIds: [] },
+        ] },
+        { date: '2026-08-24', label: '第二天', theme: '主题二', sessions: [] },
+      ],
+    })
+    renderAdmin(api, '/content/schedule')
+    const detailBefore = await screen.findByDisplayValue('要点甲')
+    fireEvent.click(screen.getByRole('button', { name: '下移“内容要点 1”' }))
+    expect(screen.getByDisplayValue('要点甲')).toBe(detailBefore)
+    const sessionBefore = screen.getByDisplayValue('课程甲')
+    fireEvent.click(screen.getByRole('button', { name: '下移“课程甲”' }))
+    expect(screen.getByDisplayValue('课程甲')).toBe(sessionBefore)
+    const dayBefore = screen.getByDisplayValue('第一天')
+    fireEvent.click(screen.getByRole('button', { name: '下移“第一天”' }))
+    expect(screen.getByDisplayValue('第一天')).toBe(dayBefore)
   })
 
   it('edits and sorts the validated home section order in display settings', async () => {

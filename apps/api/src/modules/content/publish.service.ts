@@ -46,7 +46,9 @@ const requireRecord = <T>(record: T | null): T => {
 export const createContentPublishingService = (repository: ContentPublishingRepository): ContentPublishingService => ({
   getDraft: async (key) => {
     const record = requireRecord(await repository.getDraft(key))
-    return AdminContentDraftResponseSchema.parse({ apiVersion: 'v1', data: record })
+    return AdminContentDraftResponseSchema.parse({
+      apiVersion: 'v1', data: { ...record, payload: sanitizeContentPayload(key, record.payload) },
+    })
   },
 
   saveDraft: async (key, payload, expectedRevision, actorUserId) => {
@@ -61,7 +63,7 @@ export const createContentPublishingService = (repository: ContentPublishingRepo
   previewDraft: async (key) => {
     const record = requireRecord(await repository.getDraft(key))
     return AdminContentPreviewResponseSchema.parse({
-      apiVersion: 'v1', data: { key: record.key, revision: record.revision, payload: record.payload },
+      apiVersion: 'v1', data: { key: record.key, revision: record.revision, payload: sanitizeContentPayload(key, record.payload) },
     })
   },
 

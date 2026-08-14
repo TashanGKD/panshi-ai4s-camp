@@ -1,7 +1,30 @@
-import { LoginResponseSchema, ProfileResponseSchema, type AdminLoginRequest, type LoginResponse, type ProfileResponse } from '@panshi/contracts'
+import {
+  AdminContentDraftResponseSchema,
+  AdminContentHistoryResponseSchema,
+  AdminContentPreviewResponseSchema,
+  ApiErrorSchema,
+  ContentPublishResponseSchema,
+  LoginResponseSchema,
+  ProfileResponseSchema,
+  type AdminContentDraftResponse,
+  type AdminContentHistoryResponse,
+  type AdminContentPreviewResponse,
+  type AdminLoginRequest,
+  type ContentModuleKey,
+  type ContentPublishResponse,
+  type ContentValidationDetails,
+  type JsonObject,
+  type LoginResponse,
+  type ProfileResponse,
+} from '@panshi/contracts'
 
 export class AdminApiError extends Error {
-  constructor(readonly status: number, message: string) { super(message); this.name = 'AdminApiError' }
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code?: string,
+    readonly details?: ContentValidationDetails,
+  ) { super(message); this.name = 'AdminApiError' }
 }
 
 type AdminClientRuntime = { production: boolean }
@@ -20,10 +43,28 @@ export const resolveApiBaseUrl = (value: string | undefined, runtime: AdminClien
   return `${url.origin}${url.pathname.replace(/\/+$/u, '')}`
 }
 
+export const resolvePublicWebBaseUrl = (value: string | undefined, runtime: AdminClientRuntime): string => {
+  const candidate = value?.trim() ?? ''
+  if (candidate === '') return ''
+  let url: URL
+  try { url = new URL(candidate) } catch { throw new Error('Invalid VITE_PUBLIC_WEB_BASE_URL') }
+  const unsafeHttp = url.protocol === 'http:' && (runtime.production || !loopbackHosts.has(url.hostname))
+  if (!['http:', 'https:'].includes(url.protocol) || unsafeHttp || url.username || url.password || url.search || url.hash) {
+    throw new Error('Invalid VITE_PUBLIC_WEB_BASE_URL')
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}`
+}
+
 export type AdminClient = {
   getProfile: () => Promise<ProfileResponse>
   login: (input: AdminLoginRequest) => Promise<LoginResponse>
   logout: () => Promise<void>
+  getDraft: (key: ContentModuleKey) => Promise<AdminContentDraftResponse>
+  saveDraft: (key: ContentModuleKey, payload: JsonObject, expectedRevision: number) => Promise<AdminContentDraftResponse>
+  getPreview: (key: ContentModuleKey) => Promise<AdminContentPreviewResponse>
+  publish: (key: ContentModuleKey, expectedRevision: number) => Promise<ContentPublishResponse>
+  getHistory: (key: ContentModuleKey) => Promise<AdminContentHistoryResponse>
+  rollback: (key: ContentModuleKey, version: number) => Promise<ContentPublishResponse>
 }
 
 export const createAdminClient = (apiBaseUrl: string | undefined, runtime: AdminClientRuntime): AdminClient => {
@@ -35,8 +76,12 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
       headers: { Accept: 'application/json', ...init?.headers },
     })
     if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as { error?: { message?: string } }
-      throw new AdminApiError(response.status, body.error?.message ?? '请求失败')
+      const parsed = ApiErrorSchema.safeParse(await response.json().catch(() => ({})))
+      const error = parsed.success ? parsed.data.error : undefined
+      const details = error?.details && typeof error.details === 'object' && 'fields' in error.details
+        ? error.details as ContentValidationDetails
+        : undefined
+      throw new AdminApiError(response.status, error?.message ?? '请求失败', error?.code, details)
     }
     return response
   }
@@ -46,6 +91,18 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     })).json()),
     logout: async () => { await send('/api/v1/auth/admin/logout', { method: 'POST' }) },
+    getDraft: async (key) => AdminContentDraftResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/draft`)).json()),
+    saveDraft: async (key, payload, expectedRevision) => AdminContentDraftResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/draft`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payload, expectedRevision }),
+    })).json()),
+    getPreview: async (key) => AdminContentPreviewResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/preview`)).json()),
+    publish: async (key, expectedRevision) => ContentPublishResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/publish`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
+    })).json()),
+    getHistory: async (key) => AdminContentHistoryResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/versions`)).json()),
+    rollback: async (key, version) => ContentPublishResponseSchema.parse(await (await send(`/api/v1/admin/content/${key}/rollback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }),
+    })).json()),
   }
 }
 

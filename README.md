@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员 Cookie 会话和最小管理后台登录壳已经实现。后台内容管理以及注册、学员账户等业务路由属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员 Cookie 会话，以及 Task 8 的草稿、同源预览、版本化发布和回退已经实现。Task 9 的完整内容工作台以及注册、学员账户等业务路由属于后续任务。
 
 ## 运行环境
 
@@ -34,9 +34,15 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，公开客户端从其中的 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
 
-管理后台的 Vite 配置同样从项目根目录加载 `VITE_API_BASE_URL`，并把 Vite 的实际 `import.meta.env.PROD` 传给客户端配置校验。生产构建只允许空值（同源）或 HTTPS API；开发模式仅允许 HTTPS，或精确的 `localhost`、`127.0.0.1`、`::1` 回环 HTTP。跨 origin 时身份请求使用 `credentials: 'include'`，不在浏览器存储中推断或保存登录态。
+管理后台的 Vite 配置同样从项目根目录加载 `VITE_API_BASE_URL`，并把 Vite 的实际 `import.meta.env.PROD` 传给客户端配置校验。生产构建只允许空值（同源）或 HTTPS API；开发模式仅允许 HTTPS，或精确的 `localhost`、`127.0.0.1`、`::1` 回环 HTTP。跨 origin 时身份请求使用 `credentials: 'include'`，不在浏览器存储中推断或保存登录态。`VITE_PUBLIC_WEB_BASE_URL` 使用相同的生产 HTTPS／开发回环 HTTP 规则，后台预览按钮只打开 `/preview/:module`，不在 URL 中附加 token。
 
 根目录 `.env.example` 的本地分端口默认值为 `VITE_API_BASE_URL=http://localhost:3001`，Web 默认由 Vite 在 `http://localhost:5173` 提供。配置值必须是不含凭据、query 或 fragment 的绝对 HTTP(S) URL，可含基础路径，末尾斜杠会被规范化；非法或不安全值会在客户端初始化时明确拒绝。使用已配置的 API origin 时，`fetch` 携带 `credentials: 'include'`，所以 API 的 `CORS_ORIGINS` 必须包含实际 Web origin；同源回退使用 `credentials: 'same-origin'`。
+
+### 内容预览与发布
+
+最小后台当前只挂载 `basic` 的通用 JSON `ContentEditor` 和 `VersionHistory`，用于验证 Task 8 的完整能力；按业务对象组织的导航、表单和完整工作台属于 Task 9。保存必须提交加载时的 `expectedRevision`，冲突返回 `CONTENT_CONFLICT`。公共 Web 的 `/preview/:module` 使用管理员 HttpOnly Cookie 读取受保护草稿，并通过与正式页面相同的模块渲染组件和 `PublicShell` 展示；未登录或无权限时只显示登录／禁止状态。
+
+发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退复制历史 payload 产生新版本。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
 
 ## PostgreSQL 与迁移
 
@@ -69,6 +75,10 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm run test:integration:migrations -w @panshi/api
+
+# Task 8 的并发发布集成目标按要求只接受这一精确本机 URL，并强制单 worker／文件串行。
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+  npm run test:integration:publishing -w @panshi/api
 ```
 
 上述账号和密码是与 `compose.yaml` 对齐的本地开发占位值，绝不能用于生产环境。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
@@ -135,6 +145,15 @@ API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -
 身份 SQL/session 生命周期的必须集成边界使用 `npm run test:integration:auth -w @panshi/api`；它同样要求显式 `TEST_DATABASE_URL` 且数据库名必须精确为 `panshi_ai4s_camp_test`，缺少时在加载测试前失败。
 `0003_user_display_name.sql` 的真实前向迁移边界使用 `npm run test:integration:migrations -w @panshi/api`；测试在专用测试数据库的一次事务内创建唯一隔离 schema，运行真实 0001/0002、插入 pre-0003 用户、再运行真实 0003，并回滚整个隔离 schema。它不会修改旧 migration，也不会接触其他数据库。
 
+Task 8 的真实浏览器流使用独立配置启动 API、Web 与 admin。必须显式提供专用测试库和临时测试管理员凭据；凭据不写入仓库。fixture 只有在 `PUBLISHING_E2E=1` 且数据库 URL 精确匹配专用测试库时才会 seed/cleanup，并且只由测试命令调用：
+
+```bash
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+E2E_ADMIN_PHONE='<dedicated-test-phone>' \
+E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
+  npm run e2e:content
+```
+
 ## Task 7 验证记录（2026-08-14）
 
 本次按 RED→GREEN 完成身份契约、拒绝优先 API、CLI、数据库会话与管理后台守卫测试。GREEN 后的分层结果为：contracts 48 项；API 无数据库集 70 项通过、3 项数据库用例按设计跳过；schema 20 项；内容集成 8 项；身份 SQL/session 集成 1 项；admin 9 项；Web 30 项。身份集成命令已确认在缺少 `TEST_DATABASE_URL` 或数据库名不精确时非零退出，并在本机 PostgreSQL `panshi_ai4s_camp_test` 上通过。根目录 typecheck、lint、build、`npm audit --omit=dev` 和 `git diff --check` 也纳入本任务最终校验。
@@ -144,6 +163,14 @@ API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -
 本次加固的无数据库结果为：contracts 67 项通过；API unit 101 项通过，另有 3 项 PostgreSQL 内容用例因未提供测试数据库而明确跳过；admin 26 项通过。根目录 typecheck、lint、build 通过，`npm audit --omit=dev` 报告 0 个生产依赖漏洞。完整 `npm audit` 仍报告来自 `drizzle-kit` 开发依赖链旧版 esbuild 的 4 个 moderate 漏洞；自动修复要求强制降级到 breaking 版本，因此本次未执行 `npm audit fix --force`。
 
 当前执行环境没有设置 `TEST_DATABASE_URL`，所以精确的 auth integration、隔离 schema 的 0003 forward migration integration、以及完整 schema integration 都在加载测试前按安全门禁非零退出；本记录不声称这三组 PostgreSQL 测试已通过。运行命令和专用测试数据库限制见上文。
+
+## Task 8 验证记录（2026-08-14）
+
+本次按 RED→GREEN 实现并验证：contracts 77 项；API 无数据库聚焦集 119 项通过、3 项既有 PostgreSQL 用例按设计跳过；admin 38 项；Web 45 项。PostgreSQL 目标按顺序独立运行：schema 24 项、公开内容 8 项、身份 3 项、前向迁移 1 项、Task 8 发布事务 6 项均通过。Task 8 的 Playwright 真实浏览器流 1 项通过，覆盖匿名预览拒绝、管理员登录、保存草稿、同源组件预览、发布、回退、公共读取和审计脱敏。
+
+根目录 workspace 检查、typecheck、lint、build、`git diff --check` 均通过；`npm audit --omit=dev` 为 0 个漏洞。完整 `npm audit` 仍报告 `drizzle-kit` 开发依赖链旧版 esbuild 的 4 个 moderate 漏洞，自动修复会强制降级到 breaking 版本，未执行 `npm audit fix --force`。无环境变量运行 E2E fixture 会按安全门禁非零退出。
+
+既有 `visual:test` 已实际运行但未通过：原配置没有 API server，当前公共页落入错误壳，结果为 15/24 通过；诊断性注入当前正式 seed 后为 18/24 通过，并确认剩余失败来自 Task 6 之后未更新的 public-home 图片高度和仍查询 `.info-card--compact` 的旧 selector。Task 8 没有改写视觉基线或这组旧断言。Docker Compose 本次未运行；数据库、API、Web、admin 的 Task 8 流由本机 PostgreSQL 和 Playwright 进程完成。
 
 公开站点的 Playwright 视觉测试使用本机已安装的 Chromium，并按操作系统保存快照：
 

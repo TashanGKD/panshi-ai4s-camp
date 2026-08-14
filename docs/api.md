@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取以及管理员登录、退出和 profile 边界；报名、后台业务管理和资源下载路由仍属于后续任务。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份，以及 Task 8 的内容草稿、预览、发布、历史和回退边界；完整内容工作台、报名和资源下载路由仍属于后续任务。
 
 ## API 范围
 
@@ -27,9 +27,29 @@
 - `POST /api/v1/auth/admin/logout`：若 Cookie 中存在 token，按 SHA-256 hash 幂等撤销；无论 token 缺失、未知、过期、已撤销或已轮换，都用匹配属性清除 Cookie 并返回 204。Origin 保护仍先于路由执行。
 - `GET /api/v1/me/profile`：返回 `id`、`displayName`、`phoneNormalized` 和 `role`；未知、过期或已撤销会话返回 401，非管理员或已停用账号返回 403。
 
+已实现的管理员内容接口均要求真实 `panshi_session` Cookie 和 `admin` 角色：
+
+- `GET /api/v1/admin/content/:key/draft`：读取草稿 payload、当前 `revision` 和已发布版本号。
+- `PUT /api/v1/admin/content/:key/draft`：请求 `{ "expectedRevision": n, "payload": {} }`。数据库使用单条 `UPDATE ... WHERE draft_revision = expectedRevision RETURNING` 完成 compare-and-swap；过期 revision 返回 409 `CONTENT_CONFLICT`。
+- `GET /api/v1/admin/content/:key/preview`：为公共 Web `/preview/:module` 返回受保护草稿。该 GET 只接受管理员 Cookie，不签发公开 token，不生成可转发预览链接。
+- `POST /api/v1/admin/content/:key/publish`：请求 `{ "expectedRevision": n }`。事务按模块行加锁，在事务内校验草稿、分配递增版本、插入不可变版本、更新发布指针并写审计。
+- `GET /api/v1/admin/content/:key/versions`：按版本号倒序返回不可变历史 payload、创建人和时间。
+- `POST /api/v1/admin/content/:key/rollback`：请求 `{ "version": n }`；复制历史 payload 创建一个新版本并移动指针，不修改历史行。
+
+管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
+
 Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由使用 App 已完成的上述 `GET /api/v1/public/site` 请求与契约校验，不单独重复请求；App 成功后页面显示真实空状态，App 失败时保留顶层错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
 
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
+
+发布校验返回 422 `CONTENT_VALIDATION_FAILED`，`error.details.fields` 为稳定的 `{ path, code, message }[]`，不直接返回 Zod issue、stack 或无清洗的输入。关联规则如下：
+
+- `importantDates.items[].machineKey` 可选值为 `registrationOpen`、`registrationDeadline`、`campStart`、`campEnd`。只有机器键参与关联校验，不从中文 label 猜测；两项报名边界同时存在时必须为真实日期且开放日严格早于截止日，机器实训日期必须与已发布 `basic.dates` 一致。
+- `schedule.days[].sessions[].timeRange` 使用 `{ start: "HH:mm", end: "HH:mm" }` 且 start 严格早于 end。公共读取仍兼容历史 `time` 显示字符串；新发布若携带该历史显示字段则必须同时提供机器范围。
+- `schedule.speakers` 使用稳定 `id`，session 使用 `speakerIds`；讲师 ID、单节引用不得重复，每个引用必须存在。历史 `instructors` 字符串只保留公共显示兼容；声明 speaker registry 后的新发布必须使用引用。
+- 联系项继续校验非空 `label`/`value` 以及仅允许安全的 `https:`、`mailto:`、`tel:` href，并返回具体字段路径。
+- 发布通过注入的 validation repository 查询真实 `resources` 表；存在 `access_level='public'` 且 `file_id is null` 的记录时拒绝发布。Task 8 不新增资源 API 或 UI，它们仍由 Task 15 负责。
+- 可选关联域完全缺失时不阻塞无关模块；一旦相应机器字段或数据库记录存在，就执行完整校验。
 
 ## API 运行基线
 
@@ -60,6 +80,20 @@ JSON parser 的稳定客户端错误由统一错误层转换：格式错误返�
 - `message`：非空、面向用户或调用方的错误说明。
 - `requestId`：非空请求标识，用于日志关联与排查。
 - `details`：可选的键值对象，只承载该错误的补充结构化信息。
+
+内容字段错误的 `details` 示例：
+
+```json
+{
+  "fields": [
+    {
+      "path": "days.0.sessions.0.timeRange.end",
+      "code": "INVALID_TIME_RANGE",
+      "message": "结束时间必须晚于开始时间"
+    }
+  ]
+}
+```
 
 客户端不得依赖 `message` 文案分支；程序逻辑应依赖 `code`。新增错误信息时不得改变上述顶层结构。
 

@@ -87,10 +87,15 @@ export const ImportantDatesContentSchema = z.object({
   items: z.array(z.object({
     label: NonEmptyTextSchema,
     value: NonEmptyTextSchema,
+    machineKey: z.enum(['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd']).optional(),
   }).strict()),
 }).strict()
 
 export const ScheduleContentSchema = z.object({
+  speakers: z.array(z.object({
+    id: NonEmptyTextSchema,
+    name: NonEmptyTextSchema,
+  }).strict()).optional(),
   days: z.array(z.object({
     date: IsoDateSchema,
     label: NonEmptyTextSchema,
@@ -98,8 +103,13 @@ export const ScheduleContentSchema = z.object({
     sessions: z.array(z.object({
       title: NonEmptyTextSchema,
       time: NonEmptyTextSchema.optional(),
+      timeRange: z.object({
+        start: z.string().regex(/^\d{2}:\d{2}$/u),
+        end: z.string().regex(/^\d{2}:\d{2}$/u),
+      }).strict().optional(),
       details: z.array(NonEmptyTextSchema).optional(),
       instructors: z.array(NonEmptyTextSchema).optional(),
+      speakerIds: z.array(NonEmptyTextSchema).optional(),
     }).strict()),
   }).strict()),
 }).strict()

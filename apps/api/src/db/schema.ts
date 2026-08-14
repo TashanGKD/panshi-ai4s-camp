@@ -14,8 +14,8 @@ import {
   uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
+import type { JsonObject } from '@panshi/contracts'
 
-type JsonObject = Record<string, unknown>
 type UserRole = 'user' | 'admin'
 type ApplicationStatus =
   | 'draft'

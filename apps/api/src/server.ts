@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
 import { getApiEnv } from './config/env.js'
 import { createDatabaseClient } from './db/client.js'
-import { createContentRepository } from './modules/content/content.repository.js'
+import { createContentPublishingRepository, createContentRepository } from './modules/content/content.repository.js'
+import { createContentPublishingService } from './modules/content/publish.service.js'
 import { createIdentityRepository } from './modules/identity/identity.repository.js'
 
 type ServerError = Error & { code?: string }
@@ -215,11 +216,13 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const env = getApiEnv()
   const database = createDatabaseClient(env.DATABASE_URL, env.HEALTHCHECK_TIMEOUT_MS)
   const identityRepository = createIdentityRepository(database.db)
+  const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
   const app = createApp({
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
     identityRepository,
     authTransactionRepository: identityRepository,
+    contentPublishingService,
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

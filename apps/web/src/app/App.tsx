@@ -1,13 +1,14 @@
 import '@panshi/ui/tokens.css'
 import { useEffect, useState } from 'react'
-import { Route, Routes } from 'react-router-dom'
-import type { PublicSiteResponse } from '@panshi/contracts'
+import { Route, Routes, useParams } from 'react-router-dom'
+import { ContentModuleKeySchema, type PublicSiteResponse } from '@panshi/contracts'
 import { getPublicSite } from '../api/public-client'
 import { ContactPage } from '../pages/ContactPage'
 import { HomePage } from '../pages/HomePage'
 import { ResourcesPage } from '../pages/ResourcesPage'
 import { SchedulePage } from '../pages/SchedulePage'
 import { TravelPage } from '../pages/TravelPage'
+import { PreviewPage } from '../pages/PreviewPage'
 import { PublicShell } from './PublicShell'
 import { SkipLink } from './SkipLink'
 import '../styles/public.css'
@@ -22,6 +23,13 @@ const LoadingOrError = ({ error = false }: { error?: boolean }) => <div classNam
 </div>
 
 const PlaceholderPage = ({ title }: { title: string }) => <section className="public-page__section"><h2>{title}</h2><p>本页面尚未开放。</p></section>
+
+const PreviewRoute = ({ site }: { site: PublicSiteResponse['data'] }) => {
+  const parsed = ContentModuleKeySchema.safeParse(useParams().module)
+  return parsed.success
+    ? <PreviewPage site={site} moduleKey={parsed.data} />
+    : <main className="event-container public-state"><p role="alert">不支持的内容预览模块</p></main>
+}
 
 export function App() {
   const [state, setState] = useState<State>({ status: 'loading' })
@@ -46,5 +54,6 @@ export function App() {
     <Route path="/resources" element={<PublicShell site={site}><ResourcesPage apiReady={state.status === 'ready'} /></PublicShell>} />
     <Route path="/register" element={<PublicShell site={site}><PlaceholderPage title="在线注册" /></PublicShell>} />
     <Route path="/account" element={<PublicShell site={site}><PlaceholderPage title="个人中心" /></PublicShell>} />
+    <Route path="/preview/:module" element={<PreviewRoute site={site} />} />
   </Routes>
 }

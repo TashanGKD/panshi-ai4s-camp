@@ -1,0 +1,177 @@
+import {
+  ContentValidationDetailsSchema,
+  PublicContentPayloadSchemas,
+  type ContentModuleKey,
+  type ContentValidationDetails,
+  type JsonObject,
+} from '@panshi/contracts'
+
+export type ContentValidationRepository = {
+  findPublishedPayload: (key: ContentModuleKey) => Promise<JsonObject | null>
+  findPublicResourcesMissingFiles: () => Promise<readonly { id: string, key: string }[]>
+}
+
+type FieldIssue = ContentValidationDetails['fields'][number]
+
+export class ContentValidationError extends Error {
+  readonly details: ContentValidationDetails
+
+  constructor(fields: readonly FieldIssue[]) {
+    super('Content validation failed')
+    this.name = 'ContentValidationError'
+    this.details = ContentValidationDetailsSchema.parse({ fields })
+  }
+}
+
+const fieldPath = (path: readonly PropertyKey[]) => path.map(String).join('.') || 'payload'
+const realIsoDate = /^\d{4}-\d{2}-\d{2}$/u
+const timePattern = /^(?<hour>\d{2}):(?<minute>\d{2})$/u
+
+const isRealDate = (value: string) => {
+  if (!realIsoDate.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year!, month! - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month! - 1 && date.getUTCDate() === day
+}
+
+const minuteOfDay = (value: string): number | null => {
+  const match = timePattern.exec(value)
+  if (!match?.groups) return null
+  const hour = Number(match.groups.hour)
+  const minute = Number(match.groups.minute)
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : null
+}
+
+const schemaIssues = (key: ContentModuleKey, payload: JsonObject): FieldIssue[] => {
+  const result = PublicContentPayloadSchemas[key].safeParse(payload)
+  if (result.success) return []
+  return result.error.issues.map((issue) => ({
+    path: fieldPath(issue.path),
+    code: 'INVALID_FIELD',
+    message: '字段格式不正确',
+  }))
+}
+
+type ImportantDateItem = { value: string, machineKey?: 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd' }
+type ImportantDatesPayload = { items: ImportantDateItem[] }
+
+const validateImportantDates = (payload: ImportantDatesPayload, basic: JsonObject | null): FieldIssue[] => {
+  const issues: FieldIssue[] = []
+  const indexed = new Map<string, { item: ImportantDateItem, index: number }>()
+
+  payload.items.forEach((item, index) => {
+    if (!item.machineKey) return
+    if (indexed.has(item.machineKey)) {
+      issues.push({ path: `items.${index}.machineKey`, code: 'DUPLICATE_MACHINE_KEY', message: '机器日期键不能重复' })
+      return
+    }
+    indexed.set(item.machineKey, { item, index })
+    if (!isRealDate(item.value)) {
+      issues.push({ path: `items.${index}.value`, code: 'INVALID_MACHINE_DATE', message: '机器日期必须使用有效的 YYYY-MM-DD' })
+    }
+  })
+
+  const registrationOpen = indexed.get('registrationOpen')
+  const registrationDeadline = indexed.get('registrationDeadline')
+  if (
+    registrationOpen && registrationDeadline
+    && isRealDate(registrationOpen.item.value) && isRealDate(registrationDeadline.item.value)
+    && registrationOpen.item.value >= registrationDeadline.item.value
+  ) {
+    issues.push({
+      path: `items.${registrationDeadline.index}.value`,
+      code: 'INVALID_REGISTRATION_WINDOW',
+      message: '报名截止时间必须晚于报名开放时间',
+    })
+  }
+
+  const basicDates = basic && typeof basic.dates === 'object' && basic.dates !== null && !Array.isArray(basic.dates)
+    ? basic.dates as Record<string, unknown>
+    : undefined
+  for (const [machineKey, basicKey] of [['campStart', 'start'], ['campEnd', 'end']] as const) {
+    const date = indexed.get(machineKey)
+    const expected = basicDates?.[basicKey]
+    if (date && isRealDate(date.item.value) && typeof expected === 'string' && date.item.value !== expected) {
+      issues.push({ path: `items.${date.index}.value`, code: 'CAMP_DATE_MISMATCH', message: '实训日期必须与基本信息一致' })
+    }
+  }
+  return issues
+}
+
+type SchedulePayload = {
+  speakers?: { id: string }[]
+  days: { sessions: { time?: string, timeRange?: { start: string, end: string }, instructors?: string[], speakerIds?: string[] }[] }[]
+}
+
+const validateSchedule = (payload: SchedulePayload): FieldIssue[] => {
+  const issues: FieldIssue[] = []
+  const registryDeclared = payload.speakers !== undefined
+  const speakerIds = new Set<string>()
+  payload.speakers?.forEach((speaker, index) => {
+    if (speakerIds.has(speaker.id)) {
+      issues.push({ path: `speakers.${index}.id`, code: 'DUPLICATE_SPEAKER_ID', message: '讲师 ID 不能重复' })
+    }
+    speakerIds.add(speaker.id)
+  })
+
+  payload.days.forEach((day, dayIndex) => day.sessions.forEach((session, sessionIndex) => {
+    const base = `days.${dayIndex}.sessions.${sessionIndex}`
+    if (session.time && !session.timeRange) {
+      issues.push({ path: `${base}.timeRange`, code: 'TIME_RANGE_REQUIRED', message: '新发布日程必须提供机器可读时间范围' })
+    }
+    if (session.timeRange) {
+      const start = minuteOfDay(session.timeRange.start)
+      const end = minuteOfDay(session.timeRange.end)
+      if (start === null) issues.push({ path: `${base}.timeRange.start`, code: 'INVALID_TIME', message: '时间必须使用有效的 HH:mm' })
+      if (end === null) issues.push({ path: `${base}.timeRange.end`, code: 'INVALID_TIME', message: '时间必须使用有效的 HH:mm' })
+      else if (start !== null && start >= end) {
+        issues.push({ path: `${base}.timeRange.end`, code: 'INVALID_TIME_RANGE', message: '结束时间必须晚于开始时间' })
+      }
+    }
+
+    if (registryDeclared && session.instructors?.length && !session.speakerIds?.length) {
+      issues.push({ path: `${base}.speakerIds`, code: 'SPEAKER_REFERENCES_REQUIRED', message: '声明讲师库后必须使用讲师 ID 引用' })
+    }
+    const seen = new Set<string>()
+    session.speakerIds?.forEach((speakerId, speakerIndex) => {
+      if (seen.has(speakerId)) {
+        issues.push({ path: `${base}.speakerIds.${speakerIndex}`, code: 'DUPLICATE_SPEAKER_REFERENCE', message: '同一课程不能重复引用讲师' })
+      } else if (!speakerIds.has(speakerId)) {
+        issues.push({ path: `${base}.speakerIds.${speakerIndex}`, code: 'UNKNOWN_SPEAKER', message: '引用的讲师不存在' })
+      }
+      seen.add(speakerId)
+    })
+  }))
+  return issues
+}
+
+export const validateContentForPublication = async (
+  key: ContentModuleKey,
+  payload: JsonObject,
+  repository: ContentValidationRepository,
+): Promise<void> => {
+  const issues = schemaIssues(key, payload)
+  const parsed = PublicContentPayloadSchemas[key].safeParse(payload)
+
+  if (parsed.success && key === 'importantDates') {
+    issues.push(...validateImportantDates(parsed.data as ImportantDatesPayload, await repository.findPublishedPayload('basic')))
+  }
+  if (parsed.success && key === 'basic') {
+    const related = await repository.findPublishedPayload('importantDates')
+    if (related) {
+      const parsedRelated = PublicContentPayloadSchemas.importantDates.safeParse(related)
+      if (parsedRelated.success) issues.push(...validateImportantDates(parsedRelated.data as ImportantDatesPayload, parsed.data as JsonObject))
+    }
+  }
+  if (parsed.success && key === 'schedule') issues.push(...validateSchedule(parsed.data as SchedulePayload))
+
+  for (const resource of await repository.findPublicResourcesMissingFiles()) {
+    issues.push({
+      path: `resources.${resource.key}.fileId`,
+      code: 'PUBLIC_RESOURCE_FILE_REQUIRED',
+      message: '公开资料必须关联文件',
+    })
+  }
+
+  if (issues.length > 0) throw new ContentValidationError(issues)
+}

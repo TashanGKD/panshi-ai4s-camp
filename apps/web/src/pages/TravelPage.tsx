@@ -19,6 +19,10 @@ export function TravelPage() {
     {state.status === 'loading' ? <p role="status">正在加载住宿与交通信息</p> : null}
     {state.status === 'empty' ? <p>住宿与交通信息尚未发布</p> : null}
     {state.status === 'error' ? <p role="alert">住宿与交通信息暂时无法加载</p> : null}
-    {state.status === 'ready' ? state.data.sections.map((section) => <article key={section.title}><h3>{section.title}</h3><p>{section.body}</p></article>) : null}
+    {state.status === 'ready' ? <TravelContentView travel={state.data} /> : null}
   </section>
+}
+
+export function TravelContentView({ travel }: { travel: TravelContent }) {
+  return <>{travel.sections.map((section) => <article key={section.title}><h3>{section.title}</h3><p>{section.body}</p></article>)}</>
 }

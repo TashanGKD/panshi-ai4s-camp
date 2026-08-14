@@ -23,6 +23,12 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   getProfile: async () => profile(),
   login: async () => ({ apiVersion: 'v1', data: { user: { id: 'a1', displayName: '管理员', role: 'admin' } } }),
   logout: async () => undefined,
+  getDraft: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' }, publishedVersion: null } }),
+  saveDraft: async (_key, payload) => ({ apiVersion: 'v1', data: { key: 'basic', revision: 2, payload, publishedVersion: null } }),
+  getPreview: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' } } }),
+  publish: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, version: 1 } }),
+  getHistory: async () => ({ apiVersion: 'v1', data: { key: 'basic', publishedVersion: null, versions: [] } }),
+  rollback: async (_key, version) => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, version: 2, sourceVersion: version } }),
   ...overrides,
 })
 
@@ -78,5 +84,16 @@ describe('administrator route guard', () => {
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
     await waitFor(() => expect(logout).toHaveBeenCalledOnce())
     expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
+  })
+
+  it('mounts only the minimal Task 8 editor and history after authentication', async () => {
+    const getDraft = vi.fn(client().getDraft)
+    const getHistory = vi.fn(client().getHistory)
+    renderApp(client({ getDraft, getHistory }))
+    expect(await screen.findByRole('heading', { name: '内容编辑' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '版本历史' })).toBeInTheDocument()
+    expect(getDraft).toHaveBeenCalledWith('basic')
+    expect(getHistory).toHaveBeenCalledWith('basic')
+    expect(screen.queryByText('报名审核')).not.toBeInTheDocument()
   })
 })

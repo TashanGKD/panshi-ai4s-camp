@@ -62,6 +62,14 @@ describe('public API base URL', () => {
     )
   })
 
+  it('requires HTTPS in production while allowing only loopback HTTP in development', async () => {
+    const { resolveApiBaseUrl } = await import('../src/api/public-client')
+    expect(() => resolveApiBaseUrl('http://api.example.test', { production: true })).toThrow(/VITE_API_BASE_URL/u)
+    expect(() => resolveApiBaseUrl('http://localhost:3001', { production: true })).toThrow(/VITE_API_BASE_URL/u)
+    expect(resolveApiBaseUrl('http://127.0.0.1:3001', { production: false }).prefix).toBe('http://127.0.0.1:3001')
+    expect(() => resolveApiBaseUrl('http://192.168.1.20:3001', { production: false })).toThrow(/VITE_API_BASE_URL/u)
+  })
+
   it.each([
     '/api',
     '//api.example.test',

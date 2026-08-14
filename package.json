@@ -18,6 +18,7 @@
     "lint": "eslint . --ignore-pattern '**/dist/**' --global document --global Node --global getComputedStyle",
     "visual:test": "playwright test e2e/visual.spec.ts",
     "visual:update": "playwright test e2e/visual.spec.ts --update-snapshots",
+    "e2e:content": "playwright test e2e/content-publishing.spec.ts --config=playwright.content.config.ts",
     "dev:web": "npm run dev -w @panshi/web",
     "dev:admin": "npm run dev -w @panshi/admin",
     "dev:api": "npm run dev -w @panshi/api"

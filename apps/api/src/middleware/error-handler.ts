@@ -7,6 +7,7 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     readonly publicMessage: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(publicMessage)
     this.name = 'HttpError'
@@ -63,6 +64,6 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, nex
 
   response.setHeader('X-Request-Id', requestId)
   response.status(status).json(ApiErrorSchema.parse({
-    error: { code, message, requestId },
+    error: { code, message, requestId, ...(error instanceof HttpError && error.details ? { details: error.details } : {}) },
   }))
 }

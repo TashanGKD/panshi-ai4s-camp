@@ -3,6 +3,7 @@ import type { PublicSiteResponse } from '@panshi/contracts'
 import type { ReactNode } from 'react'
 import { SkipLink } from './SkipLink'
 import { navigationItems } from '../pages/HomePage'
+import { ImportantDatesContent } from '../renderers/ContentModuleRenderer'
 
 export function PublicShell({ children, site, sidebar = false }: {
   children: ReactNode
@@ -25,7 +26,7 @@ export function PublicShell({ children, site, sidebar = false }: {
       {content}
       <aside className="public-sidebar" aria-label="活动补充信息">
         {site.importantDates.items.length > 0 ? <InfoCard title="重要日期">
-          <dl className="date-list">{site.importantDates.items.map((item) => <div key={`${item.label}:${item.value}`}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+          <ImportantDatesContent importantDates={site.importantDates} />
         </InfoCard> : null}
         {site.contacts.items.length > 0 ? <InfoCard title="联系我们">
           <dl className="contact-list">{site.contacts.items.map((item) => <div key={`${item.label}:${item.value}`}><dt>{item.label}</dt><dd>{item.href ? <a href={item.href}>{item.value}</a> : item.value}</dd></div>)}</dl>

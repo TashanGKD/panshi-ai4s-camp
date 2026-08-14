@@ -26,6 +26,8 @@ type ApplicationStatus =
   | 'waitlisted'
   | 'rejected'
 type ResourceAccess = 'public' | 'authenticated' | 'admitted'
+type FileVisibility = 'owner_admin' | ResourceAccess
+type FilePurpose = 'registration_attachment' | 'resource' | 'legacy'
 type VerificationPurpose = 'register' | 'reset_password'
 type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 
@@ -189,9 +191,22 @@ export const files = pgTable('files', {
   mimeType: text('mime_type').notNull(),
   sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
   sha256: text('sha256').notNull(),
+  uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'restrict' }),
+  ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'restrict' }),
+  purpose: text('purpose').$type<FilePurpose>().notNull().default('legacy'),
+  visibility: text('visibility').$type<FileVisibility>().notNull().default('owner_admin'),
+  attachmentSlot: text('attachment_slot'),
+  hiddenAt: timestamp('hidden_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, (table) => [
   check('files_size_bytes_check', sql`${table.sizeBytes} >= 0`),
+  check('files_sha256_check', sql`${table.sha256} ~ '^[a-f0-9]{64}$'`),
+  check('files_purpose_check', sql`${table.purpose} in ('registration_attachment', 'resource', 'legacy')`),
+  check('files_visibility_check', sql`${table.visibility} in ('owner_admin', 'public', 'authenticated', 'admitted')`),
+  check('files_attachment_slot_check', sql`${table.attachmentSlot} is null or ${table.attachmentSlot} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+  index('files_owner_user_id_idx').on(table.ownerUserId),
+  index('files_uploaded_by_idx').on(table.uploadedBy),
 ])
 
 export const applicationFiles = pgTable('application_files', {

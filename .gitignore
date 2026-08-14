@@ -4,5 +4,8 @@ node_modules/
 !.env.example
 coverage/
 dist/
+**/dist/
 playwright-report/
 test-results/
+var/uploads/*
+!var/uploads/.gitkeep

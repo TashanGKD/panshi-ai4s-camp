@@ -95,6 +95,8 @@ const expectedForeignKeys = [
   { tableName: 'content_modules', constraintName: 'content_modules_published_version_content_versions_fk', columns: ['key', 'published_version_id'], referencedTableName: 'content_versions', referencedColumns: ['module_key', 'id'], deleteAction: 'restrict' },
   { tableName: 'content_versions', constraintName: 'content_versions_created_by_users_id_fk', columns: ['created_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_content_modules_key_fk', columns: ['module_key'], referencedTableName: 'content_modules', referencedColumns: ['key'], deleteAction: 'restrict' },
+  { tableName: 'files', constraintName: 'files_owner_user_id_users_id_fk', columns: ['owner_user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
+  { tableName: 'files', constraintName: 'files_uploaded_by_users_id_fk', columns: ['uploaded_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'registration_form_drafts', constraintName: 'registration_form_drafts_base_version_fk', columns: ['base_version_id'], referencedTableName: 'registration_form_versions', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'registration_form_drafts', constraintName: 'registration_form_drafts_updated_by_users_id_fk', columns: ['updated_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'set null' },
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_created_by_users_id_fk', columns: ['created_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
@@ -109,7 +111,11 @@ const expectedChecks = [
   { constraintName: 'applications_status_check', tokens: ['status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
   { constraintName: 'content_modules_draft_revision_check', tokens: ['draft_revision', '>= 0'] },
   { constraintName: 'content_versions_version_check', tokens: ['version', '> 0'] },
+  { constraintName: 'files_attachment_slot_check', tokens: ['attachment_slot', 'NULL'] },
+  { constraintName: 'files_purpose_check', tokens: ['purpose', 'registration_attachment', 'resource', 'legacy'] },
+  { constraintName: 'files_sha256_check', tokens: ['sha256', 'a-f0-9', '64'] },
   { constraintName: 'files_size_bytes_check', tokens: ['size_bytes', '>= 0'] },
+  { constraintName: 'files_visibility_check', tokens: ['visibility', 'owner_admin', 'public', 'authenticated', 'admitted'] },
   { constraintName: 'registration_form_drafts_published_revision_check', tokens: ['published_revision', '>= 0'] },
   { constraintName: 'registration_form_drafts_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'registration_form_versions_version_check', tokens: ['version', '> 0'] },
@@ -582,6 +588,7 @@ describe('initial PostgreSQL schema', () => {
       '0007_registration_form_drafts.sql',
       '0008_registration_form_publish_revision.sql',
       '0009_registration_form_latest_draft.sql',
+      '0010_secure_file_metadata.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

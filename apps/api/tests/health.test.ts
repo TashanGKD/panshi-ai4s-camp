@@ -358,11 +358,11 @@ describe('API runtime configuration', () => {
       SECURE_COOKIES: false,
       SESSION_TTL_SECONDS: 28_800,
       VERIFICATION_PROVIDER: 'disabled',
-      VERIFICATION_SECRET: undefined,
       VERIFICATION_TTL_SECONDS: 300,
       VERIFICATION_COOLDOWN_SECONDS: 60,
       VERIFICATION_MAX_ATTEMPTS: 5,
-      VERIFICATION_MOCK_CODE: undefined,
+      FILE_STORAGE_ROOT: expect.stringMatching(/\/panshi-ai4s-camp\/var\/uploads$/u),
+      FILE_UPLOAD_MAX_BYTES: 10_485_760,
     })
   })
 
@@ -388,6 +388,8 @@ describe('API runtime configuration', () => {
     { NODE_ENV: 'test', VERIFICATION_TTL_SECONDS: '59' },
     { NODE_ENV: 'test', VERIFICATION_COOLDOWN_SECONDS: '9' },
     { NODE_ENV: 'test', VERIFICATION_MAX_ATTEMPTS: '11' },
+    { NODE_ENV: 'test', FILE_UPLOAD_MAX_BYTES: '1023' },
+    { NODE_ENV: 'test', FILE_UPLOAD_MAX_BYTES: '26214401' },
   ])('rejects unsafe verification configuration %#', (verification) => {
     expect(() => getApiEnv({
       DATABASE_URL: 'postgresql://localhost/panshi', API_PORT: '3001', CORS_ORIGINS: '', ...verification,
@@ -407,6 +409,8 @@ describe('API runtime configuration', () => {
       .toMatchObject({ JSON_BODY_LIMIT_BYTES: 10_485_760, HEALTHCHECK_TIMEOUT_MS: 10_000 })
     expect(getApiEnv({ ...base, SESSION_TTL_SECONDS: '300', NODE_ENV: 'production' }))
       .toMatchObject({ SESSION_TTL_SECONDS: 300, SECURE_COOKIES: true })
+    expect(getApiEnv({ ...base, FILE_STORAGE_ROOT: 'var/uploads' }).FILE_STORAGE_ROOT)
+      .toMatch(/\/panshi-ai4s-camp\/var\/uploads$/u)
   })
 
   it('accepts canonical IPv6, deduplicates origins, and allows an empty allowlist', () => {

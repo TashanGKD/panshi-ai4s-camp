@@ -12,6 +12,9 @@ import { createMockVerificationProvider } from './modules/identity/mock-verifica
 import { createVerificationService } from './modules/identity/verification.service.js'
 import { createRegistrationFormRepository } from './modules/registration/form.repository.js'
 import { createRegistrationFormService } from './modules/registration/form.service.js'
+import { createFileRepository } from './modules/files/file.repository.js'
+import { createFileService } from './modules/files/file.service.js'
+import { createLocalFileStorage } from './modules/files/local-file-storage.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -240,6 +243,10 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
   const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
+  const fileService = createFileService(
+    createFileRepository(database.db),
+    createLocalFileStorage({ root: env.FILE_STORAGE_ROOT, maxBytes: env.FILE_UPLOAD_MAX_BYTES }),
+  )
   const app = createApp({
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
@@ -249,6 +256,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     verificationService,
     contentPublishingService,
     registrationFormService,
+    fileService,
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {
       allowedOrigins: env.CORS_ORIGINS,
@@ -256,6 +264,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
       jsonLimitBytes: env.JSON_BODY_LIMIT_BYTES,
       secureCookies: env.SECURE_COOKIES,
       sessionTtlSeconds: env.SESSION_TTL_SECONDS,
+      fileUploadMaxBytes: env.FILE_UPLOAD_MAX_BYTES,
     },
   })
 

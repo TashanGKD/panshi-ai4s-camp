@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份、内容草稿／预览／发布／历史／回退、Task 9 的后台摘要边界和 Task 11 的报名表配置；报名答案、附件上传和资源下载仍属于后续任务。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份、内容草稿／预览／发布／历史／回退、后台摘要、报名表配置及 Task 12 的受保护附件上传下载；报名答案提交和公开资料管理仍属于后续任务。
 
 ## API 范围
 
@@ -66,7 +66,7 @@ Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由�
 
 ## API 运行基线
 
-API 进程读取并校验 `DATABASE_URL`、`API_PORT`、`NODE_ENV`、`SESSION_TTL_SECONDS` 和逗号分隔的 `CORS_ORIGINS`。`SESSION_TTL_SECONDS` 默认 28800 秒（八小时），允许 300–604800 秒，不提供 remember-me。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；重复项会去重，空值表示不允许任何跨源状态变更请求。
+API 进程读取并校验 `DATABASE_URL`、`API_PORT`、`NODE_ENV`、`SESSION_TTL_SECONDS` 和逗号分隔的 `CORS_ORIGINS`。`SESSION_TTL_SECONDS` 默认 28800 秒（八小时），允许 300–604800 秒，不提供 remember-me。JSON 请求体上限通过 `JSON_BODY_LIMIT` 设置，默认 `1mb`，允许范围为 1KB 至 10MB，启动前会转换为字节数。数据库健康检查超时由 `HEALTHCHECK_TIMEOUT_MS` 设置，默认 2000ms，允许范围为 100–10000ms。附件根目录由 `FILE_STORAGE_ROOT` 配置，默认项目 `var/uploads`；单文件上限由 `FILE_UPLOAD_MAX_BYTES` 配置，默认 10485760，允许 1024—26214400 字节。`CORS_ORIGINS` 中每项必须是规范化、无路径、无凭据的完整 HTTP(S) origin；重复项会去重，空值表示不允许任何跨源状态变更请求。
 
 验证码配置包括 `VERIFICATION_PROVIDER`（默认 `disabled`）、`VERIFICATION_SECRET`、`VERIFICATION_TTL_SECONDS`（60–1800，默认 300）、`VERIFICATION_COOLDOWN_SECONDS`（10–600，默认 60）和 `VERIFICATION_MAX_ATTEMPTS`（1–10，默认 5）。mock provider 只允许 development/test；`VERIFICATION_SECRET` 必须是 64 位十六进制字符串，解析为 32 个随机字节后作为 HMAC 密钥，不能用字符种类猜测熵。production 配置 mock 会拒绝启动。`VERIFICATION_MOCK_CODE` 只允许 test 且须为 6 位数字。disabled 模式保留接口但发送返回 503，不回退为固定验证码。
 
@@ -166,7 +166,18 @@ Cookie 和 session 实现必须满足以下安全底线：
 - `POST /api/v1/admin/registration-form/publish`：请求 `{ "expectedRevision": n }`，在事务中创建新不可变版本并更新草稿基线。
 - `GET /api/v1/admin/registration-form/history`：按版本号倒序读取原始表单快照。
 
-公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。Task 11 不提供答案保存/提交或文件上传 endpoint。
+公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。Task 11 不提供答案保存/提交；附件接口如下。
+
+### 受保护附件接口
+
+以下接口使用既有 `panshi_session`，不建立第二套身份系统。匿名请求返回 401；文件不存在、已隐藏、已删除或当前普通用户不是所有者时统一返回 404 `FILE_NOT_AVAILABLE`，不泄露对象是否存在。已停用账号不能上传或管理文件。
+
+- `POST /api/v1/files`：`multipart/form-data`，文件字段名为 `file`，同时提供 `purpose=registration_attachment`，可选 `attachmentSlot`。成功返回 201 和不含 storage key、物理路径、SHA-256 的文件摘要。
+- `GET /api/v1/files/:id/download`：仅文件所有者及有效管理员可下载，返回 `Content-Disposition: attachment`、`X-Content-Type-Options: nosniff`、`Cache-Control: private, no-store`。
+- `PATCH /api/v1/files/:id/hide`：文件所有者或有效管理员隐藏文件，成功返回 204；隐藏后所有下载立即失效。
+- `DELETE /api/v1/files/:id`：文件所有者或有效管理员删除文件，先使数据库访问状态失效，再清理物理对象，成功返回 204。
+
+上传仅允许 PDF 和 DOCX，稳定拒绝码包括 `FILE_REQUIRED`、`FILE_NAME_INVALID`、`FILE_EXTENSION_NOT_ALLOWED`、`FILE_MIME_MISMATCH`、`FILE_TOO_LARGE`、`FILE_CONTENT_INVALID`、`FILE_MULTIPART_INVALID`、`FILE_PURPOSE_INVALID` 和 `FILE_ATTACHMENT_SLOT_INVALID`。错误响应不包含物理路径、文件内容或底层解析器消息。
 
 公开内容模块使用固定的后端内容 key：`basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`travel`、`display`。这些 key 不是页面路由，不提供路由名称 alias。
 

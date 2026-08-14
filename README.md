@@ -1,6 +1,6 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员与学员 Cookie 会话、手机号注册和密码重置、草稿／同源预览／版本化发布能力、结构化内容工作台、报名表配置和真实数据摘要已经实现。报名答案提交、文件上传和资料管理属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员与学员 Cookie 会话、手机号注册和密码重置、草稿／同源预览／版本化发布能力、结构化内容工作台、报名表配置、安全附件存储和真实数据摘要已经实现。报名答案提交和公开资料管理属于后续任务。
 
 ## 运行环境
 
@@ -48,9 +48,17 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 ### 报名表配置（Task 11）
 
-管理员在“报名管理 → 表单配置”中维护固定核心字段、动态问题和独立附件要求。核心字段不可删除，手机号从账号带入并只读；动态问题仅支持单行、多行、单选和多选，题目与选项使用稳定 UUID，顺序保存为连续 order。默认草稿只包含一个确定性 UUID 的非必填“个人简历／补充材料”附件，允许 PDF/DOCX，上传能力留给 Task 12。
+管理员在“报名管理 → 表单配置”中维护固定核心字段、动态问题和独立附件要求。核心字段不可删除，手机号从账号带入并只读；动态问题仅支持单行、多行、单选和多选，题目与选项使用稳定 UUID，顺序保存为连续 order。默认草稿只包含一个确定性 UUID 的非必填“个人简历／补充材料”附件，允许 PDF/DOCX。
 
-草稿使用 revision 乐观锁，发布会在事务中创建不可变版本并更新草稿基线；历史版本由数据库 trigger 禁止 UPDATE/DELETE。报名应用绑定的 `form_version_id` 指向发布版本，因此后续发布不会改写旧题目快照。Task 11 不保存答案、不提交报名，也不实现附件上传。
+草稿使用 revision 乐观锁，发布会在事务中创建不可变版本并更新草稿基线；历史版本由数据库 trigger 禁止 UPDATE/DELETE。报名应用绑定的 `form_version_id` 指向发布版本，因此后续发布不会改写旧题目快照。报名答案保存与提交留给 Task 13。
+
+### 安全附件存储（Task 12）
+
+`FileStorage` 隔离业务与物理存储，首版 `LocalFileStorage` 默认把文件写入项目 `var/uploads`，可通过 `FILE_STORAGE_ROOT` 替换根目录；`FILE_UPLOAD_MAX_BYTES` 默认 10485760，允许 1024—26214400 字节。服务启动时创建并检查存储根的读写权限。上传目录未挂入任何前端静态资源目录；数据库和 HTTP 响应均不保存或返回物理公开 URL。
+
+附件仅接受 PDF、DOCX。服务端同时检查安全文件名、扩展名、声明 MIME、实际内容签名、大小和 SHA-256；DOCX 进一步检查 ZIP/OpenXML 必要条目、CRC、展开大小、压缩比例和条目路径。文件先以流方式写入同一存储根内的临时文件，校验后原子重命名；失败或中断会清理临时文件。最终 storage key 使用随机 UUID 分层路径，不含原始文件名。
+
+当前受保护接口只建立与 Task 13 兼容的附件所有权边界，不创建完整报名：登录学员或有效管理员可上传 `registration_attachment`；只有文件所有者和有效管理员可下载、隐藏或删除。隐藏或删除后立即返回 404 `FILE_NOT_AVAILABLE`。下载通过后端鉴权并使用安全 `Content-Disposition`、`nosniff` 和 `no-store` 响应头。上传、隐藏和删除审计只记录用途、访问级别、MIME、大小及附件项等元数据，不记录原文件名、存储路径或文件内容。
 
 发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退会先按当前规则重新校验历史 payload，再复制为新版本。旧版 importantDates、schedule 和 contacts 仍可公开读取，草稿允许不完整保存，但新发布/回退必须满足完整机器日期、课程时间与 speaker 引用、结构化联系人规则。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
 
@@ -88,6 +96,9 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm run test:integration:student-auth -w @panshi/api
+
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:files -w @panshi/api
 
 # Task 8 的并发发布集成目标按要求只接受这一精确本机 URL，并强制单 worker／文件串行。
 TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \

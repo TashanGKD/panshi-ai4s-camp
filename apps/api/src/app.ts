@@ -18,6 +18,8 @@ import { createAdminSummaryRouter } from './modules/admin-summary/admin-summary.
 import type { AdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 import { createRegistrationFormPublicRouter, createAdminRegistrationFormRouter } from './modules/registration/form.routes.js'
 import type { RegistrationFormService } from './modules/registration/form.service.js'
+import { createFileRouter } from './modules/files/file.routes.js'
+import type { FileService } from './modules/files/file.service.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -25,6 +27,7 @@ export type ApiRuntimeConfig = {
   jsonLimitBytes: number
   secureCookies?: boolean
   sessionTtlSeconds?: number
+  fileUploadMaxBytes?: number
 }
 
 export type AppDependencies = {
@@ -37,6 +40,7 @@ export type AppDependencies = {
   contentPublishingService?: ContentPublishingService
   adminSummaryService?: AdminSummaryService
   registrationFormService?: RegistrationFormService
+  fileService?: FileService
   config: ApiRuntimeConfig
 }
 
@@ -89,6 +93,7 @@ export const createApp = ({
   contentPublishingService,
   adminSummaryService,
   registrationFormService,
+  fileService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -111,6 +116,7 @@ export const createApp = ({
     }
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
     if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
+    if (fileService) app.use('/api/v1/files', createFileRouter(sessions, fileService, { maxBytes: config.fileUploadMaxBytes ?? 10_485_760 }))
   }
   if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {

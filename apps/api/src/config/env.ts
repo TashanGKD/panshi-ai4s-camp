@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
+
+const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
+const defaultFileStorageRoot = resolve(projectRoot, 'var/uploads')
 
 const postgresUrl = z.string().min(1).refine((value) => {
   try {
@@ -56,6 +61,8 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   VERIFICATION_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
   VERIFICATION_MOCK_CODE: z.string().regex(/^\d{6}$/u).optional(),
+  FILE_STORAGE_ROOT: z.string().min(1).default(defaultFileStorageRoot).transform((value) => resolve(projectRoot, value)),
+  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(26_214_400).default(10_485_760),
 }).superRefine((env, context) => {
   if (env.NODE_ENV === 'production' && env.VERIFICATION_PROVIDER === 'mock') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_PROVIDER'], message: 'mock provider is forbidden in production' })

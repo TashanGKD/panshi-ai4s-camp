@@ -54,11 +54,11 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 ### 安全附件存储（Task 12）
 
-`FileStorage` 隔离业务与物理存储，首版 `LocalFileStorage` 默认把文件写入项目 `var/uploads`，可通过 `FILE_STORAGE_ROOT` 替换根目录；`FILE_UPLOAD_MAX_BYTES` 默认 10485760，允许 1024—26214400 字节。服务启动时创建并检查存储根的读写权限。上传目录未挂入任何前端静态资源目录；数据库和 HTTP 响应均不保存或返回物理公开 URL。
+`FileStorage` 隔离业务与物理存储，首版 `LocalFileStorage` 默认把文件写入项目 `var/uploads`，可通过 `FILE_STORAGE_ROOT` 替换根目录；`FILE_UPLOAD_MAX_BYTES` 默认及硬上限均为 10485760 字节。应用使用独占的 `FILE_UPLOAD_TEMP_ROOT`（默认 `var/uploads/.incoming`），服务启动时创建并验证存储根、上传临时目录及内部目录均为非符号链接的 0700 私有目录。上传目录未挂入任何前端静态资源目录；数据库和 HTTP 响应均不保存或返回物理公开 URL。
 
 附件仅接受 PDF、DOCX。服务端同时检查安全文件名、扩展名、声明 MIME、实际内容签名、大小和 SHA-256；DOCX 进一步检查 ZIP/OpenXML 必要条目、CRC、展开大小、压缩比例和条目路径。文件先以流方式写入同一存储根内的临时文件，校验后原子重命名；失败或中断会清理临时文件。最终 storage key 使用随机 UUID 分层路径，不含原始文件名。
 
-当前受保护接口只建立与 Task 13 兼容的附件所有权边界，不创建完整报名：登录学员或有效管理员可上传 `registration_attachment`；只有文件所有者和有效管理员可下载、隐藏或删除。隐藏或删除后立即返回 404 `FILE_NOT_AVAILABLE`。下载通过后端鉴权并使用安全 `Content-Disposition`、`nosniff` 和 `no-store` 响应头。上传、隐藏和删除审计只记录用途、访问级别、MIME、大小及附件项等元数据，不记录原文件名、存储路径或文件内容。
+当前受保护接口只建立与 Task 13 兼容的附件所有权边界，不创建完整报名：登录学员或有效管理员可上传 `registration_attachment`；只有文件所有者和有效管理员可下载、隐藏或删除。隐藏后立即失效；删除采用 `active/deleting/delete_failed/deleted` 可恢复状态，物理删除失败会返回稳定的 503，并允许调用同一删除接口重试。元数据落库前先建立恢复记录，避免数据库失败与物理清理失败共同造成静默孤儿。下载通过后端鉴权并使用安全 `Content-Disposition`、`nosniff` 和 `no-store` 响应头。上传、隐藏和删除审计只记录用途、访问级别、MIME、大小及附件项等元数据，不记录原文件名、存储路径或文件内容。
 
 发布在按模块加锁的 PostgreSQL 事务内完成。校验失败不会创建版本或移动线上 pointer；历史版本由数据库 trigger 禁止 UPDATE/DELETE；回退会先按当前规则重新校验历史 payload，再复制为新版本。旧版 importantDates、schedule 和 contacts 仍可公开读取，草稿允许不完整保存，但新发布/回退必须满足完整机器日期、课程时间与 speaker 引用、结构化联系人规则。保存、发布、回退均记录脱敏结构摘要。具体 endpoint、字段错误和关联校验见 `docs/api.md`。
 

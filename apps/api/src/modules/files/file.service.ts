@@ -40,9 +40,17 @@ export const createFileService = (repository: FileRepository, storage: FileStora
       throw new FileServiceError(422, 'FILE_ATTACHMENT_SLOT_INVALID', '附件项标识无效')
     }
 
-    const stored = await storage.put(input.stream, { mime: input.mimeType, size: input.sizeBytes })
+    const storageKey = storage.createStorageKey()
+    const recovery = await repository.beginUploadRecovery(storageKey, actor.id)
+    let stored
     try {
-      const record = await repository.createWithAudit({
+      stored = await storage.put(input.stream, { mime: input.mimeType, size: input.sizeBytes }, storageKey)
+    } catch (error) {
+      await repository.clearUploadRecovery(recovery.id).catch(() => undefined)
+      throw error
+    }
+    try {
+      const record = await repository.finalizeUploadWithAudit(recovery.id, {
         storageKey: stored.storageKey,
         originalName: name.originalName,
         mimeType: stored.mime,
@@ -63,14 +71,23 @@ export const createFileService = (repository: FileRepository, storage: FileStora
         attachmentSlot: record.attachmentSlot,
       }
     } catch (error) {
-      await storage.remove(stored.storageKey).catch(() => undefined)
+      try {
+        await storage.remove(stored.storageKey)
+        await repository.clearUploadRecovery(recovery.id).catch(() => undefined)
+      } catch {
+        await repository.markUploadCleanupFailed(
+          recovery.id,
+          actor.id,
+          'FILE_STORAGE_DELETE_FAILED',
+        ).catch(() => undefined)
+      }
       throw error
     }
   },
 
   openForDownload: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
-    if (!record || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    if (!record || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
     try {
       return { record, stream: await storage.open(record.storageKey) }
     } catch {
@@ -80,15 +97,27 @@ export const createFileService = (repository: FileRepository, storage: FileStora
 
   hide: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
-    if (!record || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    if (!record || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
     if (!await repository.hideWithAudit(id, actor.id)) throw unavailable()
   },
 
   remove: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
-    if (!record || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
-    const deleted = await repository.markDeletedWithAudit(id, actor.id)
-    if (!deleted) throw unavailable()
-    await storage.remove(record.storageKey).catch(() => undefined)
+    if (!record || record.lifecycleState === 'deleted' || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    const deleting = await repository.beginDeleteWithAudit(id, actor.id)
+    if (!deleting) throw unavailable()
+    try {
+      await storage.remove(deleting.storageKey)
+    } catch {
+      await repository.markDeleteFailedWithAudit(
+        id,
+        actor.id,
+        'FILE_STORAGE_DELETE_FAILED',
+      ).catch(() => undefined)
+      throw new FileServiceError(503, 'FILE_DELETE_FAILED', '文件删除失败，请稍后重试')
+    }
+    if (!await repository.markDeletedWithAudit(id, actor.id)) {
+      throw new FileServiceError(503, 'FILE_DELETE_FINALIZE_FAILED', '文件删除状态更新失败，请稍后重试')
+    }
   },
 })

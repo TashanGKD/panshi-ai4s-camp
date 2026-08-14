@@ -1,12 +1,13 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { deflateRawSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   FileStorageError,
   createLocalFileStorage,
+  preparePrivateDirectory,
 } from '../src/modules/files/local-file-storage.js'
 import {
   buildContentDisposition,
@@ -199,6 +200,82 @@ describe('local protected file storage', () => {
     await local.remove(stored.storageKey)
     await local.remove(stored.storageKey)
     await expect(local.open(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' })
+  })
+
+  it('enforces private modes on the storage root, temp directory, shards and files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-files-mode-'))
+    roots.push(root)
+    await chmod(root, 0o755)
+    const local = createLocalFileStorage({ root, maxBytes: 1024 })
+    const stored = await local.put(Readable.from(PDF), { mime: 'application/pdf', size: PDF.length })
+    const [first, second] = stored.storageKey.split('/')
+    const mode = async (path: string) => (await lstat(path)).mode & 0o777
+    expect(await mode(root)).toBe(0o700)
+    expect(await mode(join(root, '.tmp'))).toBe(0o700)
+    expect(await mode(join(root, first!, second!))).toBe(0o700)
+    expect(await mode(join(root, stored.storageKey))).toBe(0o600)
+  })
+
+  it('rejects a symlink storage root without writing outside it', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'panshi-files-outside-'))
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-files-link-parent-'))
+    roots.push(outside, parent)
+    const linkedRoot = join(parent, 'uploads')
+    await symlink(outside, linkedRoot, 'dir')
+    expect(() => createLocalFileStorage({ root: linkedRoot, maxBytes: 1024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+    expect(await readdir(outside)).toEqual([])
+  })
+
+  it('rejects a temporary storage directory replaced by a symlink', async () => {
+    const { root, storage: local } = await storage()
+    const outside = await mkdtemp(join(tmpdir(), 'panshi-files-temp-outside-'))
+    roots.push(outside)
+    await rm(join(root, '.tmp'), { recursive: true })
+    await symlink(outside, join(root, '.tmp'), 'dir')
+    await expect(local.put(Readable.from(PDF), { mime: 'application/pdf', size: PDF.length }))
+      .rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(await readdir(outside)).toEqual([])
+  })
+
+  it('rejects broad roots and a root reached through a symlink component', async () => {
+    expect(() => preparePrivateDirectory('/', { rejectBroad: true }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+    expect(() => preparePrivateDirectory(homedir(), { rejectBroad: true }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+    expect(() => preparePrivateDirectory(resolve(process.cwd(), '../..'), { rejectBroad: true }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+
+    const outside = await mkdtemp(join(tmpdir(), 'panshi-files-component-outside-'))
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-files-component-parent-'))
+    roots.push(outside, parent)
+    await symlink(outside, join(parent, 'linked'), 'dir')
+    expect(() => createLocalFileStorage({ root: join(parent, 'linked', 'uploads'), maxBytes: 1_024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+  })
+
+  it('rejects shard and final-file symlink escapes for open and remove', async () => {
+    const { root, storage: local } = await storage()
+    const outside = await mkdtemp(join(tmpdir(), 'panshi-files-escape-'))
+    roots.push(outside)
+    const stored = await local.put(Readable.from(PDF), { mime: 'application/pdf', size: PDF.length })
+    const [first, second, id] = stored.storageKey.split('/')
+    const target = join(root, stored.storageKey)
+    const outsideFile = join(outside, 'outside.pdf')
+    await writeFile(outsideFile, PDF, { mode: 0o600 })
+
+    await rm(target)
+    await symlink(outsideFile, target)
+    await expect(local.open(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    await expect(local.remove(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(await readFile(outsideFile)).toEqual(PDF)
+
+    await rm(join(root, first!), { recursive: true })
+    await mkdir(join(outside, second!), { mode: 0o700 })
+    await writeFile(join(outside, second!, id!), PDF, { mode: 0o600 })
+    await symlink(outside, join(root, first!), 'dir')
+    await expect(local.open(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    await expect(local.remove(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
   })
 })
 

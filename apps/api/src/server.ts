@@ -265,6 +265,11 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
       secureCookies: env.SECURE_COOKIES,
       sessionTtlSeconds: env.SESSION_TTL_SECONDS,
       fileUploadMaxBytes: env.FILE_UPLOAD_MAX_BYTES,
+      fileUploadTempDirectory: env.FILE_UPLOAD_TEMP_ROOT,
+      fileUploadGlobalConcurrency: env.FILE_UPLOAD_GLOBAL_CONCURRENCY,
+      fileUploadPerUserConcurrency: env.FILE_UPLOAD_PER_USER_CONCURRENCY,
+      fileUploadPerUserWindowMax: env.FILE_UPLOAD_PER_USER_WINDOW_MAX,
+      fileUploadPerUserWindowMs: env.FILE_UPLOAD_PER_USER_WINDOW_MS,
     },
   })
 

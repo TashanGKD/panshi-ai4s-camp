@@ -28,6 +28,8 @@ type ApplicationStatus =
 type ResourceAccess = 'public' | 'authenticated' | 'admitted'
 type FileVisibility = 'owner_admin' | ResourceAccess
 type FilePurpose = 'registration_attachment' | 'resource' | 'legacy'
+type FileLifecycleState = 'active' | 'deleting' | 'delete_failed' | 'deleted'
+type FileStorageRecoveryState = 'pending' | 'delete_failed'
 type VerificationPurpose = 'register' | 'reset_password'
 type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 
@@ -198,6 +200,8 @@ export const files = pgTable('files', {
   attachmentSlot: text('attachment_slot'),
   hiddenAt: timestamp('hidden_at', { withTimezone: true }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  lifecycleState: text('lifecycle_state').$type<FileLifecycleState>().notNull().default('active'),
+  deleteFailureCode: text('delete_failure_code'),
   createdAt: createdAt(),
 }, (table) => [
   check('files_size_bytes_check', sql`${table.sizeBytes} >= 0`),
@@ -205,10 +209,30 @@ export const files = pgTable('files', {
   check('files_purpose_check', sql`${table.purpose} in ('registration_attachment', 'resource', 'legacy')`),
   check('files_visibility_check', sql`${table.visibility} in ('owner_admin', 'public', 'authenticated', 'admitted')`),
   check('files_attachment_slot_check', sql`${table.attachmentSlot} is null or ${table.attachmentSlot} ~ '^[a-z][a-z0-9_-]{0,63}$'`),
+  check('files_lifecycle_state_check', sql`${table.lifecycleState} in ('active', 'deleting', 'delete_failed', 'deleted')`),
+  check('files_delete_failure_state_check', sql`(${table.lifecycleState} = 'delete_failed') = (${table.deleteFailureCode} is not null)`),
+  check('files_deleted_state_check', sql`(${table.lifecycleState} = 'deleted') = (${table.deletedAt} is not null)`),
   index('files_owner_user_id_idx').on(table.ownerUserId),
   index('files_uploaded_by_idx').on(table.uploadedBy),
+  index('files_lifecycle_state_idx').on(table.lifecycleState),
 ])
 
+export const fileStorageRecoveries = pgTable('file_storage_recoveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storageKey: text('storage_key').notNull().unique('file_storage_recoveries_storage_key_unique'),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'restrict' }),
+  state: text('state').$type<FileStorageRecoveryState>().notNull().default('pending'),
+  failureCode: text('failure_code'),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check('file_storage_recoveries_state_check', sql`${table.state} in ('pending', 'delete_failed')`),
+  check('file_storage_recoveries_failure_state_check', sql`(${table.state} = 'delete_failed') = (${table.failureCode} is not null)`),
+  index('file_storage_recoveries_state_idx').on(table.state, table.updatedAt),
+])
+
+// Task 13 must attach only an active registration_attachment owned by the applicant,
+// validate purpose/slot against the submitted form snapshot, and enforce one file per application slot.
 export const applicationFiles = pgTable('application_files', {
   applicationId: uuid('application_id').notNull().references(() => applications.id, { onDelete: 'cascade' }),
   fileId: uuid('file_id').notNull().references(() => files.id, { onDelete: 'restrict' }),

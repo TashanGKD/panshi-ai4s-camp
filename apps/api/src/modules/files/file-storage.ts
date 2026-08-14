@@ -13,7 +13,8 @@ export type StoredFile = {
 }
 
 export interface FileStorage {
-  put(input: Readable, metadata: FileWriteMetadata): Promise<StoredFile>
+  createStorageKey(): string
+  put(input: Readable, metadata: FileWriteMetadata, storageKey?: string): Promise<StoredFile>
   open(storageKey: string): Promise<Readable>
   remove(storageKey: string): Promise<void>
 }

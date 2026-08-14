@@ -28,6 +28,11 @@ export type ApiRuntimeConfig = {
   secureCookies?: boolean
   sessionTtlSeconds?: number
   fileUploadMaxBytes?: number
+  fileUploadTempDirectory?: string
+  fileUploadGlobalConcurrency?: number
+  fileUploadPerUserConcurrency?: number
+  fileUploadPerUserWindowMax?: number
+  fileUploadPerUserWindowMs?: number
 }
 
 export type AppDependencies = {
@@ -116,7 +121,17 @@ export const createApp = ({
     }
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
     if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
-    if (fileService) app.use('/api/v1/files', createFileRouter(sessions, fileService, { maxBytes: config.fileUploadMaxBytes ?? 10_485_760 }))
+    if (fileService) {
+      if (!config.fileUploadTempDirectory) throw new Error('File upload temporary directory is required')
+      app.use('/api/v1/files', createFileRouter(sessions, fileService, {
+        maxBytes: config.fileUploadMaxBytes ?? 10_485_760,
+        temporaryDirectory: config.fileUploadTempDirectory,
+        globalConcurrency: config.fileUploadGlobalConcurrency,
+        perUserConcurrency: config.fileUploadPerUserConcurrency,
+        perUserWindowMax: config.fileUploadPerUserWindowMax,
+        perUserWindowMs: config.fileUploadPerUserWindowMs,
+      }))
+    }
   }
   if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {

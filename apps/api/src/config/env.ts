@@ -62,7 +62,12 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
   VERIFICATION_MOCK_CODE: z.string().regex(/^\d{6}$/u).optional(),
   FILE_STORAGE_ROOT: z.string().min(1).default(defaultFileStorageRoot).transform((value) => resolve(projectRoot, value)),
-  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(26_214_400).default(10_485_760),
+  FILE_UPLOAD_TEMP_ROOT: z.string().min(1).optional().transform((value) => value ? resolve(projectRoot, value) : undefined),
+  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(10_485_760).default(10_485_760),
+  FILE_UPLOAD_GLOBAL_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),
+  FILE_UPLOAD_PER_USER_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
+  FILE_UPLOAD_PER_USER_WINDOW_MAX: z.coerce.number().int().min(1).max(30).default(5),
+  FILE_UPLOAD_PER_USER_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
 }).superRefine((env, context) => {
   if (env.NODE_ENV === 'production' && env.VERIFICATION_PROVIDER === 'mock') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_PROVIDER'], message: 'mock provider is forbidden in production' })
@@ -76,6 +81,7 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
 }).transform(({ JSON_BODY_LIMIT, ...env }) => ({
   ...env,
   JSON_BODY_LIMIT_BYTES: JSON_BODY_LIMIT,
+  FILE_UPLOAD_TEMP_ROOT: env.FILE_UPLOAD_TEMP_ROOT ?? resolve(env.FILE_STORAGE_ROOT, '.incoming'),
   SECURE_COOKIES: env.NODE_ENV === 'production',
 }))
 

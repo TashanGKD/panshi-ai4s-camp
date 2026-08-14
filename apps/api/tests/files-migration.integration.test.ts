@@ -39,15 +39,19 @@ describe('secure file metadata forward migration', () => {
     ]) await client.query(await migration(name))
 
     const id = '00000000-0000-4000-8000-000000000190'
+    const deletedId = '00000000-0000-4000-8000-000000000191'
     await client.query(
       `INSERT INTO files (id, storage_key, original_name, mime_type, size_bytes, sha256)
-       VALUES ($1, 'aa/bb/legacy', 'legacy.pdf', 'application/pdf', 10, $2)`,
-      [id, 'a'.repeat(64)],
+       VALUES ($1, 'aa/bb/legacy', 'legacy.pdf', 'application/pdf', 10, $3),
+              ($2, 'aa/bb/deleted', 'deleted.pdf', 'application/pdf', 10, $3)`,
+      [id, deletedId, 'a'.repeat(64)],
     )
     await client.query(await migration('0010_secure_file_metadata.sql'))
+    await client.query('UPDATE files SET deleted_at = now() WHERE id = $1', [deletedId])
+    await client.query(await migration('0011_recoverable_file_lifecycle.sql'))
 
     const result = await client.query(
-      'SELECT uploaded_by, owner_user_id, purpose, visibility, attachment_slot, hidden_at, deleted_at FROM files WHERE id = $1',
+      'SELECT uploaded_by, owner_user_id, purpose, visibility, attachment_slot, hidden_at, deleted_at, lifecycle_state, delete_failure_code FROM files WHERE id = $1',
       [id],
     )
     expect(result.rows[0]).toEqual({
@@ -58,8 +62,15 @@ describe('secure file metadata forward migration', () => {
       attachment_slot: null,
       hidden_at: null,
       deleted_at: null,
+      lifecycle_state: 'active',
+      delete_failure_code: null,
     })
+    expect((await client.query('SELECT lifecycle_state, deleted_at FROM files WHERE id = $1', [deletedId])).rows[0])
+      .toEqual({ lifecycle_state: 'deleted', deleted_at: expect.any(Date) })
     await expect(client.query("UPDATE files SET visibility = 'world' WHERE id = $1", [id])).rejects.toThrow()
     await expect(client.query("UPDATE files SET attachment_slot = '../resume' WHERE id = $1", [id])).rejects.toThrow()
+    await expect(client.query("UPDATE files SET lifecycle_state = 'delete_failed' WHERE id = $1", [id])).rejects.toThrow()
+    await expect(client.query("UPDATE files SET lifecycle_state = 'deleted' WHERE id = $1", [id])).rejects.toThrow()
+    await expect(client.query("INSERT INTO file_storage_recoveries (storage_key, state) VALUES ('orphan', 'delete_failed')")).rejects.toThrow()
   })
 })

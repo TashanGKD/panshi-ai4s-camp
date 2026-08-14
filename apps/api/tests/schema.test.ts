@@ -581,6 +581,7 @@ describe('initial PostgreSQL schema', () => {
       '0006_verification_delivery_state.sql',
       '0007_registration_form_drafts.sql',
       '0008_registration_form_publish_revision.sql',
+      '0009_registration_form_latest_draft.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

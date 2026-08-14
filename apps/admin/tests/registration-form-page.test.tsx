@@ -166,6 +166,36 @@ describe('RegistrationFormPage', () => {
     expect(screen.queryByText('旧附件')).not.toBeInTheDocument()
   })
 
+  it('keeps edits made while a save request is in flight', async () => {
+    const pendingSave = deferred<Awaited<ReturnType<AdminClient['saveRegistrationFormDraft']>>>()
+    const save = vi.fn((
+      _form: Parameters<AdminClient['saveRegistrationFormDraft']>[0],
+      _expectedRevision: number,
+    ) => {
+      void _form
+      void _expectedRevision
+      return pendingSave.promise
+    })
+    const client = {
+      getRegistrationFormDraft: async () => ({ apiVersion: 'v1' as const, data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+      getRegistrationFormHistory: async () => ({ apiVersion: 'v1' as const, data: { publishedVersion: null, versions: [] } }),
+      saveRegistrationFormDraft: save,
+    } as unknown as AdminClient
+    render(<MemoryRouter><RegistrationFormPage client={client} /></MemoryRouter>)
+    await screen.findByRole('heading', { name: '表单配置' })
+    fireEvent.click(screen.getByRole('button', { name: '新增问题' }))
+    fireEvent.change(screen.getByLabelText('问题 1 题目'), { target: { value: '已发送快照' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    const submittedForm = save.mock.calls[0]![0]
+
+    fireEvent.change(screen.getByLabelText('问题 1 题目'), { target: { value: '保存期间的新编辑' } })
+    pendingSave.resolve({ apiVersion: 'v1', data: { form: submittedForm, revision: 1, baseVersion: null, publishedVersionId: null } })
+
+    await waitFor(() => expect(screen.getByText('草稿修订 1')).toBeInTheDocument())
+    expect(screen.getByLabelText('问题 1 题目')).toHaveValue('保存期间的新编辑')
+    expect(screen.getByText('有未保存修改，请先保存')).toBeInTheDocument()
+  })
+
   it('locks a same-frame double publish to one request', async () => {
     const publishDeferred = deferred<Awaited<ReturnType<AdminClient['publishRegistrationForm']>>>()
     const publish = vi.fn(() => publishDeferred.promise)

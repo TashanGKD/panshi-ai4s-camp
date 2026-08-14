@@ -12,13 +12,13 @@
     "e2e:visual-fixture": "tsx src/cli/visual-e2e-fixture.ts",
     "e2e:student-auth-fixture": "tsx src/cli/student-auth-e2e-fixture.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --exclude 'tests/*.integration.test.ts' --exclude 'tests/schema.test.ts'",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",
     "test:integration:publishing": "node tests/require-publishing-integration-env.mjs && vitest run tests/content-publishing.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:auth": "node tests/require-auth-integration-env.mjs && vitest run tests/admin-auth.integration.test.ts",
     "test:integration:migrations": "node tests/require-schema-integration-env.mjs && vitest run tests/user-display-name-migration.integration.test.ts",
     "test:integration:student-auth": "node tests/require-student-auth-integration-env.mjs && vitest run tests/student-auth.integration.test.ts --maxWorkers=1 --no-file-parallelism",
-    "test:integration:registration": "node tests/require-registration-integration-env.mjs && vitest run tests/registration-form.integration.test.ts --maxWorkers=1 --no-file-parallelism",
+    "test:integration:registration": "node tests/require-registration-integration-env.mjs && vitest run tests/registration-form.integration.test.ts tests/registration-form-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

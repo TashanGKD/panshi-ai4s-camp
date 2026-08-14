@@ -189,12 +189,21 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
 
   const save = () => run(async () => {
     if (!draft) return
-    const saved = await client.saveRegistrationFormDraft(form, draft.data.revision)
-    setDraft(saved); setBaseline(copy(saved.data.form)); setForm(copy(saved.data.form)); setMessage({ kind: 'status', text: '报名表草稿已保存。' })
+    const operationGeneration = generation.current
+    const submittedForm = copy(form)
+    const submittedSnapshot = JSON.stringify(submittedForm)
+    const saved = await client.saveRegistrationFormDraft(submittedForm, draft.data.revision)
+    if (generation.current !== operationGeneration) return
+    setDraft(saved)
+    setBaseline(copy(saved.data.form))
+    setForm((current) => JSON.stringify(current) === submittedSnapshot ? copy(saved.data.form) : current)
+    setMessage({ kind: 'status', text: '报名表草稿已保存。' })
   })
   const publish = () => run(async () => {
     if (!draft || isDirty) { setMessage({ kind: 'error', text: '请先保存草稿，再发布报名表。' }); return }
+    const operationGeneration = generation.current
     await client.publishRegistrationForm(draft.data.revision)
+    if (generation.current !== operationGeneration) return
     if (await load()) setMessage({ kind: 'status', text: '报名表已发布。' })
   })
 

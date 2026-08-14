@@ -84,6 +84,7 @@ describe('registration form PostgreSQL integration', () => {
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
     const rejected = results.find((result) => result.status === 'rejected')
     expect(rejected?.status === 'rejected' ? rejected.reason : undefined).toMatchObject({ name: 'RegistrationFormConflictError' })
+    await expect(service.publish(0, adminId)).rejects.toMatchObject({ name: 'RegistrationFormConflictError' })
 
     const versions = await database.db.select({ version: registrationFormVersions.version }).from(registrationFormVersions)
     expect(versions).toEqual([{ version: 1 }])

@@ -74,7 +74,7 @@ export const createRegistrationFormRepository = (
       publishedRevision: registrationFormDrafts.publishedRevision,
       publishedVersionId: registrationFormDrafts.baseVersionId,
     }).from(registrationFormDrafts).where(eq(registrationFormDrafts.id, DRAFT_ID)).for('update')
-    if (!draft || draft.revision !== expectedRevision || (draft.publishedVersionId !== null && draft.publishedRevision === expectedRevision)) return null
+    if (!draft || draft.revision !== expectedRevision || draft.publishedRevision === expectedRevision) return null
     const form = toForm(draft.form)
     const [latest] = await transaction.select({ value: max(registrationFormVersions.version) }).from(registrationFormVersions)
     const version = (latest?.value ?? 0) + 1

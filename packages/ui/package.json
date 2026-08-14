@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit --project tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

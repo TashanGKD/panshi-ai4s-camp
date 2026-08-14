@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { ProfileResponseSchema } from '@panshi/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 import { AdminApiError, type AdminClient } from '../src/api/admin-client'
@@ -13,9 +14,9 @@ const deferred = <T,>() => {
   return { promise, resolve }
 }
 
-const profile = (role: 'user' | 'admin' = 'admin') => ({
+const profile = () => ({
   apiVersion: 'v1' as const,
-  data: { user: { id: 'a1', displayName: '管理员', phoneNormalized: '+8613800138000', role } },
+  data: { user: { id: 'a1', displayName: '管理员', phoneNormalized: '+8613800138000', role: 'admin' as const } },
 })
 
 const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
@@ -51,13 +52,22 @@ describe('administrator route guard', () => {
     expect(login).toHaveBeenCalledWith({ phone: '13800138000', password: 'wrong' })
   })
 
-  it('renders forbidden for backend 403 and authenticated non-admin profiles', async () => {
-    const forbidden = renderApp(client({ getProfile: async () => { throw new AdminApiError(403, '无权访问') } }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('无权访问管理后台')
-    forbidden.unmount()
+  it('routes backend 403 for an authenticated non-admin to the login page', async () => {
+    renderApp(client({ getProfile: async () => { throw new AdminApiError(403, '无权访问') } }))
 
-    renderApp(client({ getProfile: async () => profile('user') }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('无权访问管理后台')
+    expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
+    expect(screen.queryByText('无权访问管理后台')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['server failure', new AdminApiError(503, '服务暂不可用')],
+    ['network failure', new TypeError('Failed to fetch')],
+    ['response-schema failure', ProfileResponseSchema.safeParse({ apiVersion: 'v1', data: {} }).error],
+  ])('renders a distinct load error for %s', async (_label, error) => {
+    renderApp(client({ getProfile: async () => { throw error } }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('管理后台加载失败，请稍后重试')
+    expect(screen.queryByLabelText('手机号')).not.toBeInTheDocument()
   })
 
   it('renders the protected shell for an administrator and logs out through the backend', async () => {

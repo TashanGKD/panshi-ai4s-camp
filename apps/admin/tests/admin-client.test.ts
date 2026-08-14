@@ -24,12 +24,13 @@ describe('administrator API client', () => {
     expect(() => resolveApiBaseUrl(value)).toThrow('Invalid VITE_API_BASE_URL')
   })
 
-  it('classifies backend 401 and 403 without storing tokens', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 401 }))
+  it.each([401, 403, 503])('preserves backend HTTP status %i without storing auth state', async (status) => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status }))
     vi.stubGlobal('fetch', fetchMock)
     const client = createAdminClient()
 
-    await expect(client.getProfile()).rejects.toMatchObject({ status: 401 })
+    await expect(client.getProfile()).rejects.toMatchObject({ status })
     expect(window.localStorage).toHaveLength(0)
+    expect(window.sessionStorage).toHaveLength(0)
   })
 })

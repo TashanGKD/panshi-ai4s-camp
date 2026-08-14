@@ -363,8 +363,10 @@ describe('API runtime configuration', () => {
       VERIFICATION_MAX_ATTEMPTS: 5,
       FILE_STORAGE_ROOT: expect.stringMatching(/\/panshi-ai4s-camp\/var\/uploads$/u),
       FILE_UPLOAD_TEMP_ROOT: expect.stringMatching(/\/panshi-ai4s-camp\/var\/uploads\/\.incoming$/u),
-      FILE_UPLOAD_MAX_BYTES: 10_485_760,
+      FILE_UPLOAD_MAX_BYTES: 5_242_880,
       FILE_UPLOAD_GLOBAL_CONCURRENCY: 4,
+      FILE_UPLOAD_GLOBAL_WINDOW_MAX: 20,
+      FILE_UPLOAD_GLOBAL_WINDOW_MS: 60_000,
       FILE_UPLOAD_PER_USER_CONCURRENCY: 1,
       FILE_UPLOAD_PER_USER_WINDOW_MAX: 5,
       FILE_UPLOAD_PER_USER_WINDOW_MS: 60_000,
@@ -394,7 +396,7 @@ describe('API runtime configuration', () => {
     { NODE_ENV: 'test', VERIFICATION_COOLDOWN_SECONDS: '9' },
     { NODE_ENV: 'test', VERIFICATION_MAX_ATTEMPTS: '11' },
     { NODE_ENV: 'test', FILE_UPLOAD_MAX_BYTES: '1023' },
-    { NODE_ENV: 'test', FILE_UPLOAD_MAX_BYTES: '10485761' },
+    { NODE_ENV: 'test', FILE_UPLOAD_MAX_BYTES: '5242881' },
   ])('rejects unsafe verification configuration %#', (verification) => {
     expect(() => getApiEnv({
       DATABASE_URL: 'postgresql://localhost/panshi', API_PORT: '3001', CORS_ORIGINS: '', ...verification,

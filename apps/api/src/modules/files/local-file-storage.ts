@@ -1,18 +1,34 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, constants, createWriteStream, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  createWriteStream,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Transform, type Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { FileStorage, FileWriteMetadata, StoredFile } from './file-storage.js'
+import { FILE_UPLOAD_HARD_MAX_BYTES, type FileStorage, type FileWriteMetadata, type StoredFile } from './file-storage.js'
 import { FileValidationError, validateStoredFileContent } from './file-validation.js'
 
 export class FileStorageError extends Error {
-  constructor(readonly code: string, message: string) {
+  readonly recoveryRequired: boolean
+
+  constructor(readonly code: string, message: string, options: { recoveryRequired?: boolean } = {}) {
     super(message)
     this.name = 'FileStorageError'
+    this.recoveryRequired = options.recoveryRequired ?? false
   }
 }
 
@@ -20,6 +36,9 @@ const projectRoot = resolve(fileURLToPath(new URL('../../../../../', import.meta
 const storageKeyPattern = /^[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u
 const privateDirectoryMode = 0o700
 const privateFileMode = 0o600
+const storageMarkerName = '.panshi-storage-root'
+const storageMarkerContent = 'panshi-ai4s-camp:file-storage:v1\n'
+const storageMarkerSize = Buffer.byteLength(storageMarkerContent)
 
 const isInside = (root: string, target: string) => {
   const pathFromRoot = relative(root, target)
@@ -34,6 +53,48 @@ const isSymlinkError = (error: unknown) => hasCode(error, 'ELOOP') || hasCode(er
 
 const unsafeRoot = (): never => {
   throw new FileStorageError('FILE_STORAGE_ROOT_UNSAFE', '文件存储根目录不安全')
+}
+
+const invalidMarker = (): never => {
+  throw new FileStorageError('FILE_STORAGE_MARKER_INVALID', '文件存储根目录标记无效')
+}
+
+const currentUid = (): number => {
+  const uid = process.getuid?.()
+  if (!Number.isInteger(uid)) unsafeRoot()
+  return uid as number
+}
+
+const pathAncestors = (input: string) => {
+  const ancestors: string[] = []
+  let current = resolve(input)
+  while (true) {
+    ancestors.push(current)
+    const parent = dirname(current)
+    if (parent === current) return ancestors
+    current = parent
+  }
+}
+
+const broadRoots = new Set([
+  ...pathAncestors(projectRoot),
+  ...pathAncestors(resolve(projectRoot, '..')),
+  ...pathAncestors(resolve(process.cwd())),
+  resolve(homedir()),
+  resolve(tmpdir()),
+  '/', '/tmp', '/private/tmp', '/var', '/var/tmp', '/private/var/tmp', '/usr', '/usr/tmp',
+  '/etc', '/System', '/Library', '/Applications', '/dev', '/dev/shm',
+])
+
+const isBroadRoot = (path: string): boolean => {
+  if (broadRoots.has(path)) return true
+  try {
+    return broadRoots.has(realpathSync(path))
+  } catch (error) {
+    if (isMissing(error)) return false
+    if (error instanceof FileStorageError) throw error
+    return unsafeRoot()
+  }
 }
 
 const allowedPlatformAlias = (path: string) => process.platform === 'darwin' && (path === '/var' || path === '/tmp')
@@ -54,28 +115,116 @@ const assertNoSymlinkComponents = (path: string) => {
 
 const assertPrivateDirectorySync = (path: string, code: string) => {
   const metadata = lstatSync(path)
-  if (metadata.isSymbolicLink() || !metadata.isDirectory() || (metadata.mode & 0o777) !== privateDirectoryMode) {
+  if (
+    metadata.isSymbolicLink()
+    || !metadata.isDirectory()
+    || metadata.uid !== currentUid()
+    || (metadata.mode & 0o777) !== privateDirectoryMode
+  ) {
     throw new FileStorageError(code, '文件存储目录不安全')
   }
   return realpathSync(path)
 }
 
-export const preparePrivateDirectory = (input: string, options: { rejectBroad?: boolean } = {}) => {
+const verifyStorageMarker = (root: string) => {
+  const marker = resolve(root, storageMarkerName)
+  if (!isInside(root, marker)) invalidMarker()
+  try {
+    const metadata = lstatSync(marker)
+    if (
+      metadata.isSymbolicLink()
+      || !metadata.isFile()
+      || metadata.uid !== currentUid()
+      || (metadata.mode & 0o777) !== privateFileMode
+      || metadata.size !== storageMarkerSize
+      || realpathSync(marker) !== resolve(realpathSync(root), storageMarkerName)
+      || readFileSync(marker, 'utf8') !== storageMarkerContent
+    ) invalidMarker()
+  } catch (error) {
+    if (error instanceof FileStorageError) throw error
+    invalidMarker()
+  }
+}
+
+const assertSafeCreationParent = (path: string) => {
+  assertNoSymlinkComponents(path)
+  const metadata = lstatSync(path)
+  if (
+    metadata.isSymbolicLink()
+    || !metadata.isDirectory()
+    || metadata.uid !== currentUid()
+    || (metadata.mode & 0o022) !== 0
+  ) unsafeRoot()
+  return realpathSync(path)
+}
+
+const createStorageMarker = (root: string) => {
+  const marker = resolve(root, storageMarkerName)
+  let descriptor: number | undefined
+  try {
+    descriptor = openSync(
+      marker,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      privateFileMode,
+    )
+    writeFileSync(descriptor, storageMarkerContent, 'utf8')
+    fsyncSync(descriptor)
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
+  }
+}
+
+export const preparePrivateDirectory = (input: string, options: { rejectBroad?: boolean } = {}): string => {
   const path = resolve(input)
-  if (options.rejectBroad && new Set([parse(path).root, resolve(homedir()), projectRoot]).has(path)) unsafeRoot()
+  if (options.rejectBroad && isBroadRoot(path)) unsafeRoot()
   assertNoSymlinkComponents(path)
   try {
-    const existing = lstatSync(path)
-    if (existing.isSymbolicLink() || !existing.isDirectory()) unsafeRoot()
+    assertPrivateDirectorySync(path, 'FILE_STORAGE_ROOT_UNSAFE')
+    verifyStorageMarker(path)
+    return realpathSync(path)
   } catch (error) {
     if (!isMissing(error)) throw error
-    mkdirSync(path, { recursive: true, mode: privateDirectoryMode })
   }
-  assertNoSymlinkComponents(path)
-  chmodSync(path, privateDirectoryMode)
-  const realPath = assertPrivateDirectorySync(path, 'FILE_STORAGE_ROOT_UNSAFE')
-  if (options.rejectBroad && [parse(realPath).root, realpathSync(homedir()), projectRoot].includes(realPath)) unsafeRoot()
-  return realPath
+
+  const parent = dirname(path)
+  const realParent = assertSafeCreationParent(parent)
+  if (options.rejectBroad && isBroadRoot(realParent)) unsafeRoot()
+  let created = false
+  try {
+    mkdirSync(path, { mode: privateDirectoryMode })
+    created = true
+    assertNoSymlinkComponents(path)
+    if (assertPrivateDirectorySync(path, 'FILE_STORAGE_ROOT_UNSAFE') !== resolve(realParent, parse(path).base)) unsafeRoot()
+    createStorageMarker(path)
+    verifyStorageMarker(path)
+    return realpathSync(path)
+  } catch (error) {
+    if (created) {
+      try { unlinkSync(resolve(path, storageMarkerName)) } catch { /* best-effort rollback */ }
+      try { rmdirSync(path) } catch { /* leave an unsafe partial root untouched */ }
+    }
+    if (error instanceof FileStorageError) throw error
+    return unsafeRoot()
+  }
+}
+
+const prepareInternalDirectory = (root: string, input: string) => {
+  const path = resolve(input)
+  if (!isInside(root, path)) unsafeRoot()
+  try {
+    const actual = assertPrivateDirectorySync(path, 'FILE_STORAGE_SYMLINK_REJECTED')
+    if (!isInside(root, actual)) unsafeRoot()
+    return actual
+  } catch (error) {
+    if (!isMissing(error)) throw error
+  }
+  const parent = dirname(path)
+  const actualParent = assertPrivateDirectorySync(parent, 'FILE_STORAGE_SYMLINK_REJECTED')
+  if (actualParent !== root && !isInside(root, actualParent)) unsafeRoot()
+  mkdirSync(path, { mode: privateDirectoryMode })
+  const actual = assertPrivateDirectorySync(path, 'FILE_STORAGE_SYMLINK_REJECTED')
+  if (!isInside(root, actual)) unsafeRoot()
+  return actual
 }
 
 const mapError = (error: unknown): FileStorageError => {
@@ -87,13 +236,14 @@ const mapError = (error: unknown): FileStorageError => {
 }
 
 export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBytes: number }): FileStorage => {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Invalid file size limit')
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > FILE_UPLOAD_HARD_MAX_BYTES) throw new Error('Invalid file size limit')
   const resolvedRoot = preparePrivateDirectory(root, { rejectBroad: true })
-  const temporaryRoot = preparePrivateDirectory(resolve(resolvedRoot, '.tmp'))
+  const temporaryRoot = prepareInternalDirectory(resolvedRoot, resolve(resolvedRoot, '.tmp'))
   if (!isInside(resolvedRoot, temporaryRoot)) unsafeRoot()
 
   const verifyRoot = () => {
     if (assertPrivateDirectorySync(resolvedRoot, 'FILE_STORAGE_ROOT_UNSAFE') !== resolvedRoot) unsafeRoot()
+    verifyStorageMarker(resolvedRoot)
   }
   const verifyTemporaryRoot = () => {
     verifyRoot()
@@ -116,7 +266,7 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
       }
     }
     const metadata = await lstat(path)
-    if (metadata.isSymbolicLink() || !metadata.isDirectory() || (metadata.mode & 0o777) !== privateDirectoryMode) {
+    if (metadata.isSymbolicLink() || !metadata.isDirectory() || metadata.uid !== currentUid() || (metadata.mode & 0o777) !== privateDirectoryMode) {
       throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '文件分片目录不安全')
     }
     const actual = await realpath(path)
@@ -134,10 +284,24 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
     try {
       verifyTemporaryRoot()
       const metadata = await lstat(path)
-      if (!metadata.isSymbolicLink() && metadata.isFile()) await unlink(path)
+      if (!metadata.isSymbolicLink() && metadata.isFile() && metadata.uid === currentUid()) await unlink(path)
     } catch (error) {
       if (!isMissing(error)) throw error
     }
+  }
+
+  const safeUnlinkFinal = async (storageKey: string, path: string) => {
+    try {
+      await verifyKeyParent(storageKey, false)
+      const metadata = await lstat(path)
+      if (metadata.isSymbolicLink() || (metadata.isFile() && metadata.uid === currentUid())) {
+        await unlink(path)
+        return true
+      }
+    } catch {
+      // Refuse to follow a changed parent; the recovery ledger and audit retain the anomaly for reconciliation.
+    }
+    return false
   }
 
   const createStorageKey = () => {
@@ -154,6 +318,7 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
     const temporary = resolve(temporaryRoot, `${randomUUID()}.part`)
     const hash = createHash('sha256')
     let size = 0
+    let renamed = false
     const counter = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         size += chunk.length
@@ -175,7 +340,11 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
       let content: Buffer
       try {
         const temporaryMetadata = await temporaryHandle.stat()
-        if (!temporaryMetadata.isFile() || (temporaryMetadata.mode & 0o777) !== privateFileMode) {
+        if (
+          !temporaryMetadata.isFile()
+          || temporaryMetadata.uid !== currentUid()
+          || (temporaryMetadata.mode & 0o777) !== privateFileMode
+        ) {
           throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '临时文件不安全')
         }
         content = await temporaryHandle.readFile()
@@ -191,15 +360,21 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
         if (!isMissing(error)) throw error
       }
       await rename(temporary, target)
+      renamed = true
       await verifyKeyParent(storageKey, false)
       const finalMetadata = await lstat(target)
-      if (finalMetadata.isSymbolicLink() || !finalMetadata.isFile() || (finalMetadata.mode & 0o777) !== privateFileMode) {
+      if (finalMetadata.isSymbolicLink() || !finalMetadata.isFile() || finalMetadata.uid !== currentUid() || (finalMetadata.mode & 0o777) !== privateFileMode) {
         throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '最终文件不安全')
       }
       return { storageKey, sha256: hash.digest('hex'), size, mime: metadata.mime }
     } catch (error) {
       await safeUnlinkTemporary(temporary).catch(() => undefined)
-      throw mapError(error)
+      const targetCleanupFailed = renamed && !await safeUnlinkFinal(storageKey, target)
+      const mapped = mapError(error)
+      if (targetCleanupFailed) {
+        throw new FileStorageError(mapped.code, mapped.message, { recoveryRequired: true })
+      }
+      throw mapped
     }
   }
 
@@ -211,7 +386,12 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
       try {
         await verifyKeyParent(storageKey, false)
         const pathMetadata = await lstat(target)
-        if (pathMetadata.isSymbolicLink() || !pathMetadata.isFile()) throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝符号链接文件')
+        if (
+          pathMetadata.isSymbolicLink()
+          || !pathMetadata.isFile()
+          || pathMetadata.uid !== currentUid()
+          || (pathMetadata.mode & 0o777) !== privateFileMode
+        ) throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝不安全文件')
         const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW)
         try {
           const descriptorMetadata = await handle.stat()
@@ -232,7 +412,12 @@ export const createLocalFileStorage = ({ root, maxBytes }: { root: string, maxBy
       try {
         await verifyKeyParent(storageKey, false)
         const before = await lstat(target)
-        if (before.isSymbolicLink() || !before.isFile()) throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝符号链接文件')
+        if (
+          before.isSymbolicLink()
+          || !before.isFile()
+          || before.uid !== currentUid()
+          || (before.mode & 0o777) !== privateFileMode
+        ) throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝不安全文件')
         const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW)
         try {
           const opened = await handle.stat()

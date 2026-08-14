@@ -30,6 +30,7 @@ export type FileRepository = {
   beginUploadRecovery: (storageKey: string, actorUserId: string) => Promise<{ id: string }>
   finalizeUploadWithAudit: (recoveryId: string, record: NewFileRecord, actorUserId: string) => Promise<FileRecord>
   clearUploadRecovery: (recoveryId: string) => Promise<void>
+  recordUploadStorageFailure: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   markUploadCleanupFailed: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   findById: (id: string) => Promise<FileRecord | null>
   hideWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
@@ -73,6 +74,19 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
   clearUploadRecovery: async (recoveryId) => {
     await db.delete(fileStorageRecoveries).where(eq(fileStorageRecoveries.id, recoveryId))
   },
+
+  recordUploadStorageFailure: (recoveryId, actorUserId, failureCode) => db.transaction(async (transaction) => {
+    const [recovery] = await transaction.update(fileStorageRecoveries).set({ updatedAt: new Date() })
+      .where(eq(fileStorageRecoveries.id, recoveryId)).returning({ id: fileStorageRecoveries.id })
+    if (!recovery) throw new Error('File upload recovery row is missing')
+    await transaction.insert(auditLogs).values({
+      actorUserId,
+      action: 'file.storage_rejected',
+      entityType: 'file_storage_recovery',
+      entityId: recovery.id,
+      metadata: { failureCode },
+    })
+  }),
 
   markUploadCleanupFailed: (recoveryId, actorUserId, failureCode) => db.transaction(async (transaction) => {
     const [recovery] = await transaction.update(fileStorageRecoveries).set({

@@ -1,5 +1,7 @@
 import type { Readable } from 'node:stream'
 
+export const FILE_UPLOAD_HARD_MAX_BYTES = 5 * 1_024 * 1_024
+
 export type FileWriteMetadata = {
   mime: string
   size: number

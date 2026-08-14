@@ -12,24 +12,45 @@ import type { SessionService } from '../identity/session.service.js'
 import { buildContentDisposition, FileValidationError } from './file-validation.js'
 import { FileStorageError, preparePrivateDirectory } from './local-file-storage.js'
 import { FileServiceError, type FileService } from './file.service.js'
+import { FILE_UPLOAD_HARD_MAX_BYTES } from './file-storage.js'
 
 const FileIdSchema = z.string().uuid()
-const HARD_UPLOAD_MAX_BYTES = 10 * 1_024 * 1_024
 const MULTIPART_OVERHEAD_BYTES = 64 * 1_024
 
 type UploadGateOptions = {
   globalConcurrency: number
   perUserConcurrency: number
+  globalWindowMax: number
+  globalWindowMs: number
   perUserWindowMax: number
   perUserWindowMs: number
+  windowMapMaxEntries: number
   now?: () => number
 }
 
-const createUploadAdmissionGate = (options: UploadGateOptions) => {
+export const createUploadAdmissionGate = (options: UploadGateOptions) => {
+  for (const value of [
+    options.globalConcurrency, options.perUserConcurrency,
+    options.globalWindowMax, options.globalWindowMs,
+    options.perUserWindowMax, options.perUserWindowMs,
+    options.windowMapMaxEntries,
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid file upload admission limit')
+  }
   let globalActive = 0
+  let globalWindow = { startedAt: 0, count: 0 }
+  let nextWindowPruneAt = 0
   const activeByUser = new Map<string, number>()
   const windows = new Map<string, { startedAt: number, count: number }>()
   const now = options.now ?? Date.now
+
+  const pruneExpiredWindows = (current: number) => {
+    if (current < nextWindowPruneAt && windows.size < options.windowMapMaxEntries) return
+    for (const [userId, window] of windows) {
+      if (current - window.startedAt >= options.perUserWindowMs) windows.delete(userId)
+    }
+    nextWindowPruneAt = current + Math.min(options.perUserWindowMs, 60_000)
+  }
 
   return {
     acquire(userId: string) {
@@ -38,8 +59,18 @@ const createUploadAdmissionGate = (options: UploadGateOptions) => {
         throw new HttpError(429, 'FILE_UPLOAD_CONCURRENCY_LIMITED', '当前上传任务较多，请稍后重试')
       }
       const current = now()
+      if (current - globalWindow.startedAt >= options.globalWindowMs) {
+        globalWindow = { startedAt: current, count: 0 }
+      }
+      if (globalWindow.count >= options.globalWindowMax) {
+        throw new HttpError(429, 'FILE_UPLOAD_GLOBAL_RATE_LIMITED', '当前上传请求较多，请稍后重试')
+      }
+      pruneExpiredWindows(current)
       let window = windows.get(userId)
-      if (!window || current - window.startedAt >= options.perUserWindowMs) {
+      if (!window) {
+        if (windows.size >= options.windowMapMaxEntries) {
+          throw new HttpError(429, 'FILE_UPLOAD_RATE_LIMITED', '上传过于频繁，请稍后重试')
+        }
         window = { startedAt: current, count: 0 }
         windows.set(userId, window)
       }
@@ -47,6 +78,7 @@ const createUploadAdmissionGate = (options: UploadGateOptions) => {
         throw new HttpError(429, 'FILE_UPLOAD_RATE_LIMITED', '上传过于频繁，请稍后重试')
       }
       window.count += 1
+      globalWindow.count += 1
       globalActive += 1
       activeByUser.set(userId, userActive + 1)
       let released = false
@@ -144,11 +176,13 @@ export const createFileRouter = (
     temporaryDirectory: string
     globalConcurrency?: number
     perUserConcurrency?: number
+    globalWindowMax?: number
+    globalWindowMs?: number
     perUserWindowMax?: number
     perUserWindowMs?: number
   },
 ) => {
-  if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1_024 || options.maxBytes > HARD_UPLOAD_MAX_BYTES) {
+  if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1_024 || options.maxBytes > FILE_UPLOAD_HARD_MAX_BYTES) {
     throw new Error('Invalid file upload size limit')
   }
   const router = Router()
@@ -156,8 +190,11 @@ export const createFileRouter = (
   const gate = createUploadAdmissionGate({
     globalConcurrency: options.globalConcurrency ?? 4,
     perUserConcurrency: options.perUserConcurrency ?? 1,
+    globalWindowMax: options.globalWindowMax ?? 20,
+    globalWindowMs: options.globalWindowMs ?? 60_000,
     perUserWindowMax: options.perUserWindowMax ?? 5,
     perUserWindowMs: options.perUserWindowMs ?? 60_000,
+    windowMapMaxEntries: 10_000,
   })
   const upload = multer({
     storage: createPrivateMulterStorage(options.temporaryDirectory),
@@ -186,40 +223,45 @@ export const createFileRouter = (
       next(error)
       return
     }
-    upload(request, response, async (multerError) => {
-      if (multerError) {
-        release?.()
-        if (request.file?.path) await unlink(request.file.path).catch(() => undefined)
-        if (multerError instanceof multer.MulterError && multerError.code === 'LIMIT_FILE_SIZE') {
-          next(new HttpError(413, 'FILE_TOO_LARGE', '文件超过大小限制'))
+    try {
+      upload(request, response, async (multerError) => {
+        if (multerError) {
+          release?.()
+          if (request.file?.path) await unlink(request.file.path).catch(() => undefined)
+          if (multerError instanceof multer.MulterError && multerError.code === 'LIMIT_FILE_SIZE') {
+            next(new HttpError(413, 'FILE_TOO_LARGE', '文件超过大小限制'))
+            return
+          }
+          next(new HttpError(400, 'FILE_MULTIPART_INVALID', '附件上传请求无效'))
           return
         }
-        next(new HttpError(400, 'FILE_MULTIPART_INVALID', '附件上传请求无效'))
-        return
-      }
-      const temporaryPath = request.file?.path
-      try {
-        if (!request.file) throw new HttpError(400, 'FILE_REQUIRED', '请选择要上传的文件')
-        const purpose = typeof request.body.purpose === 'string' ? request.body.purpose : ''
-        const attachmentSlot = typeof request.body.attachmentSlot === 'string' && request.body.attachmentSlot !== ''
-          ? request.body.attachmentSlot
-          : undefined
-        const file = await service.upload({
-          stream: createReadStream(request.file.path),
-          originalName: request.file.originalname,
-          mimeType: request.file.mimetype,
-          sizeBytes: request.file.size,
-          purpose,
-          ...(attachmentSlot ? { attachmentSlot } : {}),
-        }, actor)
-        response.status(201).json({ apiVersion: 'v1', data: { file } })
-      } catch (error) {
-        next(toHttpError(error))
-      } finally {
-        release?.()
-        if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
-      }
-    })
+        const temporaryPath = request.file?.path
+        try {
+          if (!request.file) throw new HttpError(400, 'FILE_REQUIRED', '请选择要上传的文件')
+          const purpose = typeof request.body.purpose === 'string' ? request.body.purpose : ''
+          const attachmentSlot = typeof request.body.attachmentSlot === 'string' && request.body.attachmentSlot !== ''
+            ? request.body.attachmentSlot
+            : undefined
+          const file = await service.upload({
+            stream: createReadStream(request.file.path),
+            originalName: request.file.originalname,
+            mimeType: request.file.mimetype,
+            sizeBytes: request.file.size,
+            purpose,
+            ...(attachmentSlot ? { attachmentSlot } : {}),
+          }, actor)
+          response.status(201).json({ apiVersion: 'v1', data: { file } })
+        } catch (error) {
+          next(toHttpError(error))
+        } finally {
+          release?.()
+          if (temporaryPath) await unlink(temporaryPath).catch(() => undefined)
+        }
+      })
+    } catch (error) {
+      release?.()
+      next(toHttpError(error))
+    }
   }
 
   router.use(requireUser)

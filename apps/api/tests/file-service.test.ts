@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createFileService } from '../src/modules/files/file.service.js'
 import type { FileRecord, FileRepository } from '../src/modules/files/file.repository.js'
 import type { FileStorage } from '../src/modules/files/file-storage.js'
+import { FileStorageError } from '../src/modules/files/local-file-storage.js'
 
 const actor = { id: '00000000-0000-4000-8000-000000000301', displayName: '学员', phoneNormalized: '+8613800138301', passwordHash: 'unused', role: 'user' as const, disabledAt: null }
 const storageKey = 'aa/bb/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -84,5 +85,73 @@ describe('recoverable file lifecycle', () => {
     }, actor)).rejects.toThrow('database insert failed')
     expect(events).toEqual(['recovery_begin', 'storage_put', 'metadata_finalize', 'storage_cleanup'])
     expect(recoveryState).toBe('delete_failed')
+  })
+
+  it('audits a storage escape rejection without recording a physical path', async () => {
+    const audit: Array<{ recoveryId: string, code: string }> = []
+    const repository = {
+      beginUploadRecovery: async () => ({ id: '00000000-0000-4000-8000-000000000304' }),
+      recordUploadStorageFailure: async (recoveryId: string, _actorId: string, code: string) => {
+        audit.push({ recoveryId, code })
+      },
+      clearUploadRecovery: async () => undefined,
+    } as unknown as FileRepository
+    const storage = {
+      createStorageKey: () => storageKey,
+      put: async () => { throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝符号链接文件') },
+    } as unknown as FileStorage
+
+    await expect(createFileService(repository, storage).upload({
+      stream: Readable.from(Buffer.alloc(10)), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 10,
+      purpose: 'registration_attachment', attachmentSlot: 'resume',
+    }, actor)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(audit).toEqual([{
+      recoveryId: '00000000-0000-4000-8000-000000000304',
+      code: 'FILE_STORAGE_SYMLINK_REJECTED',
+    }])
+    expect(JSON.stringify(audit)).not.toMatch(/resume|uploads|\/tmp/iu)
+  })
+
+  it('retains reconciliation state when an escaped target cannot be safely cleaned', async () => {
+    let cleared = false
+    let recoveryFailure = ''
+    const repository = {
+      beginUploadRecovery: async () => ({ id: '00000000-0000-4000-8000-000000000305' }),
+      recordUploadStorageFailure: async () => undefined,
+      clearUploadRecovery: async () => { cleared = true },
+      markUploadCleanupFailed: async (_id: string, _actorId: string, code: string) => { recoveryFailure = code },
+    } as unknown as FileRepository
+    const storage = {
+      createStorageKey: () => storageKey,
+      put: async () => {
+        throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝符号链接文件', { recoveryRequired: true })
+      },
+    } as unknown as FileStorage
+
+    await expect(createFileService(repository, storage).upload({
+      stream: Readable.from(Buffer.alloc(10)), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 10,
+      purpose: 'registration_attachment', attachmentSlot: 'resume',
+    }, actor)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(cleared).toBe(false)
+    expect(recoveryFailure).toBe('FILE_STORAGE_TARGET_CLEANUP_FAILED')
+  })
+
+  it('does not clear recovery state when anomaly auditing fails', async () => {
+    let cleared = false
+    const repository = {
+      beginUploadRecovery: async () => ({ id: '00000000-0000-4000-8000-000000000306' }),
+      recordUploadStorageFailure: async () => { throw new Error('audit database unavailable') },
+      clearUploadRecovery: async () => { cleared = true },
+    } as unknown as FileRepository
+    const storage = {
+      createStorageKey: () => storageKey,
+      put: async () => { throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', '拒绝符号链接文件') },
+    } as unknown as FileStorage
+
+    await expect(createFileService(repository, storage).upload({
+      stream: Readable.from(Buffer.alloc(10)), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 10,
+      purpose: 'registration_attachment', attachmentSlot: 'resume',
+    }, actor)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(cleared).toBe(false)
   })
 })

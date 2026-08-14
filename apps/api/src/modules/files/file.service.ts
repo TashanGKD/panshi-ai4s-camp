@@ -46,7 +46,29 @@ export const createFileService = (repository: FileRepository, storage: FileStora
     try {
       stored = await storage.put(input.stream, { mime: input.mimeType, size: input.sizeBytes }, storageKey)
     } catch (error) {
-      await repository.clearUploadRecovery(recovery.id).catch(() => undefined)
+      const failureCode = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined
+      const recoveryRequired = typeof error === 'object' && error !== null && 'recoveryRequired' in error && error.recoveryRequired === true
+      if (failureCode?.startsWith('FILE_STORAGE_')) {
+        let audited = false
+        try {
+          await repository.recordUploadStorageFailure(recovery.id, actor.id, failureCode)
+          audited = true
+        } catch {
+          // Keep the pending recovery row when the audit transaction is unavailable.
+        }
+        if (!audited) throw error
+      }
+      if (recoveryRequired) {
+        await repository.markUploadCleanupFailed(
+          recovery.id,
+          actor.id,
+          'FILE_STORAGE_TARGET_CLEANUP_FAILED',
+        ).catch(() => undefined)
+      } else {
+        await repository.clearUploadRecovery(recovery.id).catch(() => undefined)
+      }
       throw error
     }
     try {

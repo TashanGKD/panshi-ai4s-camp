@@ -30,6 +30,8 @@ export type ApiRuntimeConfig = {
   fileUploadMaxBytes?: number
   fileUploadTempDirectory?: string
   fileUploadGlobalConcurrency?: number
+  fileUploadGlobalWindowMax?: number
+  fileUploadGlobalWindowMs?: number
   fileUploadPerUserConcurrency?: number
   fileUploadPerUserWindowMax?: number
   fileUploadPerUserWindowMs?: number
@@ -124,9 +126,11 @@ export const createApp = ({
     if (fileService) {
       if (!config.fileUploadTempDirectory) throw new Error('File upload temporary directory is required')
       app.use('/api/v1/files', createFileRouter(sessions, fileService, {
-        maxBytes: config.fileUploadMaxBytes ?? 10_485_760,
+        maxBytes: config.fileUploadMaxBytes ?? 5_242_880,
         temporaryDirectory: config.fileUploadTempDirectory,
         globalConcurrency: config.fileUploadGlobalConcurrency,
+        globalWindowMax: config.fileUploadGlobalWindowMax,
+        globalWindowMs: config.fileUploadGlobalWindowMs,
         perUserConcurrency: config.fileUploadPerUserConcurrency,
         perUserWindowMax: config.fileUploadPerUserWindowMax,
         perUserWindowMs: config.fileUploadPerUserWindowMs,

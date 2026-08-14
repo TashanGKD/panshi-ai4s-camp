@@ -13,7 +13,7 @@ import { auditLogs, files, fileStorageRecoveries, sessions, users } from '../src
 import { createIdentityRepository } from '../src/modules/identity/identity.repository.js'
 import { createFileRepository } from '../src/modules/files/file.repository.js'
 import { createFileService } from '../src/modules/files/file.service.js'
-import { createLocalFileStorage } from '../src/modules/files/local-file-storage.js'
+import { FileStorageError, createLocalFileStorage } from '../src/modules/files/local-file-storage.js'
 import type { FileStorage } from '../src/modules/files/file-storage.js'
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL
@@ -52,6 +52,7 @@ const buildPdf = () => {
 
 const PDF = buildPdf()
 let uploadRoot = ''
+let uploadCleanupRoot = ''
 
 const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex')
 const cookie = (token: string) => `panshi_session=${token}`
@@ -64,7 +65,8 @@ describe('protected file PostgreSQL integration', () => {
 
   beforeEach(async () => {
     await database.pool.query('TRUNCATE file_storage_recoveries, files, audit_logs, sessions, users CASCADE')
-    uploadRoot = await mkdtemp(join(tmpdir(), 'panshi-file-integration-'))
+    uploadCleanupRoot = await mkdtemp(join(tmpdir(), 'panshi-file-integration-'))
+    uploadRoot = join(uploadCleanupRoot, 'uploads')
     await database.db.insert(users).values([
       { id: studentId, displayName: '学员一', phoneNormalized: '+8613800138101', passwordHash: 'unused', role: 'user' },
       { id: otherId, displayName: '学员二', phoneNormalized: '+8613800138102', passwordHash: 'unused', role: 'user' },
@@ -78,8 +80,9 @@ describe('protected file PostgreSQL integration', () => {
   })
 
   afterEach(async () => {
-    if (uploadRoot) await rm(uploadRoot, { recursive: true, force: true })
+    if (uploadCleanupRoot) await rm(uploadCleanupRoot, { recursive: true, force: true })
     uploadRoot = ''
+    uploadCleanupRoot = ''
   })
 
   afterAll(async () => {
@@ -239,6 +242,27 @@ describe('protected file PostgreSQL integration', () => {
     expect(await database.db.select().from(fileStorageRecoveries)).toEqual([
       expect.objectContaining({ id: recovery.id, state: 'pending' }),
     ])
+  })
+
+  it('persists only a stable code when storage rejects an escape anomaly', async () => {
+    const repository = createFileRepository(database.db)
+    const key = 'ee/ff/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    const storage = {
+      createStorageKey: () => key,
+      put: async () => { throw new FileStorageError('FILE_STORAGE_SYMLINK_REJECTED', 'unsafe local path') },
+      open: async () => Readable.from(PDF),
+      remove: async () => undefined,
+    } satisfies FileStorage
+    const actor = { id: studentId, displayName: '学员一', phoneNormalized: '+8613800138101', passwordHash: 'unused', role: 'user' as const, disabledAt: null }
+
+    await expect(createFileService(repository, storage).upload({
+      stream: Readable.from(PDF), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: PDF.length,
+      purpose: 'registration_attachment', attachmentSlot: 'resume',
+    }, actor)).rejects.toMatchObject({ code: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(await database.db.select().from(fileStorageRecoveries)).toHaveLength(0)
+    const rejection = (await database.db.select().from(auditLogs)).find((entry) => entry.action === 'file.storage_rejected')
+    expect(rejection?.metadata).toEqual({ failureCode: 'FILE_STORAGE_SYMLINK_REJECTED' })
+    expect(JSON.stringify(rejection)).not.toMatch(/resume|uploads|unsafe local path/iu)
   })
 
   it.each([

@@ -54,9 +54,21 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 ### 安全附件存储（Task 12）
 
-`FileStorage` 隔离业务与物理存储，首版 `LocalFileStorage` 默认把文件写入项目 `var/uploads`，可通过 `FILE_STORAGE_ROOT` 替换根目录；`FILE_UPLOAD_MAX_BYTES` 默认及硬上限均为 10485760 字节。应用使用独占的 `FILE_UPLOAD_TEMP_ROOT`（默认 `var/uploads/.incoming`），服务启动时创建并验证存储根、上传临时目录及内部目录均为非符号链接的 0700 私有目录。上传目录未挂入任何前端静态资源目录；数据库和 HTTP 响应均不保存或返回物理公开 URL。
+`FileStorage` 隔离业务与物理存储，首版 `LocalFileStorage` 默认使用项目 `var/uploads`，可通过 `FILE_STORAGE_ROOT` 替换根目录；`FILE_UPLOAD_MAX_BYTES` 默认及硬上限均为 5242880 字节（5 MiB）。应用使用独占的 `FILE_UPLOAD_TEMP_ROOT`（默认 `var/uploads/.incoming`）。既有存储根必须由当前运行 UID 拥有、为非符号链接的 0700 目录，并包含当前 UID 所有、0600 且内容恰为 `panshi-ai4s-camp:file-storage:v1` 加换行的 `.panshi-storage-root` 标记；应用绝不自动修改既有目录权限。全新目录只会在当前 UID 拥有且组／其他用户不可写的安全父目录下创建。`/`、HOME、系统临时目录、常见共享目录、当前目录、项目／工作区及其祖先都会被拒绝。
 
-附件仅接受 PDF、DOCX。服务端同时检查安全文件名、扩展名、声明 MIME、实际内容签名、大小和 SHA-256；DOCX 进一步检查 ZIP/OpenXML 必要条目、CRC、展开大小、压缩比例和条目路径。文件先以流方式写入同一存储根内的临时文件，校验后原子重命名；失败或中断会清理临时文件。最终 storage key 使用随机 UUID 分层路径，不含原始文件名。
+首次本地运行前需显式执行一次部署准备（生产环境对自定义路径执行等价步骤，并确保目录和标记均属于 API 运行账号）：
+
+```bash
+install -d -m 700 var/uploads
+printf 'panshi-ai4s-camp:file-storage:v1\n' > var/uploads/.panshi-storage-root
+chmod 600 var/uploads/.panshi-storage-root
+```
+
+上传默认受全局 4 路、单账号 1 路并发限制，同时受全局每分钟 20 次、单账号每分钟 5 次频率限制；账号窗口采用有界、惰性淘汰的内存表。5 MiB 与低频率门控将首版同步校验工作限制在可控范围，暂不引入 worker。未来迁移对象存储时只替换 `FileStorage` 适配器；若文件规模或验证复杂度提高，再将内容验证迁移至 worker。上传目录未挂入任何前端静态资源目录，数据库和 HTTP 响应均不保存或返回物理公开 URL。
+
+附件仅接受 PDF、DOCX。服务端同时检查安全文件名、扩展名、声明 MIME、实际内容签名、大小和 SHA-256；DOCX 进一步检查 ZIP/OpenXML 必要条目、CRC、展开大小、压缩比例和条目路径。文件先以流方式写入同一存储根内的临时文件，校验后原子重命名；失败或中断会清理临时文件，重命名后的异常也会在父目录仍可安全确认时尽力清理目标，并仅以稳定错误码写审计。最终 storage key 使用随机 UUID 分层路径，不含原始文件名。
+
+首版 Web 威胁模型覆盖远程请求、恶意附件、路径穿越和符号链接逃逸。存储根、临时目录和分片目录均要求当前 UID 所有且为 0700，文件为 0600；操作前后保留 `lstat`／`realpath` 复核，文件打开使用 `O_NOFOLLOW`。能够以同一 UID 在本机直接操作应用文件系统的进程不属于首版 Web 威胁模型，因为它已能读写该 UID 的全部应用数据；本轮因此不引入原生 `openat` 封装。
 
 当前受保护接口只建立与 Task 13 兼容的附件所有权边界，不创建完整报名：登录学员或有效管理员可上传 `registration_attachment`；只有文件所有者和有效管理员可下载、隐藏或删除。隐藏后立即失效；删除采用 `active/deleting/delete_failed/deleted` 可恢复状态，物理删除失败会返回稳定的 503，并允许调用同一删除接口重试。元数据落库前先建立恢复记录，避免数据库失败与物理清理失败共同造成静默孤儿。下载通过后端鉴权并使用安全 `Content-Disposition`、`nosniff` 和 `no-store` 响应头。上传、隐藏和删除审计只记录用途、访问级别、MIME、大小及附件项等元数据，不记录原文件名、存储路径或文件内容。
 

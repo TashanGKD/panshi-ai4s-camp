@@ -7,6 +7,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, type ApiRuntimeConfig } from '../src/app.js'
 import { FileServiceError, type FileService } from '../src/modules/files/file.service.js'
+import { createUploadAdmissionGate } from '../src/modules/files/file.routes.js'
 import { hashSessionToken } from '../src/modules/identity/session.service.js'
 
 const origin = 'https://camp.example'
@@ -49,6 +50,8 @@ const makeApp = (service: FileService, tempDirectory: string, limits: Partial<Ap
     fileUploadMaxBytes: 1024,
     fileUploadTempDirectory: tempDirectory,
     fileUploadGlobalConcurrency: 2,
+    fileUploadGlobalWindowMax: 10,
+    fileUploadGlobalWindowMs: 60_000,
     fileUploadPerUserConcurrency: 1,
     fileUploadPerUserWindowMax: 2,
     fileUploadPerUserWindowMs: 60_000,
@@ -88,11 +91,14 @@ describe('file upload route resource boundaries', () => {
     await started
     expect((await lstat(temp)).mode & 0o777).toBe(0o700)
     const names = await readdir(temp)
-    expect(names).toHaveLength(1)
-    expect((await lstat(join(temp, names[0]!))).mode & 0o777).toBe(0o600)
+    const uploads = names.filter((name) => name.endsWith('.upload'))
+    expect(uploads).toHaveLength(1)
+    const temporaryMetadata = await lstat(join(temp, uploads[0]!))
+    expect(temporaryMetadata.mode & 0o777).toBe(0o600)
+    expect(temporaryMetadata.uid).toBe(process.getuid?.())
     release()
     expect((await pending).status).toBe(201)
-    expect(await readdir(temp)).toEqual([])
+    expect((await readdir(temp)).filter((name) => name.endsWith('.upload'))).toEqual([])
   })
 
   it('rejects excessive multipart fields with a stable parser error', async () => {
@@ -108,7 +114,7 @@ describe('file upload route resource boundaries', () => {
 
   it('refuses an upload limit above the application hard maximum', async () => {
     const temp = await temporaryRoot()
-    expect(() => makeApp(makeService(async () => responseFile), temp, { fileUploadMaxBytes: 10 * 1_024 * 1_024 + 1 }))
+    expect(() => makeApp(makeService(async () => responseFile), temp, { fileUploadMaxBytes: 5 * 1_024 * 1_024 + 1 }))
       .toThrow('Invalid file upload size limit')
   })
 
@@ -202,6 +208,46 @@ describe('file upload route resource boundaries', () => {
     expect(limited.status).toBe(429)
     expect(limited.body.error.code).toBe('FILE_UPLOAD_RATE_LIMITED')
   })
+
+  it('rate-limits uploads globally across multiple accounts', async () => {
+    const temp = await temporaryRoot()
+    const app = makeApp(makeService(async () => responseFile), temp, {
+      fileUploadGlobalWindowMax: 2,
+      fileUploadPerUserWindowMax: 5,
+    })
+    expect((await upload(app, 'one-token')).status).toBe(201)
+    expect((await upload(app, 'two-token')).status).toBe(201)
+    const limited = await upload(app, 'three-token')
+    expect(limited.status).toBe(429)
+    expect(limited.body.error.code).toBe('FILE_UPLOAD_GLOBAL_RATE_LIMITED')
+  })
+
+  it('evicts expired account windows and caps tracking capacity', () => {
+    let now = 1_000
+    const gate = createUploadAdmissionGate({
+      globalConcurrency: 2, perUserConcurrency: 1,
+      globalWindowMax: 10, globalWindowMs: 1_000,
+      perUserWindowMax: 2, perUserWindowMs: 1_000,
+      windowMapMaxEntries: 2, now: () => now,
+    })
+    gate.acquire('one')()
+    gate.acquire('two')()
+    expect(() => gate.acquire('three')).toThrowError(expect.objectContaining({ code: 'FILE_UPLOAD_RATE_LIMITED' }))
+    now += 1_001
+    expect(() => gate.acquire('three')()).not.toThrow()
+  })
+
+  it('releases concurrency after an exceptional upload path', async () => {
+    const temp = await temporaryRoot()
+    let calls = 0
+    const app = makeApp(makeService(async () => {
+      calls += 1
+      if (calls === 1) throw new Error('simulated validation failure')
+      return responseFile
+    }), temp, { fileUploadGlobalConcurrency: 1 })
+    expect((await upload(app, 'one-token')).status).toBe(500)
+    expect((await upload(app, 'two-token')).status).toBe(201)
+  })
 })
 
 describe('file download streaming', () => {
@@ -210,11 +256,12 @@ describe('file download streaming', () => {
     service.openForDownload = async () => {
       throw new FileServiceError(404, 'FILE_NOT_AVAILABLE', '文件不存在或不可访问')
     }
-    const temp = await mkdtemp(join(tmpdir(), 'panshi-download-open-failure-'))
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-download-open-failure-'))
+    const temp = join(parent, 'incoming')
     const response = await request(makeApp(service, temp))
       .get('/api/v1/files/00000000-0000-4000-8000-000000000210/download')
       .set('Cookie', 'panshi_session=one-token')
-    await rm(temp, { recursive: true, force: true })
+    await rm(parent, { recursive: true, force: true })
     expect(response.status).toBe(404)
     expect(response.body.error.code).toBe('FILE_NOT_AVAILABLE')
     expect(response.headers).not.toHaveProperty('content-disposition')
@@ -241,7 +288,8 @@ describe('file download streaming', () => {
       record: { ...responseFile, sizeBytes: 1_000_000, storageKey: 'unused', sha256: 'a'.repeat(64), uploadedBy: users.get('one-token')!.id, ownerUserId: users.get('one-token')!.id, visibility: 'owner_admin', hiddenAt: null, deletedAt: null, lifecycleState: 'active', deleteFailureCode: null, createdAt: new Date() },
       stream: source,
     })
-    const temp = await mkdtemp(join(tmpdir(), 'panshi-download-route-'))
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-download-route-'))
+    const temp = join(parent, 'incoming')
     const app = makeApp(service, temp)
     const server = createServer(app)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -256,7 +304,7 @@ describe('file download streaming', () => {
       client.end()
     })
     await new Promise<void>((resolve) => server.close(() => resolve()))
-    await rm(temp, { recursive: true, force: true })
+    await rm(parent, { recursive: true, force: true })
     expect(destroyed).toBe(true)
   })
 })

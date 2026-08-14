@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 import { Readable } from 'node:stream'
 import { deflateRawSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -50,6 +51,8 @@ const incrementalPdf = () => {
 }
 
 const PDF = buildPdf()
+const STORAGE_MARKER = '.panshi-storage-root'
+const STORAGE_MARKER_CONTENT = 'panshi-ai4s-camp:file-storage:v1\n'
 const PDF_2_0 = buildPdf('2.0')
 // Generated with qpdf 12.3.2: qpdf --empty --object-streams=generate -
 const QPDF_XREF_STREAM = Buffer.from(
@@ -132,7 +135,7 @@ const listFiles = async (root: string): Promise<string[]> => {
     const path = join(root, entry.name)
     return entry.isDirectory() ? listFiles(path) : [path]
   }))
-  return nested.flat()
+  return nested.flat().filter((path) => !path.endsWith(`/${STORAGE_MARKER}`))
 }
 
 describe('local protected file storage', () => {
@@ -143,8 +146,9 @@ describe('local protected file storage', () => {
   })
 
   const storage = async (maxBytes = 1024) => {
-    const root = await mkdtemp(join(tmpdir(), 'panshi-files-'))
-    roots.push(root)
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-files-'))
+    roots.push(parent)
+    const root = join(parent, 'uploads')
     return { root, storage: createLocalFileStorage({ root, maxBytes }) }
   }
 
@@ -202,18 +206,47 @@ describe('local protected file storage', () => {
     await expect(local.open(stored.storageKey)).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' })
   })
 
-  it('enforces private modes on the storage root, temp directory, shards and files', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'panshi-files-mode-'))
-    roots.push(root)
-    await chmod(root, 0o755)
+  it('creates a marked private root and enforces ownership modes on internal paths', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'panshi-files-mode-'))
+    roots.push(parent)
+    const root = join(parent, 'uploads')
     const local = createLocalFileStorage({ root, maxBytes: 1024 })
     const stored = await local.put(Readable.from(PDF), { mime: 'application/pdf', size: PDF.length })
     const [first, second] = stored.storageKey.split('/')
     const mode = async (path: string) => (await lstat(path)).mode & 0o777
+    const owner = async (path: string) => (await lstat(path)).uid
     expect(await mode(root)).toBe(0o700)
+    expect(await mode(join(root, STORAGE_MARKER))).toBe(0o600)
+    expect(await readFile(join(root, STORAGE_MARKER), 'utf8')).toBe(STORAGE_MARKER_CONTENT)
     expect(await mode(join(root, '.tmp'))).toBe(0o700)
+    expect(await mode(join(root, first!))).toBe(0o700)
     expect(await mode(join(root, first!, second!))).toBe(0o700)
     expect(await mode(join(root, stored.storageKey))).toBe(0o600)
+    for (const path of [root, join(root, '.tmp'), join(root, first!), join(root, first!, second!), join(root, stored.storageKey)]) {
+      expect(await owner(path)).toBe(process.getuid?.())
+    }
+  })
+
+  it('never chmods an existing root and requires a valid private marker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-files-existing-'))
+    roots.push(root)
+    await chmod(root, 0o755)
+    expect(() => createLocalFileStorage({ root, maxBytes: 1_024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+    expect((await lstat(root)).mode & 0o777).toBe(0o755)
+
+    await chmod(root, 0o700)
+    expect(() => createLocalFileStorage({ root, maxBytes: 1_024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_MARKER_INVALID' }))
+    await writeFile(join(root, STORAGE_MARKER), 'wrong-version\n', { mode: 0o600 })
+    expect(() => createLocalFileStorage({ root, maxBytes: 1_024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_MARKER_INVALID' }))
+    await writeFile(join(root, STORAGE_MARKER), STORAGE_MARKER_CONTENT, { mode: 0o600 })
+    await chmod(join(root, STORAGE_MARKER), 0o644)
+    expect(() => createLocalFileStorage({ root, maxBytes: 1_024 }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_MARKER_INVALID' }))
+    await chmod(join(root, STORAGE_MARKER), 0o600)
+    expect(() => createLocalFileStorage({ root, maxBytes: 1_024 })).not.toThrow()
   })
 
   it('rejects a symlink storage root without writing outside it', async () => {
@@ -245,6 +278,8 @@ describe('local protected file storage', () => {
       .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
     expect(() => preparePrivateDirectory(resolve(process.cwd(), '../..'), { rejectBroad: true }))
       .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+    expect(() => preparePrivateDirectory(resolve(tmpdir()), { rejectBroad: true }))
+      .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
 
     const outside = await mkdtemp(join(tmpdir(), 'panshi-files-component-outside-'))
     const parent = await mkdtemp(join(tmpdir(), 'panshi-files-component-parent-'))
@@ -252,6 +287,24 @@ describe('local protected file storage', () => {
     await symlink(outside, join(parent, 'linked'), 'dir')
     expect(() => createLocalFileStorage({ root: join(parent, 'linked', 'uploads'), maxBytes: 1_024 }))
       .toThrowError(expect.objectContaining({ code: 'FILE_STORAGE_ROOT_UNSAFE' }))
+  })
+
+  it('bounds synchronous validation work to the five MiB policy', async () => {
+    const maximum = 5 * 1_024 * 1_024
+    const malicious = Buffer.alloc(maximum, 0x20)
+    malicious.write('%PDF-1.7\n', 0, 'latin1')
+    malicious.write('%%EOF\n', malicious.length - 6, 'latin1')
+    const delay = monitorEventLoopDelay({ resolution: 10 })
+    delay.enable()
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    const started = performance.now()
+    expect(() => validateStoredFileContent(malicious, 'application/pdf', maximum))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+    const elapsed = performance.now() - started
+    await new Promise<void>((resolve) => setTimeout(resolve, 20))
+    delay.disable()
+    expect(elapsed).toBeLessThan(1_000)
+    expect(delay.max / 1_000_000).toBeLessThan(1_000)
   })
 
   it('rejects shard and final-file symlink escapes for open and remove', async () => {

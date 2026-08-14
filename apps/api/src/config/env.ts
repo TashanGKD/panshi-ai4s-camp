@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { FILE_UPLOAD_HARD_MAX_BYTES } from '../modules/files/file-storage.js'
 
 const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
 const defaultFileStorageRoot = resolve(projectRoot, 'var/uploads')
@@ -63,8 +64,10 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   VERIFICATION_MOCK_CODE: z.string().regex(/^\d{6}$/u).optional(),
   FILE_STORAGE_ROOT: z.string().min(1).default(defaultFileStorageRoot).transform((value) => resolve(projectRoot, value)),
   FILE_UPLOAD_TEMP_ROOT: z.string().min(1).optional().transform((value) => value ? resolve(projectRoot, value) : undefined),
-  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(10_485_760).default(10_485_760),
+  FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(FILE_UPLOAD_HARD_MAX_BYTES).default(FILE_UPLOAD_HARD_MAX_BYTES),
   FILE_UPLOAD_GLOBAL_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),
+  FILE_UPLOAD_GLOBAL_WINDOW_MAX: z.coerce.number().int().min(1).max(100).default(20),
+  FILE_UPLOAD_GLOBAL_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
   FILE_UPLOAD_PER_USER_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
   FILE_UPLOAD_PER_USER_WINDOW_MAX: z.coerce.number().int().min(1).max(30).default(5),
   FILE_UPLOAD_PER_USER_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),

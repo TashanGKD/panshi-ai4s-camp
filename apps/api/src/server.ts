@@ -267,6 +267,8 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
       fileUploadMaxBytes: env.FILE_UPLOAD_MAX_BYTES,
       fileUploadTempDirectory: env.FILE_UPLOAD_TEMP_ROOT,
       fileUploadGlobalConcurrency: env.FILE_UPLOAD_GLOBAL_CONCURRENCY,
+      fileUploadGlobalWindowMax: env.FILE_UPLOAD_GLOBAL_WINDOW_MAX,
+      fileUploadGlobalWindowMs: env.FILE_UPLOAD_GLOBAL_WINDOW_MS,
       fileUploadPerUserConcurrency: env.FILE_UPLOAD_PER_USER_CONCURRENCY,
       fileUploadPerUserWindowMax: env.FILE_UPLOAD_PER_USER_WINDOW_MAX,
       fileUploadPerUserWindowMs: env.FILE_UPLOAD_PER_USER_WINDOW_MS,

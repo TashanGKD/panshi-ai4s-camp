@@ -1,5 +1,5 @@
 import { extname, posix } from 'node:path'
-import { inflateRawSync } from 'node:zlib'
+import { inflateRawSync, inflateSync } from 'node:zlib'
 
 export const PDF_MIME = 'application/pdf'
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -112,13 +112,120 @@ const findPdfDictionaryEnd = (text: string, start: number) => {
   return -1
 }
 
-type PdfXrefEntry = { offset: number, generation: number, inUse: boolean }
+type PdfXrefEntry =
+  | { kind: 'free', nextFree: number, generation: number }
+  | { kind: 'direct', offset: number, generation: number }
+  | { kind: 'compressed', objectStream: number, index: number }
 type PdfXrefSection = {
   entries: Map<number, PdfXrefEntry>
   root?: { object: number, generation: number }
   previous?: number
   size: number
   stream: boolean
+}
+
+const readPdfInteger = (dictionary: string, name: string) => {
+  const direct = new RegExp(`/${name}\\s+(\\d+)(?!\\d)(?!\\s+\\d+\\s+R)`, 'u').exec(dictionary)
+  const value = direct ? Number(direct[1]) : NaN
+  if (!Number.isSafeInteger(value) || value < 0) pdfInvalid()
+  return value
+}
+
+const readPdfArray = (dictionary: string, name: string) => {
+  const marker = new RegExp(`/${name}\\b`, 'u').exec(dictionary)
+  if (!marker) return undefined
+  const value = new RegExp(`/${name}\\s*\\[([^\\]]*)\\]`, 'u').exec(dictionary)
+  if (!value || !/^(?:\s*\d+\s*)*$/u.test(value[1]!)) pdfInvalid()
+  const arrayValue = value![1]!
+  return arrayValue.trim() === '' ? [] : arrayValue.trim().split(/\s+/u).map(Number)
+}
+
+const pdfStreamBytes = (content: Buffer, dictionary: string, dictionaryEnd: number) => {
+  const length = readPdfInteger(dictionary, 'Length')
+  const marker = /^[\t\f\r\n ]*stream(?:\r\n|\n|\r)/u.exec(content.toString('latin1', dictionaryEnd))
+  if (!marker) pdfInvalid('PDF stream 结构无效')
+  const start = dictionaryEnd + marker![0].length
+  const end = start + length
+  if (end > content.length || !/^(?:\r\n|\n|\r)?endstream\b/u.test(content.toString('latin1', end))) {
+    pdfInvalid('PDF stream 长度无效')
+  }
+  return content.subarray(start, end)
+}
+
+const paeth = (left: number, above: number, upperLeft: number) => {
+  const estimate = left + above - upperLeft
+  const leftDistance = Math.abs(estimate - left)
+  const aboveDistance = Math.abs(estimate - above)
+  const upperLeftDistance = Math.abs(estimate - upperLeft)
+  if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) return left
+  return aboveDistance <= upperLeftDistance ? above : upperLeft
+}
+
+const undoPngPrediction = (input: Buffer, rowBytes: number, predictor: number) => {
+  if (rowBytes < 1 || input.length % (rowBytes + 1) !== 0) pdfInvalid('PDF stream 预测器数据无效')
+  const rows = input.length / (rowBytes + 1)
+  const output = Buffer.alloc(rows * rowBytes)
+  for (let row = 0; row < rows; row += 1) {
+    const filter = input[row * (rowBytes + 1)]!
+    if (filter > 4 || (predictor !== 15 && filter !== predictor - 10)) pdfInvalid('PDF stream 预测器无效')
+    for (let column = 0; column < rowBytes; column += 1) {
+      const encoded = input[row * (rowBytes + 1) + column + 1]!
+      const outputOffset = row * rowBytes + column
+      const left = column > 0 ? output[outputOffset - 1]! : 0
+      const above = row > 0 ? output[outputOffset - rowBytes]! : 0
+      const upperLeft = row > 0 && column > 0 ? output[outputOffset - rowBytes - 1]! : 0
+      const predictor = filter === 1 ? left
+        : filter === 2 ? above
+          : filter === 3 ? Math.floor((left + above) / 2)
+            : filter === 4 ? paeth(left, above, upperLeft)
+              : 0
+      output[outputOffset] = (encoded + predictor) & 0xff
+    }
+  }
+  return output
+}
+
+const decodePdfStream = (encoded: Buffer, dictionary: string, maxDecodedBytes: number) => {
+  const filterMarker = /\/Filter\b/u.test(dictionary)
+  const directFilter = /\/Filter\s+\/([A-Za-z0-9]+)\b/u.exec(dictionary)?.[1]
+  const arrayFilter = /\/Filter\s*\[\s*\/([A-Za-z0-9]+)\s*\]/u.exec(dictionary)?.[1]
+  if (filterMarker && !directFilter && !arrayFilter) pdfInvalid('PDF stream 过滤器无效')
+  const filter = directFilter ?? arrayFilter
+  if (filter !== undefined && filter !== 'FlateDecode' && filter !== 'Fl') pdfInvalid('PDF stream 过滤器不受支持')
+
+  let decoded: Buffer
+  try {
+    decoded = filter === undefined ? encoded : inflateSync(encoded, { maxOutputLength: maxDecodedBytes + 1 })
+  } catch {
+    pdfInvalid('PDF stream 解码失败')
+  }
+  if (decoded!.length > maxDecodedBytes) pdfInvalid('PDF stream 展开大小异常')
+
+  const decodeParmsMarker = /\/DecodeParms\b/u.exec(dictionary)
+  if (!decodeParmsMarker) return decoded!
+  if (filter === undefined) pdfInvalid('PDF stream 解码参数无效')
+  const parametersStart = dictionary.indexOf('<<', decodeParmsMarker.index)
+  const parametersEnd = parametersStart < 0 ? -1 : findPdfDictionaryEnd(dictionary, parametersStart)
+  if (parametersStart < 0 || parametersEnd < 0) pdfInvalid('PDF stream 解码参数无效')
+  const parameters = dictionary.slice(parametersStart, parametersEnd)
+  const predictor = /\/Predictor\b/u.test(parameters) ? readPdfInteger(parameters, 'Predictor') : 1
+  if (predictor === 1) return decoded!
+  if (predictor < 10 || predictor > 15) pdfInvalid('PDF stream 预测器不受支持')
+  const colors = /\/Colors\b/u.test(parameters) ? readPdfInteger(parameters, 'Colors') : 1
+  const bits = /\/BitsPerComponent\b/u.test(parameters) ? readPdfInteger(parameters, 'BitsPerComponent') : 8
+  const columns = /\/Columns\b/u.test(parameters) ? readPdfInteger(parameters, 'Columns') : 1
+  if (colors !== 1 || bits !== 8 || columns < 1 || columns > maxDecodedBytes) pdfInvalid('PDF stream 预测器参数无效')
+  return undoPngPrediction(decoded!, columns, predictor)
+}
+
+const readPdfField = (input: Buffer, offset: number, width: number) => {
+  if (width < 0 || width > 8 || offset < 0 || offset + width > input.length) pdfInvalid()
+  let value = 0
+  for (let index = 0; index < width; index += 1) {
+    value = value * 256 + input[offset + index]!
+    if (!Number.isSafeInteger(value)) pdfInvalid('PDF 交叉引用数值溢出')
+  }
+  return value
 }
 
 const validatePdfXrefStream = (content: Buffer, offset: number, text: string): PdfXrefSection => {
@@ -137,10 +244,54 @@ const validatePdfXrefStream = (content: Buffer, offset: number, text: string): P
   const widths = widthsMatch.slice(1).map(Number)
   const recordWidth = widths.reduce((sum, width) => sum + width, 0)
   if (recordWidth < 1 || widths.some((width) => !Number.isInteger(width) || width < 0 || width > 8)) pdfInvalid()
-  const streamStart = text.slice(dictionaryEnd).search(/stream(?:\r\n|\n|\r)/u)
-  const endStream = text.indexOf('endstream', dictionaryEnd)
-  if (streamStart < 0 || endStream < dictionaryEnd || endStream >= content.length) pdfInvalid()
-  return { entries: new Map(), ...parsed, stream: true }
+  const indexValues = readPdfArray(dictionary, 'Index') ?? [0, parsed.size]
+  if (indexValues.length === 0 || indexValues.length % 2 !== 0) pdfInvalid('PDF 交叉引用 Index 无效')
+  let entryCount = 0
+  let previousEnd = 0
+  for (let index = 0; index < indexValues.length; index += 2) {
+    const first = indexValues[index]!
+    const count = indexValues[index + 1]!
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(count) || count < 1 || first < previousEnd || first + count > parsed.size) {
+      pdfInvalid('PDF 交叉引用 Index 无效')
+    }
+    previousEnd = first + count
+    entryCount += count
+  }
+  const expectedBytes = entryCount * recordWidth
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes > Math.max(65_536, content.length * 4)) {
+    pdfInvalid('PDF 交叉引用流过大')
+  }
+  const encoded = pdfStreamBytes(content, dictionary, dictionaryEnd)
+  const decoded = decodePdfStream(encoded, dictionary, expectedBytes + entryCount)
+  if (decoded.length !== expectedBytes) pdfInvalid('PDF 交叉引用流长度无效')
+
+  const entries = new Map<number, PdfXrefEntry>()
+  let cursor = 0
+  for (let range = 0; range < indexValues.length; range += 2) {
+    const first = indexValues[range]!
+    const count = indexValues[range + 1]!
+    for (let entryIndex = 0; entryIndex < count; entryIndex += 1) {
+      const object = first + entryIndex
+      const type = widths[0] === 0 ? 1 : readPdfField(decoded, cursor, widths[0]!)
+      const fieldTwo = readPdfField(decoded, cursor + widths[0]!, widths[1]!)
+      const fieldThree = readPdfField(decoded, cursor + widths[0]! + widths[1]!, widths[2]!)
+      cursor += recordWidth
+      if (type === 0) {
+        if (fieldTwo >= parsed.size || fieldThree > 65_535) pdfInvalid('PDF 空闲对象记录无效')
+        entries.set(object, { kind: 'free', nextFree: fieldTwo, generation: fieldThree })
+      } else if (type === 1) {
+        if (fieldTwo < 1 || fieldTwo >= content.length || fieldThree > 65_535) pdfInvalid('PDF 对象偏移无效')
+        if (!new RegExp(`^${object}\\s+${fieldThree}\\s+obj\\b`, 'u').test(text.slice(fieldTwo))) pdfInvalid('PDF 对象偏移无效')
+        entries.set(object, { kind: 'direct', offset: fieldTwo, generation: fieldThree })
+      } else if (type === 2) {
+        if (object < 1 || fieldTwo < 1 || fieldTwo >= parsed.size || fieldThree >= parsed.size) pdfInvalid('PDF 对象流记录无效')
+        entries.set(object, { kind: 'compressed', objectStream: fieldTwo, index: fieldThree })
+      } else {
+        pdfInvalid('PDF 交叉引用类型无效')
+      }
+    }
+  }
+  return { entries, ...parsed, stream: true }
 }
 
 const readPdfLine = (text: string, start: number): { line: string, next: number } | undefined => {
@@ -180,11 +331,12 @@ const validatePdfTraditionalXref = (content: Buffer, offset: number, text: strin
       const entry = readLine()
       const entryMatch = entry ? /^(\d{10})\s+(\d{5})\s+([fn])(?:\s*)$/u.exec(entry) : null
       if (!entryMatch) pdfInvalid('PDF 交叉引用条目无效')
-      offsets.set(firstObject + index, {
-        offset: Number(entryMatch![1]),
-        generation: Number(entryMatch![2]),
-        inUse: entryMatch![3] === 'n',
-      })
+      const object = firstObject + index
+      const fieldTwo = Number(entryMatch![1])
+      const generation = Number(entryMatch![2])
+      offsets.set(object, entryMatch![3] === 'n'
+        ? { kind: 'direct', offset: fieldTwo, generation }
+        : { kind: 'free', nextFree: fieldTwo, generation })
     }
   }
   const trailerStart = cursor
@@ -194,6 +346,81 @@ const validatePdfTraditionalXref = (content: Buffer, offset: number, text: strin
   const parsed = parsePdfDictionary(text.slice(dictionaryStart, dictionaryEnd))
   if ([...offsets.keys()].some((object) => object >= parsed.size)) pdfInvalid('PDF 交叉引用范围无效')
   return { entries: offsets, ...parsed, stream: false }
+}
+
+const validateCompressedPdfRoot = (
+  content: Buffer,
+  text: string,
+  rootObject: number,
+  rootEntry: Extract<PdfXrefEntry, { kind: 'compressed' }>,
+  entries: Map<number, PdfXrefEntry>,
+) => {
+  const container = entries.get(rootEntry.objectStream)
+  if (!container || container.kind !== 'direct' || container.generation !== 0) pdfInvalid('PDF 根对象流缺失')
+  const directContainer = container! as Extract<PdfXrefEntry, { kind: 'direct' }>
+  const objectHeader = new RegExp(`^${rootEntry.objectStream}\\s+0\\s+obj\\b`, 'u').exec(text.slice(directContainer.offset))
+  if (!objectHeader) pdfInvalid('PDF 根对象流无效')
+  const dictionaryStart = text.indexOf('<<', directContainer.offset + objectHeader![0].length)
+  const dictionaryEnd = dictionaryStart < 0 ? -1 : findPdfDictionaryEnd(text, dictionaryStart)
+  if (dictionaryStart < 0 || dictionaryEnd < 0) pdfInvalid('PDF 根对象流无效')
+  const dictionary = text.slice(dictionaryStart, dictionaryEnd)
+  if (!/\/Type\s+\/ObjStm(?:\s|\/|>)/u.test(dictionary)) pdfInvalid('PDF 根对象流无效')
+  const objectCount = readPdfInteger(dictionary, 'N')
+  const firstOffset = readPdfInteger(dictionary, 'First')
+  if (objectCount < 1 || objectCount > 100_000 || rootEntry.index >= objectCount) pdfInvalid('PDF 根对象流索引无效')
+  const encoded = pdfStreamBytes(content, dictionary, dictionaryEnd)
+  const maxDecoded = Math.min(32 * 1_024 * 1_024, Math.max(65_536, content.length * 20))
+  const decoded = decodePdfStream(encoded, dictionary, maxDecoded)
+  if (firstOffset > decoded.length) pdfInvalid('PDF 根对象流头无效')
+  const header = decoded.subarray(0, firstOffset).toString('latin1').trim()
+  if (!/^(?:\d+\s+\d+\s*)+$/u.test(header)) pdfInvalid('PDF 根对象流头无效')
+  const pairs = header.split(/\s+/u).map(Number)
+  if (pairs.length !== objectCount * 2) pdfInvalid('PDF 根对象流头无效')
+  const objects = Array.from({ length: objectCount }, (_, index) => ({
+    object: pairs[index * 2]!,
+    offset: pairs[index * 2 + 1]!,
+  }))
+  if (objects.some((entry, index) => (
+    !Number.isSafeInteger(entry.object)
+    || !Number.isSafeInteger(entry.offset)
+    || entry.object < 1
+    || entry.offset < 0
+    || firstOffset + entry.offset > decoded.length
+    || (index > 0 && entry.offset <= objects[index - 1]!.offset)
+  ))) pdfInvalid('PDF 根对象流头无效')
+  const mapped = objects[rootEntry.index]!
+  if (mapped.object !== rootObject) pdfInvalid('PDF Root 映射无效')
+  const bodyStart = firstOffset + mapped.offset
+  const bodyEnd = rootEntry.index + 1 < objects.length
+    ? firstOffset + objects[rootEntry.index + 1]!.offset
+    : decoded.length
+  if (!/\/Type\s+\/Catalog(?:\s|\/|>)/u.test(decoded.subarray(bodyStart, bodyEnd).toString('latin1'))) {
+    pdfInvalid('PDF 根对象无效')
+  }
+}
+
+const validateCompressedPdfMappings = (text: string, entries: Map<number, PdfXrefEntry>) => {
+  const objectStreamSizes = new Map<number, number>()
+  for (const entry of entries.values()) {
+    if (entry.kind !== 'compressed') continue
+    let objectCount = objectStreamSizes.get(entry.objectStream)
+    if (objectCount === undefined) {
+      const container = entries.get(entry.objectStream)
+      if (!container || container.kind !== 'direct' || container.generation !== 0) pdfInvalid('PDF 对象流映射无效')
+      const directContainer = container! as Extract<PdfXrefEntry, { kind: 'direct' }>
+      const objectHeader = new RegExp(`^${entry.objectStream}\\s+0\\s+obj\\b`, 'u').exec(text.slice(directContainer.offset))
+      if (!objectHeader) pdfInvalid('PDF 对象流映射无效')
+      const dictionaryStart = text.indexOf('<<', directContainer.offset + objectHeader![0].length)
+      const dictionaryEnd = dictionaryStart < 0 ? -1 : findPdfDictionaryEnd(text, dictionaryStart)
+      if (dictionaryStart < 0 || dictionaryEnd < 0) pdfInvalid('PDF 对象流映射无效')
+      const dictionary = text.slice(dictionaryStart, dictionaryEnd)
+      if (!/\/Type\s+\/ObjStm(?:\s|\/|>)/u.test(dictionary)) pdfInvalid('PDF 对象流映射无效')
+      objectCount = readPdfInteger(dictionary, 'N')
+      if (objectCount < 1 || objectCount > 100_000) pdfInvalid('PDF 对象流映射无效')
+      objectStreamSizes.set(entry.objectStream, objectCount)
+    }
+    if (entry.index >= objectCount) pdfInvalid('PDF 对象流索引无效')
+  }
 }
 
 const validatePdf = (content: Buffer) => {
@@ -227,18 +454,22 @@ const validatePdf = (content: Buffer) => {
     current = section.previous
   }
   if (!root || root.object >= largestSize) pdfInvalid('PDF 根对象缺失')
+  validateCompressedPdfMappings(text, entries)
   const documentRoot = root!
   const rootEntry = entries.get(documentRoot.object)
-  if (rootEntry) {
-    if (!rootEntry.inUse || rootEntry.generation !== documentRoot.generation || rootEntry.offset >= content.length) pdfInvalid('PDF 根对象缺失')
-    const endObject = text.indexOf('endobj', rootEntry.offset)
+  if (!rootEntry || rootEntry.kind === 'free') pdfInvalid('PDF 根对象缺失')
+  const mappedRoot = rootEntry! as Exclude<PdfXrefEntry, { kind: 'free' }>
+  if (mappedRoot.kind === 'direct') {
+    if (mappedRoot.generation !== documentRoot.generation || mappedRoot.offset >= content.length) pdfInvalid('PDF 根对象缺失')
+    const endObject = text.indexOf('endobj', mappedRoot.offset)
     if (
-      !new RegExp(`^${documentRoot.object}\\s+${documentRoot.generation}\\s+obj\\b`, 'u').test(text.slice(rootEntry.offset))
+      !new RegExp(`^${documentRoot.object}\\s+${documentRoot.generation}\\s+obj\\b`, 'u').test(text.slice(mappedRoot.offset))
       || endObject < 0
-      || !/\/Type\s+\/Catalog(?:\s|\/|>)/u.test(text.slice(rootEntry.offset, endObject))
+      || !/\/Type\s+\/Catalog(?:\s|\/|>)/u.test(text.slice(mappedRoot.offset, endObject))
     ) pdfInvalid('PDF 根对象无效')
-  } else if (!hasXrefStream || !/\d+\s+\d+\s+obj\b/u.test(text)) {
-    pdfInvalid('PDF 根对象缺失')
+  } else {
+    if (!hasXrefStream || documentRoot.generation !== 0) pdfInvalid('PDF 根对象缺失')
+    validateCompressedPdfRoot(content, text, documentRoot.object, mappedRoot, entries)
   }
 }
 

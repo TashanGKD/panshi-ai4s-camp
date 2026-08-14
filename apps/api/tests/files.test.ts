@@ -50,6 +50,17 @@ const incrementalPdf = () => {
 
 const PDF = buildPdf()
 const PDF_2_0 = buildPdf('2.0')
+// Generated with qpdf 12.3.2: qpdf --empty --object-streams=generate -
+const QPDF_XREF_STREAM = Buffer.from(
+  'JVBERi0xLjUKJb/3ov4KMSAwIG9iago8PCAvVHlwZSAvT2JqU3RtIC9MZW5ndGggNzIgL0ZpbHRlciAvRmxhdGVEZWNvZGUgL04gMiAvRmlyc3QgOSA+PgpzdHJlYW0KeJwzUjBQMFYwNuGysVHQD0hMTy0Gcg0UghT0QyoLUhX0nRNLEnPy0xXs7MAqnPNL80qA8vremSnFCtEKsTB1EK1AVQBGDhWcZW5kc3RyZWFtCmVuZG9iago0IDAgb2JqCjw8IC9UeXBlIC9YUmVmIC9MZW5ndGggMjcgL0ZpbHRlciAvRmxhdGVEZWNvZGUgL0RlY29kZVBhcm1zIDw8IC9Db2x1bW5zIDMgL1ByZWRpY3RvciAxMiA+PiAvVyBbIDEgMSAxIF0gL1Jvb3QgMiAwIFIgL1NpemUgNSAvSUQgWzw2MGJmZTE0ZjlkMmQ4MDUyNDI0OTRmYTM2M2IxNzI2Mz48NjBiZmUxNGY5ZDJkODA1MjQyNDk0ZmEzNjNiMTcyNjM+XSA+PgpzdHJlYW0KeJxjYmBgYGLkB+JPDEwMDIxM/3f8BwAQXQPFCmVuZHN0cmVhbQplbmRvYmoKc3RhcnR4cmVmCjE4NQolJUVPRgo=',
+  'base64',
+)
+
+const pseudoXrefStream147 = () => {
+  const prefix = '%PDF-1.5\n1 0 obj\n<< /Type /XRef /Size 2 /Root 1 0 R /W [1 1 1] >>\nstream\nx\nendstream\nendobj\nstartxref\n9\n'
+  const suffix = '%%EOF\n'
+  return Buffer.from(`${prefix}${' '.repeat(147 - Buffer.byteLength(prefix) - Buffer.byteLength(suffix))}${suffix}`)
+}
 
 const crc32 = (input: Buffer) => {
   let crc = 0xffffffff
@@ -265,6 +276,31 @@ describe('safe file names and download headers', () => {
     expect(() => validateStoredFileContent(incrementalPdf(), 'application/pdf', 1_048_576)).not.toThrow()
     const truncated = PDF.subarray(0, PDF.indexOf(Buffer.from('trailer')))
     expect(() => validateStoredFileContent(truncated, 'application/pdf', 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it('accepts a qpdf-generated xref-stream fixture', () => {
+    expect(() => validateStoredFileContent(QPDF_XREF_STREAM, 'application/pdf', 1_048_576)).not.toThrow()
+  })
+
+  it('rejects the 147-byte xref-stream forgery', () => {
+    const pseudo = pseudoXrefStream147()
+    expect(pseudo).toHaveLength(147)
+    expect(() => validateStoredFileContent(pseudo, 'application/pdf', 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+  })
+
+  it.each([
+    ['Length', (value: string) => value.replace('/Length 27', '/Length 99')],
+    ['Index', (value: string) => value.replace('/Size 5 ', '/Index [ 0 4 ] /Size 5 ')],
+    ['W', (value: string) => value.replace('/W [ 1 1 1 ]', '/W [ 1 2 1 ]')],
+    ['Filter', (value: string) => value.replace('/FlateDecode', '/ASCIIHexDecode')],
+    ['Root mapping', (value: string) => value.replace('/Root 2 0 R', '/Root 3 0 R')],
+  ])('rejects an xref stream with invalid %s', (_field, mutate) => {
+    const qpdfText = QPDF_XREF_STREAM.toString('latin1')
+    const invalid = mutate(qpdfText)
+    expect(invalid).not.toBe(qpdfText)
+    expect(() => validateStoredFileContent(Buffer.from(invalid, 'latin1'), 'application/pdf', 1_048_576))
       .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
   })
 

@@ -125,11 +125,13 @@ export const registrationFormDrafts = pgTable('registration_form_drafts', {
   id: uuid('id').primaryKey(),
   schema: jsonb('schema').$type<RegistrationForm>().notNull(),
   revision: integer('revision').notNull().default(0),
+  publishedRevision: integer('published_revision').notNull().default(0),
   baseVersionId: uuid('base_version_id').references(() => registrationFormVersions.id, { onDelete: 'restrict' }),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check('registration_form_drafts_revision_check', sql`${table.revision} >= 0`),
+  check('registration_form_drafts_published_revision_check', sql`${table.publishedRevision} >= 0`),
 ])
 
 export const applications = pgTable('applications', {

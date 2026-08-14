@@ -83,28 +83,35 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
   const [message, setMessage] = useState<{ kind: 'status' | 'error', text: string }>()
   const [errors, setErrors] = useState<readonly { path: string, message: string }[]>([])
   const generation = useRef(0)
+  const operationLock = useRef(false)
   const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(baseline), [form, baseline])
 
-  const load = async () => {
+  const load = async (loadGeneration = ++generation.current) => {
     const [nextDraft, nextHistory] = await Promise.all([client.getRegistrationFormDraft(), client.getRegistrationFormHistory()])
+    if (generation.current !== loadGeneration) return false
     setDraft(nextDraft); setHistory(nextHistory); setForm(copy(nextDraft.data.form)); setBaseline(copy(nextDraft.data.form)); setErrors([])
+    return true
   }
 
   useEffect(() => {
     const current = ++generation.current
-    void load().catch(() => { if (generation.current === current) setMessage({ kind: 'error', text: '报名表暂时无法加载' }) })
+    void load(current).catch(() => { if (generation.current === current) setMessage({ kind: 'error', text: '报名表暂时无法加载' }) })
     return () => { generation.current += 1 }
   }, [client])
 
   const run = async (operation: () => Promise<void>) => {
-    if (pending) return
+    if (operationLock.current) return
+    operationLock.current = true
     setPending(true); setMessage(undefined); setErrors([])
     try { await operation() } catch (error) {
       if (error instanceof AdminApiError && error.status === 409) setMessage({ kind: 'error', text: '报名表已被其他管理员修改，请刷新页面后重试。' })
       else if (error instanceof AdminApiError && error.status === 422) {
         setErrors(error.details?.fields ?? []); setMessage({ kind: 'error', text: '请修正标出的字段后再保存。' })
       } else setMessage({ kind: 'error', text: error instanceof Error ? error.message : '操作失败，请重试。' })
-    } finally { setPending(false) }
+    } finally {
+      operationLock.current = false
+      setPending(false)
+    }
   }
 
   const updateQuestion = (id: string, update: Partial<RegistrationDynamicQuestion>) => setForm((current) => ({
@@ -188,7 +195,7 @@ export function RegistrationFormPage({ client }: { client: AdminClient }) {
   const publish = () => run(async () => {
     if (!draft || isDirty) { setMessage({ kind: 'error', text: '请先保存草稿，再发布报名表。' }); return }
     await client.publishRegistrationForm(draft.data.revision)
-    await load(); setMessage({ kind: 'status', text: '报名表已发布。' })
+    if (await load()) setMessage({ kind: 'status', text: '报名表已发布。' })
   })
 
   if (!draft || !history) return <section className="page-section"><h1>报名管理</h1><p role="status">正在加载报名表配置</p></section>

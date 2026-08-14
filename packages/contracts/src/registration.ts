@@ -2,7 +2,20 @@ import { z } from 'zod'
 import { JsonObjectSchema, type JsonObject, type JsonValue } from './common.js'
 
 const UuidSchema = z.string().uuid()
-const NonEmptyTextSchema = z.string().trim().min(1)
+
+export const REGISTRATION_FORM_LIMITS = {
+  maxQuestions: 50,
+  maxAttachments: 10,
+  maxOptionsPerQuestion: 20,
+  labelMaxLength: 200,
+  helpTextMaxLength: 1_000,
+  optionValueMaxLength: 100,
+  optionLabelMaxLength: 200,
+  textMaxLength: 10_000,
+} as const
+
+const LabelSchema = z.string().trim().min(1).max(REGISTRATION_FORM_LIMITS.labelMaxLength)
+const HelpTextSchema = z.string().max(REGISTRATION_FORM_LIMITS.helpTextMaxLength)
 
 export const DEFAULT_REGISTRATION_ATTACHMENT_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -12,14 +25,14 @@ export const RegistrationCoreFieldKeySchema = z.enum([
 
 export const RegistrationCoreFieldSchema = z.object({
   key: RegistrationCoreFieldKeySchema,
-  label: NonEmptyTextSchema,
+  label: LabelSchema,
   required: z.literal(true),
   readOnly: z.boolean(),
 }).strict()
 
 const TextValidationSchema = z.object({
-  minLength: z.number().int().nonnegative().optional(),
-  maxLength: z.number().int().positive().optional(),
+  minLength: z.number().int().nonnegative().max(REGISTRATION_FORM_LIMITS.textMaxLength).optional(),
+  maxLength: z.number().int().positive().max(REGISTRATION_FORM_LIMITS.textMaxLength).optional(),
 }).strict().superRefine((value, context) => {
   if (value.minLength !== undefined && value.maxLength !== undefined && value.minLength > value.maxLength) {
     context.addIssue({ code: 'custom', path: ['maxLength'], message: 'maxLength must be greater than or equal to minLength' })
@@ -28,8 +41,8 @@ const TextValidationSchema = z.object({
 
 const RegistrationQuestionBaseSchema = z.object({
   id: UuidSchema,
-  label: NonEmptyTextSchema,
-  helpText: z.string(),
+  label: LabelSchema,
+  helpText: HelpTextSchema,
   required: z.boolean(),
   order: z.number().int().nonnegative(),
   active: z.boolean(),
@@ -43,13 +56,13 @@ const TextQuestionSchema = RegistrationQuestionBaseSchema.extend({
 
 export const RegistrationQuestionOptionSchema = z.object({
   id: UuidSchema,
-  value: NonEmptyTextSchema,
-  label: NonEmptyTextSchema,
+  value: z.string().trim().min(1).max(REGISTRATION_FORM_LIMITS.optionValueMaxLength),
+  label: z.string().trim().min(1).max(REGISTRATION_FORM_LIMITS.optionLabelMaxLength),
 }).strict()
 
 const ChoiceQuestionSchema = RegistrationQuestionBaseSchema.extend({
   type: z.enum(['single_choice', 'multiple_choice']),
-  options: z.array(RegistrationQuestionOptionSchema).min(1),
+  options: z.array(RegistrationQuestionOptionSchema).min(1).max(REGISTRATION_FORM_LIMITS.maxOptionsPerQuestion),
   validation: z.object({}).strict(),
 }).strict().superRefine((question, context) => {
   const ids = new Set<string>()
@@ -66,8 +79,8 @@ export const RegistrationDynamicQuestionSchema = z.discriminatedUnion('type', [T
 
 export const RegistrationAttachmentSchema = z.object({
   id: UuidSchema,
-  label: NonEmptyTextSchema,
-  helpText: z.string(),
+  label: LabelSchema,
+  helpText: HelpTextSchema,
   required: z.boolean(),
   order: z.number().int().nonnegative(),
   active: z.boolean(),
@@ -90,32 +103,34 @@ const hasUniqueAndNormalizedOrder = <T extends { id: string, order: number }>(it
 
 export const RegistrationFormSchema = z.object({
   coreFields: z.array(RegistrationCoreFieldSchema).length(8),
-  questions: z.array(RegistrationDynamicQuestionSchema),
-  attachments: z.array(RegistrationAttachmentSchema),
+  questions: z.array(RegistrationDynamicQuestionSchema).max(REGISTRATION_FORM_LIMITS.maxQuestions),
+  attachments: z.array(RegistrationAttachmentSchema).max(REGISTRATION_FORM_LIMITS.maxAttachments),
 }).strict().superRefine((form, context) => {
-  const expectedKeys = RegistrationCoreFieldKeySchema.options
-  const actualKeys = form.coreFields.map((field) => field.key)
-  if (new Set(actualKeys).size !== actualKeys.length || expectedKeys.some((key) => !actualKeys.includes(key))) {
-    context.addIssue({ code: 'custom', path: ['coreFields'], message: 'all fixed core fields are required exactly once' })
-  }
-  if (form.coreFields.some((field, index) => field.key === 'phone' ? !field.readOnly : field.readOnly || field.key !== expectedKeys[index])) {
-    context.addIssue({ code: 'custom', path: ['coreFields'], message: 'fixed core fields cannot be reordered or changed' })
-  }
+  if (form.coreFields.some((field, index) => {
+    const expected = DEFAULT_REGISTRATION_CORE_FIELDS[index]
+    return expected === undefined
+      || field.key !== expected.key
+      || field.label !== expected.label
+      || field.required !== expected.required
+      || field.readOnly !== expected.readOnly
+  })) context.addIssue({ code: 'custom', path: ['coreFields'], message: 'fixed core fields must exactly match the default definition' })
   hasUniqueAndNormalizedOrder(form.questions, 'questions', context)
   hasUniqueAndNormalizedOrder(form.attachments, 'attachments', context)
 })
 
+const DEFAULT_REGISTRATION_CORE_FIELDS = [
+  { key: 'name', label: '姓名', required: true, readOnly: false },
+  { key: 'phone', label: '手机号', required: true, readOnly: true },
+  { key: 'email', label: '电子邮箱', required: true, readOnly: false },
+  { key: 'organization', label: '所在单位', required: true, readOnly: false },
+  { key: 'department', label: '院系/部门', required: true, readOnly: false },
+  { key: 'identityType', label: '身份类型', required: true, readOnly: false },
+  { key: 'educationStage', label: '学历阶段', required: true, readOnly: false },
+  { key: 'majorResearchDirection', label: '专业及研究方向', required: true, readOnly: false },
+] as const
+
 export const DEFAULT_REGISTRATION_FORM: RegistrationForm = {
-  coreFields: [
-    { key: 'name', label: '姓名', required: true, readOnly: false },
-    { key: 'phone', label: '手机号', required: true, readOnly: true },
-    { key: 'email', label: '电子邮箱', required: true, readOnly: false },
-    { key: 'organization', label: '所在单位', required: true, readOnly: false },
-    { key: 'department', label: '院系/部门', required: true, readOnly: false },
-    { key: 'identityType', label: '身份类型', required: true, readOnly: false },
-    { key: 'educationStage', label: '学历阶段', required: true, readOnly: false },
-    { key: 'majorResearchDirection', label: '专业及研究方向', required: true, readOnly: false },
-  ],
+  coreFields: DEFAULT_REGISTRATION_CORE_FIELDS.map((field) => ({ ...field })),
   questions: [],
   attachments: [{
     id: DEFAULT_REGISTRATION_ATTACHMENT_ID,

@@ -34,6 +34,7 @@ const readDraft = async (db: NodePgDatabase<typeof schema>) => {
   const [record] = await db.select({
     form: registrationFormDrafts.schema,
     revision: registrationFormDrafts.revision,
+    publishedRevision: registrationFormDrafts.publishedRevision,
     baseVersionId: registrationFormDrafts.baseVersionId,
     baseVersion: registrationFormVersions.version,
   }).from(registrationFormDrafts)
@@ -68,9 +69,12 @@ export const createRegistrationFormRepository = (
 
   publishDraft: async ({ expectedRevision, actorUserId }) => db.transaction(async (transaction) => {
     const [draft] = await transaction.select({
-      form: registrationFormDrafts.schema, revision: registrationFormDrafts.revision,
+      form: registrationFormDrafts.schema,
+      revision: registrationFormDrafts.revision,
+      publishedRevision: registrationFormDrafts.publishedRevision,
+      publishedVersionId: registrationFormDrafts.baseVersionId,
     }).from(registrationFormDrafts).where(eq(registrationFormDrafts.id, DRAFT_ID)).for('update')
-    if (!draft || draft.revision !== expectedRevision) return null
+    if (!draft || draft.revision !== expectedRevision || (draft.publishedVersionId !== null && draft.publishedRevision === expectedRevision)) return null
     const form = toForm(draft.form)
     const [latest] = await transaction.select({ value: max(registrationFormVersions.version) }).from(registrationFormVersions)
     const version = (latest?.value ?? 0) + 1
@@ -78,7 +82,9 @@ export const createRegistrationFormRepository = (
       schema: form as unknown as JsonObject, version, createdBy: actorUserId, publishedAt: new Date(),
     }).returning({ id: registrationFormVersions.id })
     if (!created) throw new Error('Registration form version insert failed')
-    await transaction.update(registrationFormDrafts).set({ baseVersionId: created.id, updatedBy: actorUserId, updatedAt: new Date() })
+    await transaction.update(registrationFormDrafts).set({
+      baseVersionId: created.id, publishedRevision: draft.revision, updatedBy: actorUserId, updatedAt: new Date(),
+    })
       .where(eq(registrationFormDrafts.id, DRAFT_ID))
     await transaction.insert(auditLogs).values({
       actorUserId, action: 'registration_form.published', entityType: 'registration_form_version', entityId: created.id,

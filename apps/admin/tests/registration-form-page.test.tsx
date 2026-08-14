@@ -10,6 +10,16 @@ import { RegistrationFormPage } from '../src/pages/RegistrationFormPage'
 afterEach(cleanup)
 
 describe('RegistrationFormPage', () => {
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((promiseResolve, promiseReject) => {
+      resolve = promiseResolve
+      reject = promiseReject
+    })
+    return { promise, resolve, reject }
+  }
+
   it('shows fixed fields, structured question controls, attachment controls, and a preview without JSON textarea', async () => {
     const client = {
       getRegistrationFormDraft: async () => ({ apiVersion: 'v1' as const, data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
@@ -128,5 +138,51 @@ describe('RegistrationFormPage', () => {
     expect(alert).toHaveTextContent('至少选择一种格式')
     expect(alert).toHaveTextContent('题目标识重复')
     expect(screen.getByLabelText('问题 1 选项 1 标签').parentElement).toHaveTextContent('选项标签不能为空')
+  })
+
+  it('does not let an older client load overwrite a newer successful load', async () => {
+    const oldDraft = deferred<Awaited<ReturnType<AdminClient['getRegistrationFormDraft']>>>()
+    const oldHistory = deferred<Awaited<ReturnType<AdminClient['getRegistrationFormHistory']>>>()
+    const newForm = { ...DEFAULT_REGISTRATION_FORM, attachments: [{ ...DEFAULT_REGISTRATION_FORM.attachments[0]!, label: '新附件' }] }
+    const oldForm = { ...DEFAULT_REGISTRATION_FORM, attachments: [{ ...DEFAULT_REGISTRATION_FORM.attachments[0]!, label: '旧附件' }] }
+    const response = (form: typeof DEFAULT_REGISTRATION_FORM) => ({ apiVersion: 'v1' as const, data: { form, revision: 0, baseVersion: null, publishedVersionId: null } })
+    const history = { apiVersion: 'v1' as const, data: { publishedVersion: null, versions: [] } }
+    const oldClient = {
+      getRegistrationFormDraft: () => oldDraft.promise,
+      getRegistrationFormHistory: () => oldHistory.promise,
+    } as unknown as AdminClient
+    const newClient = {
+      getRegistrationFormDraft: async () => response(newForm),
+      getRegistrationFormHistory: async () => history,
+    } as unknown as AdminClient
+    const view = render(<MemoryRouter><RegistrationFormPage client={oldClient} /></MemoryRouter>)
+
+    view.rerender(<MemoryRouter><RegistrationFormPage client={newClient} /></MemoryRouter>)
+    expect(await screen.findByText('新附件')).toBeInTheDocument()
+
+    oldDraft.resolve(response(oldForm))
+    oldHistory.resolve(history)
+    await waitFor(() => expect(screen.getAllByText('新附件').length).toBeGreaterThan(0))
+    expect(screen.queryByText('旧附件')).not.toBeInTheDocument()
+  })
+
+  it('locks a same-frame double publish to one request', async () => {
+    const publishDeferred = deferred<Awaited<ReturnType<AdminClient['publishRegistrationForm']>>>()
+    const publish = vi.fn(() => publishDeferred.promise)
+    const client = {
+      getRegistrationFormDraft: async () => ({ apiVersion: 'v1' as const, data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
+      getRegistrationFormHistory: async () => ({ apiVersion: 'v1' as const, data: { publishedVersion: null, versions: [] } }),
+      publishRegistrationForm: publish,
+    } as unknown as AdminClient
+    render(<MemoryRouter><RegistrationFormPage client={client} /></MemoryRouter>)
+    await screen.findByRole('heading', { name: '表单配置' })
+
+    const publishButton = screen.getByRole('button', { name: '发布当前草稿' })
+    fireEvent.click(publishButton)
+    fireEvent.click(publishButton)
+    expect(publish).toHaveBeenCalledOnce()
+
+    publishDeferred.resolve({ apiVersion: 'v1', data: { formVersionId: '00000000-0000-4000-8000-000000000020', revision: 0, version: 1 } })
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('报名表已发布'))
   })
 })

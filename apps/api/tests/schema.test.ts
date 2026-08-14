@@ -77,8 +77,8 @@ const expectedUniqueConstraints = [
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_id_unique', columns: ['module_key', 'id'] },
   { tableName: 'content_versions', constraintName: 'content_versions_module_key_version_unique', columns: ['module_key', 'version'] },
   { tableName: 'files', constraintName: 'files_storage_key_unique', columns: ['storage_key'] },
-  { tableName: 'resources', constraintName: 'resources_key_unique', columns: ['key'] },
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_version_unique', columns: ['version'] },
+  { tableName: 'resources', constraintName: 'resources_key_unique', columns: ['key'] },
   { tableName: 'sessions', constraintName: 'sessions_token_hash_unique', columns: ['token_hash'] },
   { tableName: 'users', constraintName: 'users_phone_normalized_unique', columns: ['phone_normalized'] },
 ] as const
@@ -110,6 +110,7 @@ const expectedChecks = [
   { constraintName: 'content_modules_draft_revision_check', tokens: ['draft_revision', '>= 0'] },
   { constraintName: 'content_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'files_size_bytes_check', tokens: ['size_bytes', '>= 0'] },
+  { constraintName: 'registration_form_drafts_published_revision_check', tokens: ['published_revision', '>= 0'] },
   { constraintName: 'registration_form_drafts_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'registration_form_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'resources_access_level_check', tokens: ['access_level', 'public', 'authenticated', 'admitted'] },
@@ -579,6 +580,7 @@ describe('initial PostgreSQL schema', () => {
       '0005_verification_code_purpose.sql',
       '0006_verification_delivery_state.sql',
       '0007_registration_form_drafts.sql',
+      '0008_registration_form_publish_revision.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

@@ -72,4 +72,20 @@ describe('registration form PostgreSQL integration', () => {
     await expect(database.pool.query('UPDATE registration_form_versions SET schema = $1 WHERE id = $2', [DEFAULT_REGISTRATION_FORM, v1])).rejects.toThrow(/immutable/iu)
     await expect(database.pool.query('DELETE FROM registration_form_versions WHERE id = $1', [v1])).rejects.toThrow(/immutable/iu)
   })
+
+  it('publishes a saved draft once under concurrent PostgreSQL calls', async () => {
+    const service = createRegistrationFormService(createRegistrationFormRepository(database.db))
+    const results = await Promise.allSettled([
+      service.publish(0, adminId),
+      service.publish(0, adminId),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    const rejected = results.find((result) => result.status === 'rejected')
+    expect(rejected?.status === 'rejected' ? rejected.reason : undefined).toMatchObject({ name: 'RegistrationFormConflictError' })
+
+    const versions = await database.db.select({ version: registrationFormVersions.version }).from(registrationFormVersions)
+    expect(versions).toEqual([{ version: 1 }])
+  })
 })

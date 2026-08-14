@@ -8,7 +8,6 @@ import {
 
 export type ContentValidationRepository = {
   findPublishedPayload: (key: ContentModuleKey) => Promise<JsonObject | null>
-  findPublicResourcesMissingFiles: () => Promise<readonly { id: string, key: string }[]>
 }
 
 type FieldIssue = ContentValidationDetails['fields'][number]
@@ -58,7 +57,6 @@ type ImportantDatesPayload = { items: ImportantDateItem[] }
 const validateImportantDates = (
   payload: ImportantDatesPayload,
   basic: JsonObject | null,
-  options: { requireComplete?: boolean } = {},
 ): FieldIssue[] => {
   const issues: FieldIssue[] = []
   const indexed = new Map<string, { item: ImportantDateItem, index: number }>()
@@ -76,7 +74,7 @@ const validateImportantDates = (
   })
 
   for (const machineKey of ['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'] as const) {
-    if (options.requireComplete !== false && !indexed.has(machineKey)) {
+    if (!indexed.has(machineKey)) {
       issues.push({ path: `items.${machineKey}`, code: 'MACHINE_DATE_REQUIRED', message: '发布时必须提供完整的机器日期' })
     }
   }
@@ -219,27 +217,11 @@ export const validateContentForPublication = async (
   if (parsed.success && key === 'importantDates') {
     issues.push(...validateImportantDates(parsed.data as ImportantDatesPayload, await repository.findPublishedPayload('basic')))
   }
-  if (parsed.success && key === 'basic') {
-    const related = await repository.findPublishedPayload('importantDates')
-    if (related) {
-      const parsedRelated = PublicContentPayloadSchemas.importantDates.safeParse(related)
-      if (parsedRelated.success) issues.push(...validateImportantDates(
-        parsedRelated.data as ImportantDatesPayload,
-        parsed.data as JsonObject,
-        { requireComplete: false },
-      ))
-    }
-  }
   if (parsed.success && key === 'schedule') issues.push(...validateSchedule(parsed.data as SchedulePayload))
   if (key === 'contacts') issues.push(...validateContacts(payload))
 
-  for (const resource of await repository.findPublicResourcesMissingFiles()) {
-    issues.push({
-      path: `resources.${resource.key}.fileId`,
-      code: 'PUBLIC_RESOURCE_FILE_REQUIRED',
-      message: '公开资料必须关联文件',
-    })
-  }
+  // Resource file completeness belongs to the resource visibility boundary (Task 15),
+  // so unrelated content modules are never coupled to pending resource uploads here.
 
   if (issues.length > 0) throw new ContentValidationError(issues)
 }

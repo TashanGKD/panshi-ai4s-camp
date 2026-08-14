@@ -1,7 +1,7 @@
 import type { JsonObject, ContentModuleKey } from '@panshi/contracts'
-import { and, desc, eq, inArray, isNull, max, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { auditLogs, contentModules, contentVersions, resources } from '../../db/schema.js'
+import { auditLogs, contentModules, contentVersions } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
 import { validateContentForPublication, type ContentValidationRepository } from './content.validators.js'
 
@@ -57,12 +57,14 @@ export const createContentRepository = (
   },
 })
 
-const structuralSummary = (payload: JsonObject) => ({
-  topLevelFields: Object.keys(payload).sort(),
-  collectionCounts: Object.fromEntries(Object.entries(payload)
-    .filter(([, value]) => Array.isArray(value))
-    .map(([key, value]) => [key, (value as readonly unknown[]).length])),
-})
+const structuralSummary = (payload: JsonObject) => {
+  const valueTypes = { array: 0, object: 0, string: 0, number: 0, boolean: 0, null: 0 }
+  for (const value of Object.values(payload)) {
+    const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+    if (type in valueTypes) valueTypes[type as keyof typeof valueTypes] += 1
+  }
+  return { fieldCount: Object.keys(payload).length, valueTypes }
+}
 
 export const createContentPublishingRepository = (
   db: NodePgDatabase<typeof schema>,
@@ -83,8 +85,6 @@ export const createContentPublishingRepository = (
 
   const validationRepository = (executor: NodePgDatabase<typeof schema>): ContentValidationRepository => ({
     findPublishedPayload: (key) => findPublishedPayload(executor, key),
-    findPublicResourcesMissingFiles: async () => executor.select({ id: resources.id, key: resources.key })
-      .from(resources).where(and(eq(resources.accessLevel, 'public'), isNull(resources.fileId))),
   })
 
   const readDraft = async (

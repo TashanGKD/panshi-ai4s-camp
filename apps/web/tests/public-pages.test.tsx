@@ -99,8 +99,8 @@ describe('API-driven public pages', () => {
 
     renderRoute('/schedule')
 
-    expect(await screen.findByRole('heading', { level: 2, name: '实训日程' })).toBeVisible()
-    await screen.findByText('科研智能体')
+    await screen.findByRole('heading', { level: 4, name: '智能体构建实践' })
+    expect(screen.getByRole('heading', { level: 2, name: '实训日程' })).toBeVisible()
     expect(screen.getByRole('main')).toHaveTextContent('科研智能体')
     expect(screen.getByRole('main')).toHaveTextContent('参访交流与结营')
     expect(screen.getByRole('heading', { level: 4, name: '智能体构建实践' })).toBeVisible()

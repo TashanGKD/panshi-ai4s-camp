@@ -5,6 +5,7 @@ const adminPhone = process.env.E2E_ADMIN_PHONE
 const adminPassword = process.env.E2E_ADMIN_PASSWORD
 const exactDatabaseUrl = 'postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test'
 
+if (process.env.PUBLISHING_E2E !== '1') throw new Error('PUBLISHING_E2E must equal 1')
 if (databaseUrl !== exactDatabaseUrl) throw new Error(`TEST_DATABASE_URL must equal exactly ${exactDatabaseUrl}`)
 if (!adminPhone || !adminPassword) throw new Error('E2E_ADMIN_PHONE and E2E_ADMIN_PASSWORD are required')
 
@@ -13,6 +14,7 @@ export default defineConfig({
   testMatch: 'content-publishing.spec.ts',
   workers: 1,
   fullyParallel: false,
+  globalTeardown: './e2e/content-publishing.teardown.ts',
   use: {
     baseURL: 'http://127.0.0.1:4175',
     browserName: 'chromium',
@@ -22,11 +24,12 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'node --import tsx apps/api/src/server.ts',
+      command: "trap 'npm run e2e:publishing-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run db:migrate -w @panshi/api && npm run e2e:publishing-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
       url: 'http://127.0.0.1:3001/healthz',
       reuseExistingServer: false,
       env: {
-        API_PORT: '3001', DATABASE_URL: databaseUrl, NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb',
+        API_PORT: '3001', DATABASE_URL: databaseUrl, PUBLISHING_E2E: '1', NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb',
+        E2E_ADMIN_PHONE: adminPhone, E2E_ADMIN_PASSWORD: adminPassword,
         HEALTHCHECK_TIMEOUT_MS: '2000', SESSION_TTL_SECONDS: '28800',
         CORS_ORIGINS: 'http://127.0.0.1:4173,http://127.0.0.1:4175',
       },

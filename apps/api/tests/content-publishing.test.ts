@@ -22,10 +22,8 @@ const basic = {
 
 const repository = (
   published: Partial<Record<ContentModuleKey, JsonObject>> = {},
-  missingPublicResources: readonly { id: string, key: string }[] = [],
 ): ContentValidationRepository => ({
   findPublishedPayload: async (key) => published[key] ?? null,
-  findPublicResourcesMissingFiles: async () => missingPublicResources,
 })
 
 const fields = async (key: ContentModuleKey, payload: JsonObject, validationRepository = repository()) => {
@@ -92,7 +90,7 @@ describe('content publication validation', () => {
     await expect(validateContentForPublication('importantDates', completeImportantDates, repository({ basic }))).resolves.toBeUndefined()
   })
 
-  it('does not let legacy important dates block unrelated basic publication but checks typed camp dates', async () => {
+  it('treats basic as authoritative and never lets old important dates block a date change', async () => {
     await expect(validateContentForPublication('basic', basic, repository({
       importantDates: { items: [{ label: '历史实训时间', value: '显示文本' }] },
     }))).resolves.toBeUndefined()
@@ -100,9 +98,7 @@ describe('content publication validation', () => {
       importantDates: { items: completeImportantDates.items.map((item) => (
         item.machineKey === 'campStart' ? { ...item, value: '2026-08-22' } : item
       )) },
-    }))).rejects.toMatchObject({ details: { fields: expect.arrayContaining([
-      expect.objectContaining({ code: 'CAMP_DATE_MISMATCH' }),
-    ]) } })
+    }))).resolves.toBeUndefined()
   })
 
   it.each([
@@ -189,10 +185,6 @@ describe('content publication validation', () => {
     }] }, repository())).resolves.toBeUndefined()
   })
 
-  it('checks real public resource records through the injected repository', async () => {
-    const issues = await fields('features', { items: [] }, repository({}, [{ id: 'r1', key: 'guide' }]))
-    expect(issues).toContainEqual(expect.objectContaining({ path: 'resources.guide.fileId', code: 'PUBLIC_RESOURCE_FILE_REQUIRED' }))
-  })
 })
 
 const adminToken = 'a'.repeat(64)
@@ -229,18 +221,26 @@ const authenticatedApp = (service: ContentPublishingService = publishingService(
 }
 
 describe('administrator content routes', () => {
-  it('returns 403 for preview without an admin session and for authenticated non-admins while profile stays 401', async () => {
+  it('uses preview-only 403 while ordinary admin endpoints and profile keep unauthenticated 401', async () => {
     const app = authenticatedApp()
-    const missing = await request(app).get('/api/v1/admin/content/basic/preview')
-    const student = await request(app).get('/api/v1/admin/content/basic/preview').set('Cookie', `panshi_session=${studentToken}`)
+    const missingPreview = await request(app).get('/api/v1/admin/content/basic/preview')
+    const missingDraft = await request(app).get('/api/v1/admin/content/basic/draft')
+    const missingHistory = await request(app).get('/api/v1/admin/content/basic/versions')
+    const missingPublish = await request(app).post('/api/v1/admin/content/basic/publish')
+      .set('Origin', origin).send({ expectedRevision: 2 })
+    const studentPreview = await request(app).get('/api/v1/admin/content/basic/preview').set('Cookie', `panshi_session=${studentToken}`)
+    const studentDraft = await request(app).get('/api/v1/admin/content/basic/draft').set('Cookie', `panshi_session=${studentToken}`)
     const profile = await request(app).get('/api/v1/me/profile')
-    expect(missing.status).toBe(403)
-    expect(missing.body.error.code).toBe('FORBIDDEN')
-    expect(student.status).toBe(403)
-    expect(student.body.error.code).toBe('FORBIDDEN')
+    expect(missingPreview.status).toBe(403)
+    expect(missingPreview.body.error.code).toBe('FORBIDDEN')
+    for (const response of [missingDraft, missingHistory, missingPublish, profile]) {
+      expect(response.status).toBe(401)
+      expect(response.body.error.code).toBe('UNAUTHORIZED')
+    }
+    expect(studentPreview.status).toBe(403)
+    expect(studentDraft.status).toBe(403)
     expect(profile.status).toBe(401)
-    expect(profile.body.error.code).toBe('UNAUTHORIZED')
-    expect(JSON.stringify(missing.body)).not.toContain('正式简介')
+    expect(JSON.stringify(missingPreview.body)).not.toContain('正式简介')
   })
 
   it('returns protected draft preview through the admin cookie without a token URL', async () => {

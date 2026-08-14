@@ -26,13 +26,23 @@ const handleContentError = (error: unknown): never => {
 
 export const createAdminContentRouter = (sessions: SessionService, service: ContentPublishingService) => {
   const router = Router()
-  router.use(createRequireUser(sessions, { unauthenticatedStatus: 403 }), requireAdmin)
   router.param('key', (request, _response, next, key) => {
     const parsed = ContentModuleKeySchema.safeParse(key)
     if (!parsed.success) return next(new HttpError(404, 'CONTENT_NOT_FOUND', '内容不存在'))
     request.params.key = parsed.data
     next()
   })
+
+  router.get(
+    '/:key/preview',
+    createRequireUser(sessions, { unauthenticatedStatus: 403 }),
+    requireAdmin,
+    async (request, response) => {
+      try { response.json(await service.previewDraft(request.params.key as ContentModuleKey)) } catch (error) { handleContentError(error) }
+    },
+  )
+
+  router.use(createRequireUser(sessions), requireAdmin)
 
   router.get('/:key/draft', async (request, response) => {
     try { response.json(await service.getDraft(request.params.key as ContentModuleKey)) } catch (error) { handleContentError(error) }
@@ -47,10 +57,6 @@ export const createAdminContentRouter = (sessions: SessionService, service: Cont
         response.locals.authenticatedUser.id,
       ))
     } catch (error) { handleContentError(error) }
-  })
-
-  router.get('/:key/preview', async (request, response) => {
-    try { response.json(await service.previewDraft(request.params.key as ContentModuleKey)) } catch (error) { handleContentError(error) }
   })
 
   router.post('/:key/publish', async (request, response: Response<unknown, AuthenticatedLocals>) => {

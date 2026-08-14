@@ -1,24 +1,38 @@
 import { normalizeMainlandChinaMobile } from '@panshi/contracts'
 import { eq } from 'drizzle-orm'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createDatabaseClient } from '../db/client.js'
 import { contentModules, contentVersions, users } from '../db/schema.js'
 import { hashPassword } from '../modules/identity/password.js'
 
 const exactDatabaseUrl = 'postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test'
 
-const requireTestControls = () => {
-  const databaseUrl = process.env.DATABASE_URL
-  if (process.env.PUBLISHING_E2E !== '1' || databaseUrl !== exactDatabaseUrl) {
+type PublishingFixtureControls = {
+  databaseUrl: string | undefined
+  enabled: string | undefined
+  phone: string | undefined
+  password: string | undefined
+}
+
+const requireTestControls = (controls: PublishingFixtureControls) => {
+  const { databaseUrl, enabled, phone, password } = controls
+  if (enabled !== '1' || databaseUrl !== exactDatabaseUrl) {
     throw new Error('Refusing E2E fixture without explicit test controls and exact dedicated database')
   }
-  const phone = process.env.E2E_ADMIN_PHONE
-  const password = process.env.E2E_ADMIN_PASSWORD
   if (!phone || !password) throw new Error('E2E_ADMIN_PHONE and E2E_ADMIN_PASSWORD are required')
   return { databaseUrl, phone: normalizeMainlandChinaMobile(phone), password }
 }
 
 const clearFixture = async (database: ReturnType<typeof createDatabaseClient>) => {
-  await database.pool.query('truncate table audit_logs, resources, content_modules, content_versions, sessions, users cascade')
+  const fixtureTables = ['audit_logs', 'resources', 'content_modules', 'content_versions', 'sessions', 'users'] as const
+  const existing = await database.pool.query<{ tablename: string }>(`
+    select tablename from pg_tables
+    where schemaname = current_schema() and tablename = any($1::text[])
+  `, [fixtureTables])
+  if (existing.rows.length === 0) return
+  const safeNames = existing.rows.map(({ tablename }) => `"${tablename}"`).join(', ')
+  await database.pool.query(`truncate table ${safeNames} cascade`)
 }
 
 const seedFixture = async (database: ReturnType<typeof createDatabaseClient>, phone: string, password: string) => {
@@ -53,10 +67,16 @@ const seedFixture = async (database: ReturnType<typeof createDatabaseClient>, ph
   }
 }
 
-const main = async () => {
-  const { databaseUrl, phone, password } = requireTestControls()
-  const operation = process.argv[2]
-  if (operation !== 'seed' && operation !== 'cleanup') throw new Error('Expected seed or cleanup operation')
+export const runContentPublishingFixture = async (
+  operation: 'seed' | 'cleanup',
+  controls: PublishingFixtureControls = {
+    databaseUrl: process.env.DATABASE_URL,
+    enabled: process.env.PUBLISHING_E2E,
+    phone: process.env.E2E_ADMIN_PHONE,
+    password: process.env.E2E_ADMIN_PASSWORD,
+  },
+) => {
+  const { databaseUrl, phone, password } = requireTestControls(controls)
   const database = createDatabaseClient(databaseUrl)
   try {
     if (operation === 'seed') await seedFixture(database, phone, password)
@@ -66,7 +86,12 @@ const main = async () => {
   }
 }
 
-void main().catch(() => {
-  console.error('Content publishing E2E fixture refused or failed')
-  process.exitCode = 1
-})
+const isMainModule = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isMainModule) {
+  const operation = process.argv[2]
+  if (operation !== 'seed' && operation !== 'cleanup') throw new Error('Expected seed or cleanup operation')
+  void runContentPublishingFixture(operation).catch(() => {
+    console.error('Content publishing E2E fixture refused or failed')
+    process.exitCode = 1
+  })
+}

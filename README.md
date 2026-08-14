@@ -149,10 +149,13 @@ Task 8 的真实浏览器流使用独立配置启动 API、Web 与 admin。必�
 
 ```bash
 TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+PUBLISHING_E2E=1 \
 E2E_ADMIN_PHONE='<dedicated-test-phone>' \
 E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
   npm run e2e:content
 ```
+
+该命令在 API 启动前显式执行 migration，再建立发布测试 fixture；API 进程退出 trap 与 Playwright 全局 teardown 都会尝试清理。因而它可以从已创建但尚无 schema 的精确测试库启动，并在测试失败时仍执行兜底清理。公开资料是否具备文件只在资料自身的公开/可见性变更边界校验（Task 15），不与基本信息、日程等内容模块的发布和回退耦合。
 
 ## Task 7 验证记录（2026-08-14）
 

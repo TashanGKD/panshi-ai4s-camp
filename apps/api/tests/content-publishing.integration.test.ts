@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { createDatabaseClient } from '../src/db/client.js'
@@ -31,6 +30,10 @@ const publishableImportantDates = {
     { label: '结束', value: '2026-08-27', machineKey: 'campEnd' },
   ],
 }
+const importantDatesFor = (start: string, end: string) => ({
+  items: publishableImportantDates.items.map((item) => item.machineKey === 'campStart' ? { ...item, value: start }
+    : item.machineKey === 'campEnd' ? { ...item, value: end } : item),
+})
 let adminA: string
 let adminB: string
 
@@ -102,6 +105,23 @@ describe('content publishing PostgreSQL transactions', () => {
     expect((await service.getHistory('importantDates')).data.versions).toHaveLength(0)
   })
 
+  it('publishes a new authoritative basic date range before matching important dates', async () => {
+    await service.saveDraft('basic', oldBasic, 0, adminA)
+    await service.publish('basic', 1, adminA)
+    await service.saveDraft('importantDates', publishableImportantDates, 0, adminA)
+    await service.publish('importantDates', 1, adminA)
+
+    const movedBasic = {
+      ...oldBasic,
+      dates: { start: '2026-09-01', end: '2026-09-05', label: '2026-09-01 至 2026-09-05' },
+    }
+    await service.saveDraft('basic', movedBasic, 1, adminB)
+    await expect(service.publish('basic', 2, adminB)).resolves.toMatchObject({ data: { version: 2 } })
+
+    await service.saveDraft('importantDates', importantDatesFor('2026-09-01', '2026-09-05'), 1, adminB)
+    await expect(service.publish('importantDates', 2, adminB)).resolves.toMatchObject({ data: { version: 2 } })
+  })
+
   it('serializes concurrent publishes and allocates unique increasing versions', async () => {
     await service.saveDraft('basic', oldBasic, 0, adminA)
     const results = await Promise.all([
@@ -153,26 +173,26 @@ describe('content publishing PostgreSQL transactions', () => {
   })
 
   it('audits save, publish and rollback with redacted structural summaries', async () => {
-    await service.saveDraft('basic', oldBasic, 0, adminA)
-    await service.publish('basic', 1, adminA)
+    const arbitraryKey = 'private-contact-13800138000'
+    await service.saveDraft('basic', { ...oldBasic, [arbitraryKey]: ['第一版敏感正文'] }, 0, adminA)
+    await service.saveDraft('basic', oldBasic, 1, adminA)
+    await service.publish('basic', 2, adminA)
     await service.rollback('basic', 1, adminB)
     const audits = await database.db.select().from(auditLogs).where(eq(auditLogs.entityId, 'basic'))
     expect(audits.map(({ action }) => action)).toEqual([
-      'content.draft_saved', 'content.published', 'content.rolled_back',
+      'content.draft_saved', 'content.draft_saved', 'content.published', 'content.rolled_back',
     ])
-    expect(audits.map(({ actorUserId }) => actorUserId)).toEqual([adminA, adminA, adminB])
+    expect(audits.map(({ actorUserId }) => actorUserId)).toEqual([adminA, adminA, adminA, adminB])
     expect(audits[0]?.metadata).toMatchObject({ moduleKey: 'basic', before: { revision: 0 }, after: { revision: 1 } })
-    expect(audits[1]?.metadata).toMatchObject({ moduleKey: 'basic', revision: 1, version: 1 })
-    expect(audits[2]?.metadata).toMatchObject({ moduleKey: 'basic', sourceVersion: 1, version: 2 })
-    expect(JSON.stringify(audits)).not.toMatch(/第一版标题|第一版地点|第一版敏感正文/u)
+    expect(audits[2]?.metadata).toMatchObject({ moduleKey: 'basic', revision: 2, version: 1 })
+    expect(audits[3]?.metadata).toMatchObject({ moduleKey: 'basic', sourceVersion: 1, version: 2 })
+    expect(JSON.stringify(audits)).not.toMatch(/第一版标题|第一版地点|第一版敏感正文|private-contact-13800138000/u)
   })
 
-  it('uses the actual resources table and blocks public records without file_id', async () => {
-    await database.db.insert(resources).values({ id: randomUUID(), key: 'public-guide', title: '公开指南', accessLevel: 'public' })
+  it('leaves public resource completeness to the future Task 15 visibility boundary', async () => {
+    await database.pool.query("insert into resources (key, title, access_level) values ('public-guide', '公开指南', 'public')")
     await service.saveDraft('basic', oldBasic, 0, adminA)
-    await expect(service.publish('basic', 1, adminA)).rejects.toMatchObject({
-      details: { fields: [expect.objectContaining({ path: 'resources.public-guide.fileId' })] },
-    })
-    expect(await database.db.select().from(contentVersions)).toHaveLength(0)
+    await expect(service.publish('basic', 1, adminA)).resolves.toMatchObject({ data: { version: 1 } })
+    expect(await database.db.select().from(resources)).toHaveLength(1)
   })
 })

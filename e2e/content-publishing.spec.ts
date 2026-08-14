@@ -1,25 +1,9 @@
-import { execFileSync } from 'node:child_process'
 import { expect, test } from '@playwright/test'
 import { Client } from 'pg'
 
 const databaseUrl = process.env.TEST_DATABASE_URL!
 const adminPhone = process.env.E2E_ADMIN_PHONE!
 const adminPassword = process.env.E2E_ADMIN_PASSWORD!
-const seedEnvironment = {
-  ...process.env,
-  DATABASE_URL: databaseUrl,
-  PUBLISHING_E2E: '1',
-  E2E_ADMIN_PHONE: adminPhone,
-  E2E_ADMIN_PASSWORD: adminPassword,
-}
-
-const runFixture = (operation: 'seed' | 'cleanup') => execFileSync('npm', [
-  'run', 'e2e:publishing-fixture', '-w', '@panshi/api', '--', operation,
-], { cwd: process.cwd(), env: seedEnvironment, stdio: 'pipe' })
-
-test.beforeAll(() => runFixture('seed'))
-test.afterAll(() => runFixture('cleanup'))
-
 test('authenticated draft save -> preview -> publish -> rollback/audit and unauthorized preview', async ({ browser, page }) => {
   const anonymous = await browser.newPage()
   const anonymousApi = await anonymous.request.get('http://127.0.0.1:3001/api/v1/admin/content/basic/preview')

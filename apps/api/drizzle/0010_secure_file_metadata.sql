@@ -21,4 +21,3 @@ ALTER TABLE "files" ADD CONSTRAINT "files_attachment_slot_check"
 
 CREATE INDEX "files_owner_user_id_idx" ON "files" ("owner_user_id");
 CREATE INDEX "files_uploaded_by_idx" ON "files" ("uploaded_by");
-

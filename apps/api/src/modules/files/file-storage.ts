@@ -17,4 +17,3 @@ export interface FileStorage {
   open(storageKey: string): Promise<Readable>
   remove(storageKey: string): Promise<void>
 }
-

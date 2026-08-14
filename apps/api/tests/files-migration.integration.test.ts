@@ -63,4 +63,3 @@ describe('secure file metadata forward migration', () => {
     await expect(client.query("UPDATE files SET attachment_slot = '../resume' WHERE id = $1", [id])).rejects.toThrow()
   })
 })
-

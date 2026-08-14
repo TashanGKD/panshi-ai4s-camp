@@ -1,8 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { UserRole } from '@panshi/contracts'
-import { sessions, users } from '../../db/schema.js'
+import { auditLogs, sessions, users } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import type { AuditEntry } from '../audit/audit.repository.js'
 
 export type IdentityUser = {
   id: string
@@ -29,10 +30,18 @@ export type NewAdmin = {
 
 export type IdentityRepository = {
   findUserByPhoneNormalized: (phoneNormalized: string) => Promise<IdentityUser | null>
-  revokeActiveSessionsForUser: (userId: string, revokedAt: Date) => Promise<void>
-  createSession: (session: { tokenHash: string, userId: string, expiresAt: Date }) => Promise<void>
   findSessionByTokenHash: (tokenHash: string) => Promise<ResolvedSession | null>
   revokeSessionByTokenHash: (tokenHash: string, revokedAt: Date) => Promise<void>
+}
+
+export type AuthTransactionRepository = {
+  rotateSessionAndAudit: (rotation: {
+    userId: string
+    tokenHash: string
+    expiresAt: Date
+    revokedAt: Date
+    audit: AuditEntry
+  }) => Promise<void>
 }
 
 export type AdminCreationRepository = {
@@ -50,18 +59,20 @@ const userSelection = {
 
 export const createIdentityRepository = (
   db: NodePgDatabase<typeof schema>,
-): IdentityRepository & AdminCreationRepository => ({
+): IdentityRepository & AuthTransactionRepository & AdminCreationRepository => ({
   findUserByPhoneNormalized: async (phoneNormalized) => {
     const [user] = await db.select(userSelection).from(users).where(eq(users.phoneNormalized, phoneNormalized)).limit(1)
     return user ?? null
   },
 
-  revokeActiveSessionsForUser: async (userId, revokedAt) => {
-    await db.update(sessions).set({ revokedAt }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
-  },
-
-  createSession: async ({ tokenHash, userId, expiresAt }) => {
-    await db.insert(sessions).values({ tokenHash, userId, expiresAt })
+  rotateSessionAndAudit: async ({ userId, tokenHash, expiresAt, revokedAt, audit }) => {
+    await db.transaction(async (transaction) => {
+      await transaction.execute(sql`select ${users.id} from ${users} where ${users.id} = ${userId} for update`)
+      await transaction.update(sessions).set({ revokedAt })
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
+      await transaction.insert(sessions).values({ tokenHash, userId, expiresAt })
+      await transaction.insert(auditLogs).values(audit)
+    })
   },
 
   findSessionByTokenHash: async (tokenHash) => {

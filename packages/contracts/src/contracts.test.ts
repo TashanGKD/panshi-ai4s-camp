@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
+  AdminLoginRequestSchema,
   ApplicationStatusSchema,
   ContentModuleKeySchema,
   LoginResponseSchema,
@@ -200,6 +201,37 @@ describe('contracts', () => {
   })
 
   it.each([
+    ['13800138000', '+8613800138000'],
+    ['+8613800138000', '+8613800138000'],
+  ])('normalizes the whole mainland mobile input %s', (phone, normalized) => {
+    expect(AdminLoginRequestSchema.parse({ phone, password: '12345678' }).phone).toBe(normalized)
+  })
+
+  it.each([
+    'phone=13800138000',
+    '01012345678',
+    '+8610123456789',
+    '+86 13800138000',
+    '12800138000',
+    '1380013800',
+    '138001380000',
+  ])('rejects non-mobile or malformed whole phone input %s', (phone) => {
+    expect(AdminLoginRequestSchema.safeParse({ phone, password: '12345678' }).success).toBe(false)
+  })
+
+  it.each([
+    '1234567',
+    'a'.repeat(73),
+    `${'密'.repeat(24)}a`,
+  ])('rejects password outside the 8..72 UTF-8 byte boundary', (password) => {
+    expect(AdminLoginRequestSchema.safeParse({ phone: '13800138000', password }).success).toBe(false)
+  })
+
+  it.each(['12345678', 'a'.repeat(72), '密'.repeat(24)])('accepts password within the UTF-8 byte boundary', (password) => {
+    expect(AdminLoginRequestSchema.safeParse({ phone: '13800138000', password }).success).toBe(true)
+  })
+
+  it.each([
     { apiVersion: 'v1', data: { user: { displayName: '张三', role: 'user' } } },
     { apiVersion: 'v1', data: { user: { id: 'u1', displayName: '张三', role: 'owner' } } },
     { apiVersion: 'v2', data: { user: { id: 'u1', displayName: '张三', role: 'user' } } },
@@ -252,6 +284,18 @@ describe('contracts', () => {
       },
     })
     expect(JSON.stringify(profile)).not.toContain('must-not-survive')
+  })
+
+  it.each([
+    '+8610123456789',
+    '+8612800138000',
+    '+861380013800',
+    '13800138000',
+  ])('rejects invalid normalized profile phone %s', (phoneNormalized) => {
+    expect(ProfileResponseSchema.safeParse({
+      apiVersion: 'v1',
+      data: { user: { id: 'u1', displayName: '用户', phoneNormalized, role: 'user' } },
+    }).success).toBe(false)
   })
 
   it('validates and deeply freezes registration snapshots', () => {

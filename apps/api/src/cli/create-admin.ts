@@ -2,9 +2,10 @@ import { Writable } from 'node:stream'
 import { createInterface } from 'node:readline/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeMainlandChinaMobile } from '@panshi/contracts'
 import { createConfiguredDatabaseClient } from '../db/client.js'
 import { createIdentityRepository, type AdminCreationRepository } from '../modules/identity/identity.repository.js'
-import { hashPassword, normalizeMainlandChinaPhone } from '../modules/identity/password.js'
+import { hashPassword } from '../modules/identity/password.js'
 
 type CreateAdminArguments = { phone: string, name: string }
 
@@ -52,10 +53,9 @@ export const createAdmin = async (
 ) => {
   const input = parseCreateAdminArgs(args)
   const password = await dependencies.readPassword()
-  if (password.length === 0) throw new Error('Password must not be empty')
   await dependencies.repository.createAdmin({
     displayName: input.name,
-    phoneNormalized: normalizeMainlandChinaPhone(input.phone),
+    phoneNormalized: normalizeMainlandChinaMobile(input.phone),
     passwordHash: await hashPassword(password),
     role: 'admin',
   })

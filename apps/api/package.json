@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",
     "test:integration:auth": "node tests/require-auth-integration-env.mjs && vitest run tests/admin-auth.integration.test.ts",
+    "test:integration:migrations": "node tests/require-schema-integration-env.mjs && vitest run tests/user-display-name-migration.integration.test.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
@@ -22,7 +23,6 @@
     "drizzle-orm": "0.45.2",
     "express": "5.2.1",
     "file-type": "22.0.1",
-    "libphonenumber-js": "1.13.10",
     "multer": "2.2.0",
     "pg": "8.23.0",
     "sanitize-html": "2.17.6",

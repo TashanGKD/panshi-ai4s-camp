@@ -4,12 +4,17 @@ export class AdminApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = 'AdminApiError' }
 }
 
-export const resolveApiBaseUrl = (value?: string): string => {
+type AdminClientRuntime = { production: boolean }
+
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+export const resolveApiBaseUrl = (value: string | undefined, runtime: AdminClientRuntime): string => {
   const candidate = value?.trim() ?? ''
   if (candidate === '') return ''
   let url: URL
   try { url = new URL(candidate) } catch { throw new Error('Invalid VITE_API_BASE_URL') }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+  const unsafeHttp = url.protocol === 'http:' && (runtime.production || !loopbackHosts.has(url.hostname))
+  if (!['http:', 'https:'].includes(url.protocol) || unsafeHttp || url.username || url.password || url.search || url.hash) {
     throw new Error('Invalid VITE_API_BASE_URL')
   }
   return `${url.origin}${url.pathname.replace(/\/+$/u, '')}`
@@ -21,8 +26,8 @@ export type AdminClient = {
   logout: () => Promise<void>
 }
 
-export const createAdminClient = (apiBaseUrl?: string): AdminClient => {
-  const prefix = resolveApiBaseUrl(apiBaseUrl)
+export const createAdminClient = (apiBaseUrl: string | undefined, runtime: AdminClientRuntime): AdminClient => {
+  const prefix = resolveApiBaseUrl(apiBaseUrl, runtime)
   const send = async (path: string, init?: RequestInit): Promise<Response> => {
     const response = await fetch(`${prefix}${path}`, {
       ...init,
@@ -44,4 +49,8 @@ export const createAdminClient = (apiBaseUrl?: string): AdminClient => {
   }
 }
 
-export const adminClient = createAdminClient(import.meta.env.VITE_API_BASE_URL)
+export const createConfiguredAdminClient = (env: { VITE_API_BASE_URL?: string, PROD: boolean }) => (
+  createAdminClient(env.VITE_API_BASE_URL, { production: env.PROD })
+)
+
+export const adminClient = createConfiguredAdminClient(import.meta.env)

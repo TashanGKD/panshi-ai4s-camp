@@ -38,6 +38,8 @@ export const users = pgTable('users', {
   disabledAt: timestamp('disabled_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, (table) => [
+  check('users_display_name_check', sql`char_length(btrim(${table.displayName})) > 0`),
+  check('users_phone_normalized_check', sql`${table.phoneNormalized} ~ '^\\+861[3-9][0-9]{9}$'`),
   check('users_role_check', sql`${table.role} in ('user', 'admin')`),
 ])
 

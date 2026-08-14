@@ -4,7 +4,6 @@ import { createApp } from './app.js'
 import { getApiEnv } from './config/env.js'
 import { createDatabaseClient } from './db/client.js'
 import { createContentRepository } from './modules/content/content.repository.js'
-import { createAuditRepository } from './modules/audit/audit.repository.js'
 import { createIdentityRepository } from './modules/identity/identity.repository.js'
 
 type ServerError = Error & { code?: string }
@@ -220,7 +219,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     checkDatabase: database.checkHealth,
     contentRepository: createContentRepository(database.db),
     identityRepository,
-    auditRepository: createAuditRepository(database.db),
+    authTransactionRepository: identityRepository,
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

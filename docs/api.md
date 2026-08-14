@@ -23,8 +23,8 @@
 
 已实现的身份接口为：
 
-- `POST /api/v1/auth/admin/login`：请求体含 `phone` 和 `password`；仅有效且未停用的 `admin` 可成功，错误凭据返回 401，普通用户或停用管理员返回 403。
-- `POST /api/v1/auth/admin/logout`：撤销当前数据库会话并清除 Cookie，成功返回 204。
+- `POST /api/v1/auth/admin/login`：请求体含 `phone` 和 `password`；手机号只接受完整的 `1[3-9]` 加 9 位数字或精确 `+86` 等价值并规范化为 E.164，密码必须为 8–72 UTF-8 字节。仅有效且未停用的 `admin` 可成功，错误凭据返回 401，普通用户或停用管理员返回 403。
+- `POST /api/v1/auth/admin/logout`：若 Cookie 中存在 token，按 SHA-256 hash 幂等撤销；无论 token 缺失、未知、过期、已撤销或已轮换，都用匹配属性清除 Cookie 并返回 204。Origin 保护仍先于路由执行。
 - `GET /api/v1/me/profile`：返回 `id`、`displayName`、`phoneNormalized` 和 `role`；未知、过期或已撤销会话返回 401，非管理员或已停用账号返回 403。
 
 Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由使用 App 已完成的上述 `GET /api/v1/public/site` 请求与契约校验，不单独重复请求；App 成功后页面显示真实空状态，App 失败时保留顶层错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
@@ -81,7 +81,9 @@ Cookie 和 session 实现必须满足以下安全底线：
 - 身份认证成功或权限变化后必须轮换 session；退出登录、密码重置或 session reset 后必须使旧 session 失效。
 - 当前状态变更请求必须校验受信 Origin；`GET`、`HEAD`、`OPTIONS` 不得产生状态变更。
 
-密码使用 bcrypt cost 12；未知手机号也走固定 dummy hash 比较路径。会话 token 由 `randomBytes(32)` 生成，数据库只保存 SHA-256 hash，audit metadata、错误和日志不得包含 token。
+密码统一要求 8–72 UTF-8 字节并使用 bcrypt cost 12。验证存量 hash 前必须校验完整 bcrypt 格式和 cost 12；结构错误或旧 cost 通过固定 cost-12 dummy hash 比较路径安全失败，不得抛出或暴露差异。未知但格式有效的手机号同样走 dummy hash 路径。会话 token 由 `randomBytes(32)` 生成，数据库只保存 SHA-256 hash，audit metadata、错误和日志不得包含 token 或密码。
+
+管理员登录的会话轮换与 `auth.login_succeeded` 审计属于同一数据库事务。事务按用户行加锁，串行撤销该用户所有 active session、插入 replacement session、追加强制审计；并发登录最终只保留最后提交事务的 token 有效，任一写入失败都会回滚整个轮换。只有 identity repository 和 auth transaction repository 同时存在时才挂载身份路由；健康检查或纯公开内容 App 可以省略两者，此时不暴露伪造的 auth endpoint。生产服务器始终注入真实 PostgreSQL 实现。
 
 用户角色仅分为普通用户 `user` 和统一权限模型下的管理员 `admin`。资源访问级别为：
 

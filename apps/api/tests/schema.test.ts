@@ -106,6 +106,8 @@ const expectedChecks = [
   { constraintName: 'files_size_bytes_check', tokens: ['size_bytes', '>= 0'] },
   { constraintName: 'resources_access_level_check', tokens: ['access_level', 'public', 'authenticated', 'admitted'] },
   { constraintName: 'resources_sort_order_check', tokens: ['sort_order', '>= 0'] },
+  { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
+  { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
   { constraintName: 'users_role_check', tokens: ['role', 'user', 'admin'] },
   { constraintName: 'verification_codes_failed_attempts_check', tokens: ['failed_attempts', '>= 0'] },
 ] as const
@@ -316,6 +318,19 @@ describe('initial PostgreSQL schema', () => {
     })).rejects.toThrow()
   })
 
+  it.each([
+    { displayName: '用户', phoneNormalized: '+8610123456789' },
+    { displayName: '用户', phoneNormalized: '+8612800138000' },
+    { displayName: '用户', phoneNormalized: '13800138000' },
+    { displayName: '   ', phoneNormalized: '+8613800138000' },
+  ])('rejects a user that cannot satisfy the shared profile invariant: $phoneNormalized', async (invalid) => {
+    await expect(db.insert(users).values({
+      ...invalid,
+      passwordHash: 'test-password-hash',
+      role: 'user',
+    })).rejects.toThrow()
+  })
+
   it('adds a required display name through a forward migration', async () => {
     const columns = await pool.query<{ column_name: string, is_nullable: string }>(`
       select column_name, is_nullable
@@ -509,7 +524,7 @@ describe('initial PostgreSQL schema', () => {
     }
   })
 
-  it('keeps exactly three stable migration hashes across repeated runs', async () => {
+  it('keeps exactly four stable migration hashes across repeated runs', async () => {
     const migrateOnce = async () => {
       const migrationDatabase = createDatabaseClient(testDatabaseUrl)
       await runMigrations({
@@ -528,6 +543,7 @@ describe('initial PostgreSQL schema', () => {
       '0001_initial.sql',
       '0002_content_publication_integrity.sql',
       '0003_user_display_name.sql',
+      '0004_user_identity_invariants.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

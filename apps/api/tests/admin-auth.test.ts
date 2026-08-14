@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs'
 import request from 'supertest'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
+import type { AuditEntry } from '../src/modules/audit/audit.repository.js'
+import type { AuthTransactionRepository } from '../src/modules/identity/identity.repository.js'
 
 type Role = 'user' | 'admin'
 type TestUser = {
@@ -29,16 +31,6 @@ class TestIdentityRepository {
     this.users.find((user) => user.phoneNormalized === phoneNormalized) ?? null
   )
 
-  revokeActiveSessionsForUser = async (userId: string, revokedAt: Date) => {
-    for (const session of this.sessions) {
-      if (session.userId === userId && session.revokedAt === null) session.revokedAt = revokedAt
-    }
-  }
-
-  createSession = async (session: Omit<TestSession, 'createdAt' | 'revokedAt'>) => {
-    this.sessions.push({ ...session, revokedAt: null, createdAt: new Date() })
-  }
-
   findSessionByTokenHash = async (tokenHash: string) => {
     const session = this.sessions.find((candidate) => candidate.tokenHash === tokenHash)
     if (!session) return null
@@ -52,9 +44,39 @@ class TestIdentityRepository {
   }
 }
 
-class TestAuditRepository {
-  entries: Array<Record<string, unknown>> = []
-  append = async (entry: Record<string, unknown>) => { this.entries.push(entry) }
+class TestAuthTransactionRepository implements AuthTransactionRepository {
+  entries: AuditEntry[] = []
+  fail = false
+  private tail = Promise.resolve()
+
+  constructor(private readonly identity: TestIdentityRepository) {}
+
+  rotateSessionAndAudit = async (rotation: Parameters<AuthTransactionRepository['rotateSessionAndAudit']>[0]) => {
+    const previous = this.tail
+    let release!: () => void
+    this.tail = new Promise<void>((resolve) => { release = resolve })
+    await previous
+    const previousSessions = this.identity.sessions.map((session) => ({ ...session }))
+    try {
+      for (const session of this.identity.sessions) {
+        if (session.userId === rotation.userId && session.revokedAt === null) session.revokedAt = rotation.revokedAt
+      }
+      this.identity.sessions.push({
+        tokenHash: rotation.tokenHash,
+        userId: rotation.userId,
+        expiresAt: rotation.expiresAt,
+        revokedAt: null,
+        createdAt: new Date(),
+      })
+      if (this.fail) throw new Error('audit unavailable')
+      this.entries.push(rotation.audit)
+    } catch (error) {
+      this.identity.sessions = previousSessions
+      throw error
+    } finally {
+      release()
+    }
+  }
 }
 
 const allowedOrigin = 'https://admin.example'
@@ -69,7 +91,7 @@ const cookieHeader = (response: request.Response) => {
 describe('administrator authentication API', () => {
   let passwordHash: string
   let identityRepository: TestIdentityRepository
-  let auditRepository: TestAuditRepository
+  let authTransactionRepository: TestAuthTransactionRepository
 
   beforeAll(async () => {
     passwordHash = await bcrypt.hash('correct horse battery staple', 12)
@@ -77,7 +99,7 @@ describe('administrator authentication API', () => {
 
   beforeEach(() => {
     identityRepository = new TestIdentityRepository()
-    auditRepository = new TestAuditRepository()
+    authTransactionRepository = new TestAuthTransactionRepository(identityRepository)
     identityRepository.users.push({
       id: 'admin-1',
       displayName: '管理员',
@@ -91,7 +113,7 @@ describe('administrator authentication API', () => {
   const app = (secureCookies = false) => createApp({
     checkDatabase: async () => undefined,
     identityRepository,
-    auditRepository,
+    authTransactionRepository,
     config: {
       allowedOrigins: [allowedOrigin],
       healthcheckTimeoutMs: 2_000,
@@ -104,7 +126,7 @@ describe('administrator authentication API', () => {
   const login = (password = 'correct horse battery staple') => request(app())
     .post('/api/v1/auth/admin/login')
     .set('Origin', allowedOrigin)
-    .send({ phone: '138 0013 8000', password })
+    .send({ phone: '13800138000', password })
 
   it('returns the same 401 boundary for a wrong password and an unknown phone', async () => {
     const wrongPassword = await login('wrong password')
@@ -117,6 +139,34 @@ describe('administrator authentication API', () => {
     expect(unknownPhone.status).toBe(401)
     expect(wrongPassword.body.error.code).toBe('INVALID_CREDENTIALS')
     expect(unknownPhone.body.error.code).toBe('INVALID_CREDENTIALS')
+  })
+
+  it.each([
+    'phone=13800138000',
+    '01012345678',
+    '+86 13800138000',
+    '12800138000',
+  ])('rejects malformed whole mobile input %s before authentication', async (phone) => {
+    const response = await request(app()).post('/api/v1/auth/admin/login').set('Origin', allowedOrigin)
+      .send({ phone, password: 'correct horse battery staple' })
+    expect(response.status).toBe(400)
+    expect(identityRepository.sessions).toHaveLength(0)
+  })
+
+  it('rejects passwords beyond the bcrypt byte boundary before authentication', async () => {
+    const response = await request(app()).post('/api/v1/auth/admin/login').set('Origin', allowedOrigin)
+      .send({ phone: '13800138000', password: 'a'.repeat(73) })
+    expect(response.status).toBe(400)
+    expect(identityRepository.sessions).toHaveLength(0)
+  })
+
+  it('fails safely for malformed and legacy-cost stored bcrypt hashes', async () => {
+    for (const storedHash of ['not-a-bcrypt-hash', await bcrypt.hash('correct horse battery staple', 10)]) {
+      identityRepository.users[0]!.passwordHash = storedHash
+      const response = await login()
+      expect(response.status).toBe(401)
+      expect(response.body.error.code).toBe('INVALID_CREDENTIALS')
+    }
   })
 
   it('returns 403 when an ordinary user tries the administrator login', async () => {
@@ -167,20 +217,21 @@ describe('administrator authentication API', () => {
     expect(identityRepository.sessions[0]?.tokenHash).not.toBe(token)
     expect(identityRepository.sessions[0]?.expiresAt.getTime()).toBeGreaterThan(Date.now())
     expect(identityRepository.users[0]?.phoneNormalized).toBe('+8613800138000')
-    expect(auditRepository.entries).toHaveLength(1)
-    expect(auditRepository.entries[0]).toMatchObject({
+    expect(authTransactionRepository.entries).toHaveLength(1)
+    expect(authTransactionRepository.entries[0]).toMatchObject({
       actorUserId: 'admin-1',
       action: 'auth.login_succeeded',
       entityType: 'session',
     })
-    expect(JSON.stringify(auditRepository.entries)).not.toContain(token)
+    expect(JSON.stringify(authTransactionRepository.entries)).not.toContain(token)
+    expect(JSON.stringify(authTransactionRepository.entries)).not.toContain('correct horse battery staple')
   })
 
   it('sets Secure only for production cookies', async () => {
     const response = await request(app(true))
       .post('/api/v1/auth/admin/login')
       .set('Origin', allowedOrigin)
-      .send({ phone: '+86 138 0013 8000', password: 'correct horse battery staple' })
+      .send({ phone: '+8613800138000', password: 'correct horse battery staple' })
     expect(cookieHeader(response)).toContain('Secure')
   })
 
@@ -230,6 +281,93 @@ describe('administrator authentication API', () => {
     expect(cleared).toContain('HttpOnly')
     expect(cleared).toContain('SameSite=Lax')
     expect(afterLogout.status).toBe(401)
+  })
+
+  it.each([
+    ['missing', undefined, undefined],
+    ['unknown', 'e'.repeat(64), undefined],
+    ['expired', 'f'.repeat(64), { expiresAt: new Date(0), revokedAt: null }],
+    ['revoked', '1'.repeat(64), { expiresAt: new Date(Date.now() + 60_000), revokedAt: new Date() }],
+  ])('clears the cookie and returns 204 for a %s logout session', async (_state, token, stored) => {
+    if (token && stored) {
+      identityRepository.sessions.push({
+        tokenHash: tokenHash(token),
+        userId: 'admin-1',
+        createdAt: new Date(),
+        ...stored,
+      })
+    }
+
+    const call = request(app()).post('/api/v1/auth/admin/logout').set('Origin', allowedOrigin)
+    if (token) call.set('Cookie', sessionCookie(token))
+    const response = await call
+
+    expect(response.status).toBe(204)
+    const cleared = cookieHeader(response)
+    expect(cleared).toContain('panshi_session=')
+    expect(cleared).toContain('Path=/')
+    expect(cleared).toContain('Expires=Thu, 01 Jan 1970 00:00:00 GMT')
+    expect(cleared).toContain('HttpOnly')
+    expect(cleared).toContain('SameSite=Lax')
+    expect(cleared).not.toContain('Secure')
+  })
+
+  it('clears an idempotent production logout cookie with matching Secure attributes', async () => {
+    const response = await request(app(true)).post('/api/v1/auth/admin/logout').set('Origin', allowedOrigin)
+    expect(response.status).toBe(204)
+    const cleared = cookieHeader(response)
+    expect(cleared).toContain('Path=/')
+    expect(cleared).toContain('HttpOnly')
+    expect(cleared).toContain('Secure')
+    expect(cleared).toContain('SameSite=Lax')
+  })
+
+  it('rolls back session rotation when mandatory audit persistence fails', async () => {
+    const first = await login()
+    const firstToken = /^panshi_session=([^;]+)/u.exec(cookieHeader(first))?.[1]
+    if (!firstToken) throw new Error('Missing first login token')
+    authTransactionRepository.fail = true
+
+    expect((await login()).status).toBe(500)
+    expect(identityRepository.sessions.filter(({ revokedAt }) => revokedAt === null)).toHaveLength(1)
+    expect((await request(app()).get('/api/v1/me/profile').set('Cookie', sessionCookie(firstToken))).status).toBe(200)
+  })
+
+  it('serializes concurrent same-user rotations so exactly one returned token remains valid', async () => {
+    const authApp = app()
+    const [first, second] = await Promise.all([
+      request(authApp).post('/api/v1/auth/admin/login').set('Origin', allowedOrigin)
+        .send({ phone: '13800138000', password: 'correct horse battery staple' }),
+      request(authApp).post('/api/v1/auth/admin/login').set('Origin', allowedOrigin)
+        .send({ phone: '+8613800138000', password: 'correct horse battery staple' }),
+    ])
+    const tokens = [first, second].map((response) => /^panshi_session=([^;]+)/u.exec(cookieHeader(response))?.[1])
+    if (tokens.some((token) => !token)) throw new Error('Missing concurrent login token')
+
+    expect([first.status, second.status]).toEqual([200, 200])
+    expect(identityRepository.sessions.filter(({ revokedAt }) => revokedAt === null)).toHaveLength(1)
+    const statuses = await Promise.all(tokens.map(async (token) => {
+      const response = await request(authApp).get('/api/v1/me/profile').set('Cookie', sessionCookie(token!))
+      return response.status
+    }))
+    expect(statuses.sort()).toEqual([200, 401])
+  })
+
+  it.each([
+    ['identity only', true, false],
+    ['transaction only', false, true],
+    ['neither', false, false],
+  ])('does not mount fake auth routes with %s dependencies', async (_label, includeIdentity, includeTransaction) => {
+    const dependencies = {
+      checkDatabase: async () => undefined,
+      ...(includeIdentity ? { identityRepository } : {}),
+      ...(includeTransaction ? { authTransactionRepository } : {}),
+      config: { allowedOrigins: [allowedOrigin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576 },
+    }
+    const response = await request(createApp(dependencies)).post('/api/v1/auth/admin/login')
+      .set('Origin', allowedOrigin)
+      .send({ phone: '13800138000', password: 'correct horse battery staple' })
+    expect(response.status).toBe(404)
   })
 
   it('rejects hostile and missing Origin headers before login or logout writes', async () => {

@@ -55,7 +55,7 @@ export const createAuthRouter = (
     }
   })
 
-  router.post('/auth/admin/logout', requireUser, async (request, response) => {
+  router.post('/auth/admin/logout', async (request, response) => {
     try {
       await sessions.logout(getSessionToken(request.cookies))
       response.clearCookie(SESSION_COOKIE_NAME, cookieOptions(options.secureCookies))

@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
-import type { AuthenticatedUser } from '@panshi/contracts'
-import type { AuditService } from '../audit/audit.service.js'
-import type { IdentityRepository, IdentityUser } from './identity.repository.js'
-import { DUMMY_PASSWORD_HASH, normalizeMainlandChinaPhone, verifyPassword } from './password.js'
+import { normalizeMainlandChinaMobile, type AuthenticatedUser } from '@panshi/contracts'
+import type { AuthTransactionRepository, IdentityRepository, IdentityUser } from './identity.repository.js'
+import { DUMMY_PASSWORD_HASH, verifyPassword } from './password.js'
 
 export const SESSION_COOKIE_NAME = 'panshi_session'
 
@@ -21,7 +20,7 @@ export type SessionService = ReturnType<typeof createSessionService>
 
 export const createSessionService = (
   repository: IdentityRepository,
-  audit: AuditService,
+  transactions: AuthTransactionRepository,
   options: { sessionTtlSeconds: number, now?: () => Date, createToken?: () => Buffer },
 ) => {
   const now = options.now ?? (() => new Date())
@@ -31,7 +30,7 @@ export const createSessionService = (
     loginAdmin: async (phoneInput: string, password: string) => {
       let phoneNormalized: string | undefined
       try {
-        phoneNormalized = normalizeMainlandChinaPhone(phoneInput)
+        phoneNormalized = normalizeMainlandChinaMobile(phoneInput)
       } catch {
         // Continue through the same dummy hash path as an unknown account.
       }
@@ -44,15 +43,19 @@ export const createSessionService = (
       if (user.role !== 'admin' || user.disabledAt !== null) throw new AuthenticationError('forbidden')
 
       const issuedAt = now()
-      await repository.revokeActiveSessionsForUser(user.id, issuedAt)
       const token = createToken().toString('hex')
       const expiresAt = new Date(issuedAt.getTime() + options.sessionTtlSeconds * 1_000)
-      await repository.createSession({ tokenHash: hashSessionToken(token), userId: user.id, expiresAt })
-      await audit.record({
-        actorUserId: user.id,
-        action: 'auth.login_succeeded',
-        entityType: 'session',
-        metadata: { authenticationMethod: 'password' },
+      await transactions.rotateSessionAndAudit({
+        userId: user.id,
+        tokenHash: hashSessionToken(token),
+        expiresAt,
+        revokedAt: issuedAt,
+        audit: {
+          actorUserId: user.id,
+          action: 'auth.login_succeeded',
+          entityType: 'session',
+          metadata: { authenticationMethod: 'password' },
+        },
       })
 
       const publicUser: AuthenticatedUser = {
@@ -73,12 +76,7 @@ export const createSessionService = (
     },
 
     logout: async (token: string | undefined) => {
-      if (!token) throw new AuthenticationError('unauthorized')
-      const session = await repository.findSessionByTokenHash(hashSessionToken(token))
-      if (!session || session.revokedAt !== null || session.expiresAt.getTime() <= now().getTime()) {
-        throw new AuthenticationError('unauthorized')
-      }
-      await repository.revokeSessionByTokenHash(hashSessionToken(token), now())
+      if (token) await repository.revokeSessionByTokenHash(hashSessionToken(token), now())
     },
   }
 }

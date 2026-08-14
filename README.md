@@ -34,7 +34,7 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，公开客户端从其中的 `VITE_API_BASE_URL` 读取 API 基址。未设置、空字符串或只含空白时，客户端使用当前 Web origin 下的 `/api/v1/...`；本项目当前没有配置 Vite 开发代理，因此这种模式要求同一 origin 实际能够转发或提供 API。
 
-管理后台的 Vite 配置同样从项目根目录加载 `VITE_API_BASE_URL`；跨 origin 时身份请求使用 `credentials: 'include'`，不在 `localStorage` 保存 token。
+管理后台的 Vite 配置同样从项目根目录加载 `VITE_API_BASE_URL`，并把 Vite 的实际 `import.meta.env.PROD` 传给客户端配置校验。生产构建只允许空值（同源）或 HTTPS API；开发模式仅允许 HTTPS，或精确的 `localhost`、`127.0.0.1`、`::1` 回环 HTTP。跨 origin 时身份请求使用 `credentials: 'include'`，不在浏览器存储中推断或保存登录态。
 
 根目录 `.env.example` 的本地分端口默认值为 `VITE_API_BASE_URL=http://localhost:3001`，Web 默认由 Vite 在 `http://localhost:5173` 提供。配置值必须是不含凭据、query 或 fragment 的绝对 HTTP(S) URL，可含基础路径，末尾斜杠会被规范化；非法或不安全值会在客户端初始化时明确拒绝。使用已配置的 API origin 时，`fetch` 携带 `credentials: 'include'`，所以 API 的 `CORS_ORIGINS` 必须包含实际 Web origin；同源回退使用 `credentials: 'same-origin'`。
 
@@ -63,6 +63,12 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm run test:integration:content -w @panshi/api
+
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:auth -w @panshi/api
+
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:migrations -w @panshi/api
 ```
 
 上述账号和密码是与 `compose.yaml` 对齐的本地开发占位值，绝不能用于生产环境。迁移按文件名顺序执行，已应用文件由数据库内的 `panshi_schema_migrations` 记录；重复执行安全，已应用迁移被修改时会拒绝继续。
@@ -78,9 +84,9 @@ DATABASE_URL='postgresql://...' npm run db:migrate -w @panshi/api
 DATABASE_URL='postgresql://...' npm run admin:create -w @panshi/api -- --phone 13800138000 --name 管理员
 ```
 
-CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何口令参数，也不内置凭据。手机号在 CLI 和登录中都由 `libphonenumber-js` 转为中国大陆 E.164；重复号码由数据库唯一约束拒绝。密码使用 bcrypt cost 12。Task 7 只创建账号，不实现停用或删除命令；后续 Task 16 必须保证不能停用或删除最后一个有效管理员。
+CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何口令参数，也不内置凭据。CLI、登录请求、profile 契约和数据库约束共享严格的中国大陆手机边界：只接受完整的 `1[3-9]` 加 9 位数字或精确 `+86` 等价值，并规范化为 `+861xxxxxxxxxx`；不从周边文本提取号码，也不接受座机或空格分隔形式。重复号码由数据库唯一约束拒绝。密码统一要求 8–72 UTF-8 字节，使用 bcrypt cost 12；验证前会拒绝结构或 cost 不符合要求的存量 hash，并通过固定 dummy hash 安全失败。Task 7 只创建账号，不实现停用或删除命令；后续 Task 16 必须保证不能停用或删除最后一个有效管理员。
 
-`SESSION_TTL_SECONDS` 默认 `28800` 秒（8 小时），允许 300–604800 秒。登录会撤销该用户先前未撤销会话，用 32 字节安全随机数生成新 token，数据库只保存 SHA-256 摘要。`panshi_session` Cookie 设置 `HttpOnly; SameSite=Lax; Path=/`，仅 `NODE_ENV=production` 增加 `Secure`；退出撤销当前会话并用相同属性清除 Cookie。
+`SESSION_TTL_SECONDS` 默认 `28800` 秒（8 小时），允许 300–604800 秒。登录事务锁定对应用户行，在同一事务内撤销旧会话、写入 replacement session 并追加成功登录审计；同一用户并发登录时最后提交的轮换获胜，最终仅一个返回 token 有效，审计失败会整体回滚。token 使用 32 字节安全随机数，数据库只保存 SHA-256 摘要，审计 metadata 不含 token 或密码。`panshi_session` Cookie 设置 `HttpOnly; SameSite=Lax; Path=/`，仅 `NODE_ENV=production` 增加 `Secure`；退出对缺失、未知、过期、已撤销或已轮换 token 都幂等返回 204，并用匹配属性清除 Cookie。只在真实 identity 与 auth transaction 依赖同时存在时挂载身份路由；生产服务器始终提供两者。
 
 写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。当前 Task 7 没有登录限流或独立 CSRF token，不应宣称已有暴力破解防护；这两项保留给后续安全加固。
 
@@ -127,10 +133,17 @@ npm audit --omit=dev
 
 API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -- health.test.ts dev-command.test.ts`。内容仓库、发布指针和种子幂等性属于必须的 PostgreSQL 集成边界，使用 `npm run test:integration:content -w @panshi/api`；该命令缺少 `TEST_DATABASE_URL` 时立即失败，且只接受数据库名精确为 `panshi_ai4s_camp_test` 的 PostgreSQL URL。API schema 集成测试同样必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 身份 SQL/session 生命周期的必须集成边界使用 `npm run test:integration:auth -w @panshi/api`；它同样要求显式 `TEST_DATABASE_URL` 且数据库名必须精确为 `panshi_ai4s_camp_test`，缺少时在加载测试前失败。
+`0003_user_display_name.sql` 的真实前向迁移边界使用 `npm run test:integration:migrations -w @panshi/api`；测试在专用测试数据库的一次事务内创建唯一隔离 schema，运行真实 0001/0002、插入 pre-0003 用户、再运行真实 0003，并回滚整个隔离 schema。它不会修改旧 migration，也不会接触其他数据库。
 
 ## Task 7 验证记录（2026-08-14）
 
 本次按 RED→GREEN 完成身份契约、拒绝优先 API、CLI、数据库会话与管理后台守卫测试。GREEN 后的分层结果为：contracts 48 项；API 无数据库集 70 项通过、3 项数据库用例按设计跳过；schema 20 项；内容集成 8 项；身份 SQL/session 集成 1 项；admin 9 项；Web 30 项。身份集成命令已确认在缺少 `TEST_DATABASE_URL` 或数据库名不精确时非零退出，并在本机 PostgreSQL `panshi_ai4s_camp_test` 上通过。根目录 typecheck、lint、build、`npm audit --omit=dev` 和 `git diff --check` 也纳入本任务最终校验。
+
+### Task 7 安全边界加固复验（2026-08-14）
+
+本次加固的无数据库结果为：contracts 67 项通过；API unit 101 项通过，另有 3 项 PostgreSQL 内容用例因未提供测试数据库而明确跳过；admin 26 项通过。根目录 typecheck、lint、build 通过，`npm audit --omit=dev` 报告 0 个生产依赖漏洞。完整 `npm audit` 仍报告来自 `drizzle-kit` 开发依赖链旧版 esbuild 的 4 个 moderate 漏洞；自动修复要求强制降级到 breaking 版本，因此本次未执行 `npm audit fix --force`。
+
+当前执行环境没有设置 `TEST_DATABASE_URL`，所以精确的 auth integration、隔离 schema 的 0003 forward migration integration、以及完整 schema integration 都在加载测试前按安全门禁非零退出；本记录不声称这三组 PostgreSQL 测试已通过。运行命令和专用测试数据库限制见上文。
 
 公开站点的 Playwright 视觉测试使用本机已安装的 Chromium，并按操作系统保存快照：
 

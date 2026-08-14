@@ -24,6 +24,7 @@ const versionForm = (label: string): RegistrationForm => ({
 describe('registration form PostgreSQL integration', () => {
   let migrationSeed: RegistrationForm | undefined
   beforeAll(async () => {
+    await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
     await runMigrations({ connect: () => database.pool.connect(), close: async () => undefined })
     const [seed] = await database.db.select({ schema: registrationFormDrafts.schema }).from(registrationFormDrafts)
     migrationSeed = seed?.schema as RegistrationForm | undefined
@@ -36,7 +37,10 @@ describe('registration form PostgreSQL integration', () => {
       { id: studentId, displayName: '学员', phoneNormalized: '+8613900139000', passwordHash: 'unused', role: 'user' },
     ])
   })
-  afterAll(async () => { await database.close() })
+  afterAll(async () => {
+    await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+    await database.close()
+  })
 
   it('seeds one deterministic default attachment and audit metadata excludes question text', async () => {
     expect(migrationSeed?.attachments).toEqual([expect.objectContaining({ id: '00000000-0000-4000-8000-000000000001', required: false })])

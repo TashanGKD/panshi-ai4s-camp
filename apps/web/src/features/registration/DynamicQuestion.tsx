@@ -17,17 +17,17 @@ export function DynamicQuestion({ question, value, onChange }: {
 
   if (question.type === 'short_text') {
     return <div className="registration-question"><label htmlFor={question.id}>{label}</label>
-      <input id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
+      <input id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
   }
 
   if (question.type === 'long_text') {
     return <div className="registration-question"><label htmlFor={question.id}>{label}</label>
-      <textarea id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
+      <textarea id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
   }
 
   const selected = Array.isArray(value) ? value : value === '' ? [] : [value]
   const options = question.options ?? []
-  return <fieldset className="registration-question" aria-describedby={descriptionId}>
+  return <fieldset className="registration-question" aria-describedby={descriptionId} aria-required={question.required}>
     <legend>{label}</legend>
     {options.map((option) => <label key={option.id}>
       <input
@@ -35,7 +35,7 @@ export function DynamicQuestion({ question, value, onChange }: {
         name={question.id}
         value={option.value}
         checked={selected.includes(option.value)}
-        required={question.required && question.type === 'single_choice' && selected.length === 0}
+        required={question.required && selected.length === 0 && (question.type === 'single_choice' || option === options[0])}
         onChange={(event) => {
           if (question.type === 'single_choice') onChange(event.target.value)
           else onChange(event.target.checked ? [...selected, option.value] : selected.filter((item) => item !== option.value))

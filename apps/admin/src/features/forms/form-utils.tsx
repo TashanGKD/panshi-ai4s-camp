@@ -112,6 +112,6 @@ export function CollectionActions({ label, index, length, onMove, onDelete }: {
   return <div className="collection-actions">
     <button type="button" className="button-secondary" disabled={index === 0} aria-label={`上移“${label}”`} onClick={() => onMove(-1)}>上移</button>
     <button type="button" className="button-secondary" disabled={index === length - 1} aria-label={`下移“${label}”`} onClick={() => onMove(1)}>下移</button>
-    <button type="button" className="button-danger" aria-label={`删除${label === '' ? '项目' : label}`} onClick={onDelete}>删除</button>
+    <button type="button" className="button-danger" aria-label={label === '' ? '删除项目' : `删除“${label}”`} onClick={onDelete}>删除</button>
   </div>
 }

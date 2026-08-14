@@ -108,4 +108,16 @@ describe('administrator content contracts', () => {
       }],
     })).toBeTruthy()
   })
+
+  it('validates a stable duplicate-free home section order', () => {
+    expect(PublicContentPayloadSchemas.display.parse({
+      series: '磐石科学智能实训营', footer: '实训营', homeSectionOrder: ['target', 'intro', 'features'],
+    }).homeSectionOrder).toEqual(['target', 'intro', 'features'])
+    expect(PublicContentPayloadSchemas.display.safeParse({
+      series: '磐石科学智能实训营', footer: '实训营', homeSectionOrder: ['intro', 'intro'],
+    }).success).toBe(false)
+    expect(PublicContentPayloadSchemas.display.safeParse({
+      series: '磐石科学智能实训营', footer: '实训营', homeSectionOrder: ['intro', 'unknown'],
+    }).success).toBe(false)
+  })
 })

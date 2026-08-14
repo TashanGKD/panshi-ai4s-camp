@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { JsonObject } from '@panshi/contracts'
 import type { AdminClient } from '../src/api/admin-client'
 import { AdminApiError } from '../src/api/admin-client'
 import { AdminApp } from '../src/app/AdminApp'
@@ -45,6 +46,14 @@ const renderAdmin = (api = client(), route = '/') => render(
   <MemoryRouter initialEntries={[route]}><AdminApp client={api} publicWebBaseUrl="https://camp.example" /></MemoryRouter>,
 )
 
+const clientWithDraft = (key: Parameters<AdminClient['getDraft']>[0], payload: JsonObject, saveDraft = vi.fn(client().saveDraft)) => ({
+  api: client({
+    getDraft: async (requestedKey) => ({ apiVersion: 'v1', data: { key: requestedKey, revision: 7, payload: requestedKey === key ? payload : drafts[requestedKey] as unknown as JsonObject, publishedVersion: 2 } }),
+    saveDraft,
+  }),
+  saveDraft,
+})
+
 describe('content workbench', () => {
   it('provides the complete business navigation and a truthful resource placeholder', async () => {
     renderAdmin()
@@ -84,7 +93,7 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加特色' }))
     items = screen.getAllByTestId('feature-item')
     expect(items).toHaveLength(3)
-    fireEvent.click(within(items[2]!).getByRole('button', { name: '删除特色' }))
+    fireEvent.click(within(items[2]!).getByRole('button', { name: '删除“特色”' }))
     expect(screen.getAllByTestId('feature-item')).toHaveLength(2)
   })
 
@@ -137,5 +146,115 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '发布当前草稿' }))
     const error = await screen.findByText('开始日期无效')
     expect(field).toHaveAttribute('aria-describedby', error.id)
+  })
+
+  it('round-trips multiple intro paragraphs while editing, adding, deleting and sorting independently', async () => {
+    const source = { ...drafts.basic, intro: ['<p>第一段</p>', '<p>第二段</p>', '<p>第三段</p>'] }
+    const { api, saveDraft } = clientWithDraft('basic', source)
+    renderAdmin(api, '/content/basic')
+    await screen.findByRole('textbox', { name: '简介段落 1' })
+    fireEvent.click(screen.getByRole('button', { name: '下移“简介段落 1”' }))
+    const second = screen.getByRole('textbox', { name: '简介段落 1' })
+    second.innerHTML = '<p>第二段（修改）</p>'; fireEvent.input(second)
+    fireEvent.click(screen.getByRole('button', { name: '删除“简介段落 2”' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加简介段落' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('basic', expect.objectContaining({
+      intro: ['<p>第二段（修改）</p>', '<p>第三段</p>', '<p></p>'],
+    }), 7))
+  })
+
+  it('edits and sorts organization records before saving without a JSON escape hatch', async () => {
+    const { api, saveDraft } = clientWithDraft('organizations', { items: [
+      { role: '主办单位', name: '物理所' }, { role: '合作单位', name: '自动化所' },
+    ] })
+    renderAdmin(api, '/content/organizations')
+    const names = await screen.findAllByLabelText('单位全称')
+    fireEvent.change(names[1]!, { target: { value: '中国科学院自动化研究所' } })
+    fireEvent.click(screen.getByRole('button', { name: '上移“中国科学院自动化研究所”' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('organizations', { items: [
+      { role: '合作单位', name: '中国科学院自动化研究所' }, { role: '主办单位', name: '物理所' },
+    ] }, 7))
+  })
+
+  it('maintains important-date labels, values, machine uses and order', async () => {
+    const { api, saveDraft } = clientWithDraft('importantDates', { items: [
+      { label: '报名开放', value: '2026-07-01', machineKey: 'registrationOpen' },
+      { label: '说明会', value: '另行通知' },
+    ] })
+    renderAdmin(api, '/content/importantDates')
+    const matters = await screen.findAllByLabelText('事项')
+    fireEvent.change(matters[1]!, { target: { value: '线上说明会' } })
+    fireEvent.click(screen.getByRole('button', { name: '上移“线上说明会”' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('importantDates', { items: [
+      { label: '线上说明会', value: '另行通知' },
+      { label: '报名开放', value: '2026-07-01', machineKey: 'registrationOpen' },
+    ] }, 7))
+  })
+
+  it('round-trips multiple contact methods and edits one method without overwriting siblings', async () => {
+    const { api, saveDraft } = clientWithDraft('contacts', { items: [
+      { name: '会务组', responsibility: '报名咨询', methods: [
+        { type: 'email', value: 'first@example.com' }, { type: 'phone', value: '010-12345678' },
+      ], consultationNote: '工作日回复' },
+      { name: '课程组', responsibility: '课程咨询', methods: [{ type: 'email', value: 'course@example.com' }] },
+    ] })
+    renderAdmin(api, '/content/contacts')
+    const firstType = await screen.findByLabelText('联系人 1 的联系方式 1 类型')
+    const firstValue = screen.getByLabelText('联系人 1 的联系方式 1 内容')
+    fireEvent.change(firstType, { target: { value: 'phone' } })
+    fireEvent.change(firstValue, { target: { value: '010-87654321' } })
+    fireEvent.click(screen.getByRole('button', { name: '上移“联系方式 2”' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '添加联系方式' })[0]!)
+    fireEvent.click(screen.getByRole('button', { name: '删除“联系方式 3”' }))
+    fireEvent.click(screen.getByRole('button', { name: '下移“会务组”' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('contacts', { items: [
+      { name: '课程组', responsibility: '课程咨询', methods: [{ type: 'email', value: 'course@example.com' }] },
+      { name: '会务组', responsibility: '报名咨询', methods: [
+        { type: 'phone', value: '010-12345678' }, { type: 'phone', value: '010-87654321' },
+      ], consultationNote: '工作日回复' },
+    ] }, 7))
+  })
+
+  it('round-trips speaker references, legacy instructors and multiple session details independently', async () => {
+    const { api, saveDraft } = clientWithDraft('schedule', {
+      speakers: [{ id: 'speaker-1', name: '张老师' }, { id: 'speaker-2', name: '李老师' }],
+      days: [{ date: '2026-08-23', label: '第一天', theme: '科研智能体', sessions: [{
+        title: '智能体基础', time: '上午课程', timeRange: { start: '09:00', end: '10:00' },
+        details: ['概念一', '案例二'], speakerIds: ['speaker-1'], instructors: ['旧讲师'],
+      }] }],
+    })
+    renderAdmin(api, '/content/schedule')
+    const detail = await screen.findByLabelText('课程 1 的内容要点 1')
+    fireEvent.change(detail, { target: { value: '概念一（修改）' } })
+    fireEvent.click(screen.getByRole('button', { name: '下移“内容要点 1”' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加内容要点' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除“内容要点 3”' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('schedule', expect.objectContaining({
+      days: [expect.objectContaining({ sessions: [expect.objectContaining({
+        time: '上午课程', details: ['案例二', '概念一（修改）'], speakerIds: ['speaker-1'], instructors: ['旧讲师'],
+      })] })],
+    }), 7))
+  })
+
+  it('edits and sorts the validated home section order in display settings', async () => {
+    const { api, saveDraft } = clientWithDraft('display', {
+      series: '磐石科学智能实训营', footer: '实训营', visibleNavigation: ['home'],
+      homeSectionOrder: ['intro', 'target', 'features'],
+    })
+    renderAdmin(api, '/content/display')
+    await screen.findByText('首页模块顺序')
+    fireEvent.click(screen.getByRole('button', { name: '上移“面向对象”' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除“实训特色”' }))
+    fireEvent.change(screen.getByLabelText('待添加首页模块'), { target: { value: 'organizations' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加首页模块' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('display', expect.objectContaining({
+      homeSectionOrder: ['target', 'intro', 'organizations'],
+    }), 7))
   })
 })

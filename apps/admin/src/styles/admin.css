@@ -68,6 +68,10 @@ button:disabled { opacity: .65; cursor: wait; }
 .rich-text-input:focus { outline: 2px solid #5a9cc8; outline-offset: 1px; }
 .collection-list fieldset, .structured-form fieldset { min-width: 0; padding: 1rem; border: 1px solid #dbe1e6; border-radius: .5rem; }
 .nested-fieldset { margin-top: 1rem; background: #f8fafb; }
+.ordered-setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: end; }
+.ordered-setting > .form-field { min-width: 0; }
+.ordered-setting .collection-actions { margin-top: 0; }
+.legacy-warning { padding: .75rem; border-radius: .35rem; background: #fff5df; color: #644a12; }
 .collection-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
 .button-secondary { border: 1px solid #8ba0af; color: #234a65; background: #fff; }
 .button-danger { border: 1px solid #c88484; color: #8b2020; background: #fff; }

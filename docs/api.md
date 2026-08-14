@@ -40,7 +40,9 @@
 
 - `GET /api/v1/admin/summary`：从数据库实时返回报名总量、完整状态分布、待审核数量（`submitted + reviewing`）、未来最近五个机器日期、与当前发布版本不同的草稿，以及最近十条管理员操作。空库返回完整零值和空数组。最近操作只包含日志 ID、动作、操作者显示名和时间，不返回 audit metadata、正文、联系方式或其他敏感值。未登录返回 401，已登录非管理员返回 403。
 
-Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；保存前再次清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。`相关资料` 仍无创建或上传接口，留待 Task 15。
+Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；保存前再次清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。`相关资料` 仍无创建或上传接口，留待 Task 15。
+
+`display.homeSectionOrder` 是可选的首页模块顺序数组，允许值仅为 `intro`、`target`、`features`、`organizations`，且同一数组内不得重复。Task 9 已完成该字段的契约校验、后台排序和草稿保存；当前首页聚合接口尚未返回 `features` 与 `organizations`，因此公开首页暂不消费该字段，避免在 Task 9 中扩张公共聚合与页面发布边界。后续接入时应直接以该字段作为首页模块顺序信息真源。
 
 管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
 

@@ -148,11 +148,17 @@ export const TravelContentSchema = z.object({
   }).strict()),
 }).strict()
 
+export const HomeSectionIdSchema = z.enum(['intro', 'target', 'features', 'organizations'])
+
 export const DisplayContentSchema = z.object({
   series: NonEmptyTextSchema,
   footer: NonEmptyTextSchema,
   showRegistrationCount: z.boolean().optional(),
   visibleNavigation: z.array(NonEmptyTextSchema).optional(),
+  homeSectionOrder: z.array(HomeSectionIdSchema).refine(
+    (items) => new Set(items).size === items.length,
+    'home section IDs must not repeat',
+  ).optional(),
 }).strict()
 
 export const PublicContentPayloadSchemas = {
@@ -205,6 +211,7 @@ export type ScheduleContent = z.infer<typeof ScheduleContentSchema>
 export type ContactsContent = z.infer<typeof ContactsContentSchema>
 export type TravelContent = z.infer<typeof TravelContentSchema>
 export type DisplayContent = z.infer<typeof DisplayContentSchema>
+export type HomeSectionId = z.infer<typeof HomeSectionIdSchema>
 export type ResourceAccess = z.infer<typeof ResourceAccessSchema>
 export type PublicSiteResponse = z.infer<typeof PublicSiteResponseSchema>
 export type PublicScheduleResponse = z.infer<typeof PublicScheduleResponseSchema>

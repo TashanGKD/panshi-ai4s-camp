@@ -39,6 +39,41 @@ describe('review workflow PostgreSQL', () => {
     const audit = JSON.stringify(await database.db.select().from(auditLogs)); expect(audit).not.toContain('不可导出的内部备注'); expect(audit).not.toContain('请补充研究计划'); expect(audit).not.toContain('内部答案')
   })
 
+  it('preserves every administrator reason as immutable private status history', async () => {
+    const service = createReviewService(createReviewRepository(database.db))
+    const reviewing = await service.transition(admin, '30000000-0000-4000-8000-000000000001', {
+      expectedRevision: 2,
+      targetStatus: 'reviewing',
+      internalNote: '第一次审核意见',
+      editableFieldIds: [],
+      editableAttachmentIds: [],
+    })
+    await service.transition(admin, '30000000-0000-4000-8000-000000000001', {
+      expectedRevision: reviewing.data.revision,
+      targetStatus: 'needs_supplement',
+      publicMessage: '请向学员公开补充要求',
+      internalNote: '第二次内部判断',
+      editableFieldIds: [questionId],
+      editableAttachmentIds: [],
+    })
+
+    const detail = await service.detail(admin, '30000000-0000-4000-8000-000000000001') as unknown as { data: {
+      history: Array<{ changedBy: string | null, fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null }>
+      application: { internalReviewNote: string | null }
+    } }
+    expect(detail.data.history.slice(-2)).toEqual([
+      expect.objectContaining({ changedBy: admin.id, fromStatus: 'submitted', toStatus: 'reviewing', internalNote: '第一次审核意见' }),
+      expect.objectContaining({ changedBy: admin.id, fromStatus: 'reviewing', toStatus: 'needs_supplement', reason: '请向学员公开补充要求', internalNote: '第二次内部判断' }),
+    ])
+    expect(detail.data.application.internalReviewNote).toBe('第二次内部判断')
+    const stored = await database.db.select().from(applicationStatusHistory)
+    expect(stored.map((row) => row.internalNote).filter(Boolean)).toEqual(['第一次审核意见', '第二次内部判断'])
+    const audit = JSON.stringify(await database.db.select().from(auditLogs))
+    expect(audit).not.toContain('第一次审核意见')
+    expect(audit).not.toContain('第二次内部判断')
+    expect(audit).not.toContain('请向学员公开补充要求')
+  })
+
   it('returns partial bulk results and exports filtered safe CSV with a BOM', async () => {
     const service = createReviewService(createReviewRepository(database.db))
     const bulk = await service.bulkTransition(admin, { applicationIds: ['30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000099'], targetStatus: 'reviewing' })

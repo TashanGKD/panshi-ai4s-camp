@@ -67,7 +67,14 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
       supplementEditableAttachmentIds: input.targetStatus === 'needs_supplement' ? input.editableAttachmentIds : [],
       internalReviewNote: input.internalNote ?? locked.internalReviewNote,
     }).where(and(eq(applications.id, locked.id), eq(applications.revision, locked.revision)))
-    await transaction.insert(applicationStatusHistory).values({ applicationId: locked.id, fromStatus: locked.status, toStatus: input.targetStatus, changedBy: input.adminId, reason: input.targetStatus === 'needs_supplement' ? input.publicMessage : null })
+    await transaction.insert(applicationStatusHistory).values({
+      applicationId: locked.id,
+      fromStatus: locked.status,
+      toStatus: input.targetStatus,
+      changedBy: input.adminId,
+      reason: input.targetStatus === 'needs_supplement' ? input.publicMessage : null,
+      internalNote: input.internalNote ?? null,
+    })
     await transaction.insert(auditLogs).values({ actorUserId: input.adminId, action: 'application.status_changed', entityType: 'application', entityId: locked.id, metadata: { fromStatus: locked.status, toStatus: input.targetStatus, revision: nextRevision, editableFieldCount: input.editableFieldIds.length, editableAttachmentCount: input.editableAttachmentIds.length } })
     return { id: locked.id, revision: nextRevision, status: input.targetStatus }
   }
@@ -87,7 +94,7 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
       if (!record) return null
       const [versions, history, attachments] = await Promise.all([
         db.select().from(applicationVersions).where(eq(applicationVersions.applicationId, applicationId)).orderBy(desc(applicationVersions.createdAt)),
-        db.select({ fromStatus: applicationStatusHistory.fromStatus, toStatus: applicationStatusHistory.toStatus, reason: applicationStatusHistory.reason, createdAt: applicationStatusHistory.createdAt, changedBy: applicationStatusHistory.changedBy }).from(applicationStatusHistory).where(eq(applicationStatusHistory.applicationId, applicationId)).orderBy(asc(applicationStatusHistory.createdAt)),
+        db.select({ fromStatus: applicationStatusHistory.fromStatus, toStatus: applicationStatusHistory.toStatus, reason: applicationStatusHistory.reason, internalNote: applicationStatusHistory.internalNote, createdAt: applicationStatusHistory.createdAt, changedBy: applicationStatusHistory.changedBy }).from(applicationStatusHistory).where(eq(applicationStatusHistory.applicationId, applicationId)).orderBy(asc(applicationStatusHistory.createdAt)),
         db.select({ id: files.id, slotId: applicationFiles.attachmentSlot, originalName: files.originalName, mimeType: files.mimeType, sizeBytes: files.sizeBytes }).from(applicationFiles).innerJoin(files, eq(files.id, applicationFiles.fileId)).where(eq(applicationFiles.applicationId, applicationId)),
       ])
       return { application: { ...record.application, phone: record.phone, form: record.form, formVersion: record.formVersion, submittedAt: record.application.submittedAt?.toISOString() ?? null, createdAt: record.application.createdAt.toISOString(), updatedAt: record.application.updatedAt.toISOString() }, versions: versions.map((v) => ({ id: v.id, snapshot: v.snapshot, reason: v.reason, createdAt: v.createdAt.toISOString() })), history: history.map((h) => ({ ...h, createdAt: h.createdAt.toISOString() })), attachments: attachments.map((file) => ({ ...file, downloadUrl: `/api/v1/files/${file.id}/download` })) }

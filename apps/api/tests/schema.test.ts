@@ -200,6 +200,14 @@ describe('initial PostgreSQL schema', () => {
     expect(tables.rows.map(({ table_name }) => table_name)).toEqual([...requiredTables].sort())
   })
 
+  it('stores an immutable private note on each application status history row', async () => {
+    const columns = await pool.query<{ column_name: string }>(`
+      select column_name from information_schema.columns
+      where table_schema = 'public' and table_name = 'application_status_history'
+    `)
+    expect(columns.rows.map((row) => row.column_name)).toContain('internal_note')
+  })
+
   it('creates all intended primary key and unique constraints', async () => {
     const constraints = await pool.query<{
       table_name: string
@@ -609,6 +617,7 @@ describe('initial PostgreSQL schema', () => {
       '0011_recoverable_file_lifecycle.sql',
       '0012_application_submission.sql',
       '0013_review_workflow.sql',
+      '0014_private_review_history.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

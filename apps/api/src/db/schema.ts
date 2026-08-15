@@ -195,6 +195,7 @@ export const applicationStatusHistory = pgTable('application_status_history', {
   toStatus: text('to_status').$type<ApplicationStatus>().notNull(),
   changedBy: uuid('changed_by').references(() => users.id, { onDelete: 'set null' }),
   reason: text('reason'),
+  internalNote: text('internal_note'),
   createdAt: createdAt(),
 }, (table) => [
   check('application_status_history_from_status_check', sql`${table.fromStatus} is null or ${table.fromStatus} in (

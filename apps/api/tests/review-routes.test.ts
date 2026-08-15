@@ -18,4 +18,15 @@ describe('admin application review routes', () => {
     const list = await request(app).get('/api/v1/admin/applications').set('Cookie', 'panshi_session=admin-token'); expect(list.status).toBe(200)
     const csv = await request(app).get('/api/v1/admin/applications/export.csv').set('Cookie', 'panshi_session=admin-token'); expect(csv.status).toBe(200); expect(csv.headers['content-type']).toContain('text/csv'); expect(csv.headers['cache-control']).toBe('private, no-store')
   })
+  it('keeps detail, transition and bulk responses private without etags', async () => {
+    const responses = [
+      await request(app).get('/api/v1/admin/applications/30000000-0000-4000-8000-000000000001').set('Cookie', 'panshi_session=admin-token'),
+      await request(app).post('/api/v1/admin/applications/30000000-0000-4000-8000-000000000001/status').set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send({}),
+      await request(app).post('/api/v1/admin/applications/bulk-status').set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send({}),
+    ]
+    for (const response of responses) {
+      expect(response.headers['cache-control']).toBe('private, no-store')
+      expect(response.headers.etag).toBeUndefined()
+    }
+  })
 })

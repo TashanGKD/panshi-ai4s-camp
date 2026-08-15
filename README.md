@@ -44,7 +44,7 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 展示设置新增可选 `homeSectionOrder`，仅接受不重复的 `intro`、`target`、`features`、`organizations`，后台可访问地排序并随草稿保存。当前公共首页聚合尚不包含实训特色和组织单位，Task 9 不扩大该接口边界；公开页消费点留待首页聚合完整后接入。
 
-工作台通过 `GET /api/v1/admin/summary` 从 PostgreSQL 汇总报名总量与状态、待审核数量、临近重要日期、未发布草稿和最近操作；临近日期的“今天”按 `Asia/Shanghai` 业务日期计算。空库只显示零值与空状态，不填充演示数字；最近操作不返回 audit metadata 或内容正文。“相关资料”目前只展示 Task 15 待建设状态，不虚构资料编辑接口。
+工作台通过 `GET /api/v1/admin/summary` 从 PostgreSQL 汇总报名总量与状态、待审核数量、临近重要日期、未发布草稿和最近操作；临近日期的“今天”按 `Asia/Shanghai` 业务日期计算。空库只显示零值与空状态，不填充演示数字；最近操作不返回 audit metadata 或内容正文。相关资料由独立后台上传、配置访问范围并发布。
 
 ### 报名表配置（Task 11）
 
@@ -112,6 +112,9 @@ TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_c
 TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
   npm run test:integration:files -w @panshi/api
 
+TEST_DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp_test' \
+  npm run test:integration:resources -w @panshi/api
+
 # Task 8 的并发发布集成目标按要求只接受这一精确本机 URL，并强制单 worker／文件串行。
 TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
   npm run test:integration:publishing -w @panshi/api
@@ -175,7 +178,7 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
 
 内容依据文件为 `磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`（本次读取的 SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。公开日期按已确认覆盖值固定为 2026-08-23 至 2026-08-27，地点为中国科学院物理研究所。源文件 OOXML 含 537 处插入和 273 处删除修订，并混有 8 月与 9 月日期残留，因此首版日程只发布五天的可核验专题层级，不复制受修订污染的逐节时间表。组织单位清单在修订中也存在增删，首版暂不发布该模块。报名截止、电话、邮箱、住宿交通、资料文件以及标为“待定”的授课人均未写入公开种子。
 
-`相关资料` 路由复用 App 已加载并通过契约校验的 `GET /api/v1/public/site` 状态，不再二次请求；顶层请求成功后如实显示“相关资料尚未发布”，顶层网络或契约失败仍显示全站错误。当前没有实现或声称存在资料记录、资料路由或下载权限；`apps/api/src/modules/resources` 以及 public/authenticated/admitted 权限属于 Task 15。
+`相关资料` 路由在全站信息加载成功后调用 `GET /api/v1/resources`，由服务端按 public、authenticated、admitted 三种范围过滤；受限列表与下载禁止缓存，底层文件隐藏或删除后立即失效。
 
 ## Task 6 验证记录（2026-08-14）
 
@@ -214,7 +217,7 @@ E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
   npm run e2e:content
 ```
 
-该命令在 API 启动前显式执行 migration，再建立发布测试 fixture；API 进程退出 trap 与 Playwright 全局 teardown 都会尝试清理。因而它可以从已创建但尚无 schema 的精确测试库启动，并在测试失败时仍执行兜底清理。公开资料是否具备文件只在资料自身的公开/可见性变更边界校验（Task 15），不与基本信息、日程等内容模块的发布和回退耦合。
+该命令在 API 启动前显式执行 migration，再建立发布测试 fixture；API 进程退出 trap 与 Playwright 全局 teardown 都会尝试清理。因而它可以从已创建但尚无 schema 的精确测试库启动，并在测试失败时仍执行兜底清理。公开资料的文件完整性在资料发布边界校验，不与基本信息、日程等内容模块的发布和回退耦合。
 
 ## Task 7 验证记录（2026-08-14）
 

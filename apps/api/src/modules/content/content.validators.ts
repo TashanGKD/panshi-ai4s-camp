@@ -226,7 +226,7 @@ export const validateContentForPublication = async (
   if (parsed.success && key === 'schedule') issues.push(...validateSchedule(parsed.data as SchedulePayload))
   if (key === 'contacts') issues.push(...validateContacts(payload))
 
-  // Resource file completeness belongs to the resource visibility boundary (Task 15),
+  // Resource file completeness belongs to the resource visibility boundary,
   // so unrelated content modules are never coupled to pending resource uploads here.
 
   if (issues.length > 0) throw new ContentValidationError(issues)

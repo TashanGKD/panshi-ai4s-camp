@@ -66,6 +66,8 @@ const installFetch = ({
   if (path.endsWith('/api/v1/public/site')) return jsonResponse(site)
   if (path.endsWith('/api/v1/public/schedule')) return jsonResponse(schedule)
   if (path.endsWith('/api/v1/public/content/travel')) return jsonResponse({ error: {} }, travelStatus)
+  if (path.endsWith('/api/v1/resources')) return jsonResponse({ apiVersion: 'v1', data: { resources: [] } })
+  if (path.endsWith('/api/v1/public/statistics/applications')) return jsonResponse({ apiVersion: 'v1', data: { visible: false } })
   throw new Error(`Unexpected request: ${path}`)
 })
 
@@ -91,7 +93,7 @@ describe('API-driven public pages', () => {
     expect(screen.getByRole('complementary')).toHaveTextContent('2026-08-23 至 2026-08-27')
     expect(screen.getByRole('complementary')).not.toHaveTextContent('报名截止')
     expect(screen.getByRole('complementary')).not.toHaveTextContent('联系方式待公布')
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
   it('loads schedule from its separate public endpoint', async () => {
@@ -151,17 +153,17 @@ describe('API-driven public pages', () => {
 
   it('does not render ResourcesPage until the shared site request succeeds', async () => {
     let resolveSite: ((response: Response) => void) | undefined
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise((resolve) => {
-      resolveSite = resolve
-    }))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => requestPath(input).endsWith('/api/v1/public/site')
+      ? new Promise((resolve) => { resolveSite = resolve })
+      : Promise.resolve(jsonResponse({ apiVersion: 'v1', data: { resources: [] } })))
 
     renderRoute('/resources')
 
     expect(screen.getByRole('status')).toHaveTextContent('正在加载活动信息')
     expect(screen.queryByRole('heading', { level: 2, name: '相关资料' })).not.toBeInTheDocument()
     await act(async () => resolveSite?.(jsonResponse(siteResponse)))
-    expect(await screen.findByText('相关资料尚未发布')).toBeVisible()
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('暂无当前账号可访问的资料。登录后或录取后可能开放更多资料。')).toBeVisible()
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
   it.each([
@@ -173,7 +175,7 @@ describe('API-driven public pages', () => {
     renderRoute('/resources')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('活动信息暂时无法加载')
-    expect(screen.queryByText('相关资料尚未发布')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无当前账号可访问的资料。登录后或录取后可能开放更多资料。')).not.toBeInTheDocument()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 

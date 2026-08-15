@@ -189,7 +189,7 @@ describe('content publishing PostgreSQL transactions', () => {
     expect(JSON.stringify(audits)).not.toMatch(/第一版标题|第一版地点|第一版敏感正文|private-contact-13800138000/u)
   })
 
-  it('leaves public resource completeness to the future Task 15 visibility boundary', async () => {
+  it('leaves public resource completeness to the independent resource visibility boundary', async () => {
     await database.pool.query("insert into resources (key, title, access_level) values ('public-guide', '公开指南', 'public')")
     await service.saveDraft('basic', oldBasic, 0, adminA)
     await expect(service.publish('basic', 1, adminA)).resolves.toMatchObject({ data: { version: 1 } })

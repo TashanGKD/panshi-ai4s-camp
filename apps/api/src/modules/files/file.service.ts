@@ -27,15 +27,19 @@ export const createFileService = (repository: FileRepository, storage: FileStora
     sizeBytes: number
     purpose: string
     attachmentSlot?: string
+    visibility?: 'public' | 'authenticated' | 'admitted'
   }, actor: AuthenticatedSessionUser) => {
     if (actor.disabledAt !== null) throw new FileServiceError(403, 'ACCOUNT_DISABLED', '账号已停用')
     const name = validateOriginalFileName(input.originalName)
     if (input.mimeType !== name.mime) {
       throw new FileServiceError(415, 'FILE_MIME_MISMATCH', '文件类型与扩展名不一致')
     }
-    if (input.purpose !== 'registration_attachment') {
+    if (!['registration_attachment', 'resource'].includes(input.purpose)) {
       throw new FileServiceError(422, 'FILE_PURPOSE_INVALID', '附件用途无效')
     }
+    if (input.purpose === 'resource' && actor.role !== 'admin') throw new FileServiceError(404, 'FILE_NOT_AVAILABLE', '文件不存在或不可访问')
+    if (input.purpose === 'resource' && !input.visibility) throw new FileServiceError(422, 'FILE_VISIBILITY_INVALID', '资料访问范围无效')
+    if (input.purpose === 'registration_attachment' && input.visibility) throw new FileServiceError(422, 'FILE_VISIBILITY_INVALID', '附件访问范围无效')
     if (input.attachmentSlot !== undefined && !/^(?:[a-z][a-z0-9_-]{0,63}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u.test(input.attachmentSlot)) {
       throw new FileServiceError(422, 'FILE_ATTACHMENT_SLOT_INVALID', '附件项标识无效')
     }
@@ -80,8 +84,8 @@ export const createFileService = (repository: FileRepository, storage: FileStora
         sha256: stored.sha256,
         uploadedBy: actor.id,
         ownerUserId: actor.id,
-        purpose: 'registration_attachment',
-        visibility: 'owner_admin',
+        purpose: input.purpose as 'registration_attachment' | 'resource',
+        visibility: input.purpose === 'resource' ? input.visibility! : 'owner_admin',
         attachmentSlot: input.attachmentSlot ?? null,
       }, actor.id)
       return {
@@ -110,6 +114,16 @@ export const createFileService = (repository: FileRepository, storage: FileStora
   openForDownload: async (id: string, actor: AuthenticatedSessionUser) => {
     const record = await repository.findById(id)
     if (!record || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
+    try {
+      return { record, stream: await storage.open(record.storageKey) }
+    } catch {
+      throw unavailable()
+    }
+  },
+
+  openPublishedResource: async (id: string) => {
+    const record = await repository.findById(id)
+    if (!record || record.purpose !== 'resource' || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null) throw unavailable()
     try {
       return { record, stream: await storage.open(record.storageKey) }
     } catch {

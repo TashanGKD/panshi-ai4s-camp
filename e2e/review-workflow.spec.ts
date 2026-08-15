@@ -117,6 +117,40 @@ test('review workflow enforces state, privacy, bulk, export and revision contrac
   ])
   await student.goto('http://127.0.0.1:4194/account')
   await expect(student.getByRole('definition').filter({ hasText: '已录取' })).toBeVisible()
+
+  const displayDraftResponse = await adminContext.request.get(`${apiBase}/api/v1/admin/content/display/draft`)
+  privateResponse(displayDraftResponse)
+  const displayDraft = (await displayDraftResponse.json()).data
+  const savedDisplayResponse = await adminContext.request.put(`${apiBase}/api/v1/admin/content/display/draft`, {
+    headers: { Origin: adminOrigin },
+    data: {
+      expectedRevision: displayDraft.revision,
+      payload: { series: '磐石 E2E 实训营', footer: 'E2E 测试页脚', showRegistrationCount: true },
+    },
+  })
+  privateResponse(savedDisplayResponse)
+  const savedDisplay = (await savedDisplayResponse.json()).data
+  const publishedDisplay = await adminContext.request.post(`${apiBase}/api/v1/admin/content/display/publish`, { headers: { Origin: adminOrigin }, data: { expectedRevision: savedDisplay.revision } })
+  privateResponse(publishedDisplay)
+  const publishedDisplayBody = await publishedDisplay.json()
+  expect(publishedDisplay.ok(), JSON.stringify(publishedDisplayBody)).toBe(true)
+
+  const resourceUpload = await adminContext.request.post(`${apiBase}/api/v1/files`, { headers: { Origin: adminOrigin }, multipart: { purpose: 'resource', visibility: 'admitted', file: { name: '录取学员指南.pdf', mimeType: 'application/pdf', buffer: pdf } } })
+  privateResponse(resourceUpload); expect(resourceUpload.status()).toBe(201)
+  const resourceFileId = (await resourceUpload.json()).data.file.id
+  const resourceDraftResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources`, { headers: { Origin: adminOrigin }, data: { key: 'admitted-guide', title: '录取学员指南', description: '仅向已录取学员开放', fileId: resourceFileId, accessScope: 'admitted', sortOrder: 0 } })
+  privateResponse(resourceDraftResponse); expect(resourceDraftResponse.status()).toBe(201)
+  const resourceId = (await resourceDraftResponse.json()).data.resource.id
+  const resourcePublishResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources/${resourceId}/publish`, { headers: { Origin: adminOrigin } })
+  privateResponse(resourcePublishResponse); expect(resourcePublishResponse.ok()).toBe(true)
+
+  await student.goto('http://127.0.0.1:4194/resources')
+  await expect(student.getByText('录取学员指南', { exact: true })).toBeVisible()
+  const download = student.waitForEvent('download')
+  await student.getByRole('link', { name: '下载' }).click()
+  expect((await download).suggestedFilename()).toBe('录取学员指南.pdf')
+  await student.goto('http://127.0.0.1:4194/')
+  await expect(student.getByLabel('报名人数')).toContainText('1')
   await studentContext.close()
   await adminContext.close()
 })

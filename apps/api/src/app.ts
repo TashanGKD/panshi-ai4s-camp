@@ -24,6 +24,10 @@ import { createApplicationRouter } from './modules/registration/application.rout
 import type { ApplicationService } from './modules/registration/application.service.js'
 import { createAdminApplicationRouter } from './modules/registration/admin-application.routes.js'
 import type { ReviewService } from './modules/registration/review.service.js'
+import { createAdminResourceRouter, createResourceRouter } from './modules/resources/resource.routes.js'
+import type { ResourceService } from './modules/resources/resource.service.js'
+import { createStatisticsRouter } from './modules/statistics/statistics.routes.js'
+import type { StatisticsService } from './modules/statistics/statistics.service.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -54,6 +58,8 @@ export type AppDependencies = {
   fileService?: FileService
   applicationService?: ApplicationService
   reviewService?: ReviewService
+  resourceService?: ResourceService
+  statisticsService?: StatisticsService
   config: ApiRuntimeConfig
 }
 
@@ -80,6 +86,7 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
     if (originAllowed) {
       response.setHeader('Access-Control-Allow-Origin', origin)
       response.setHeader('Access-Control-Allow-Credentials', 'true')
+      response.setHeader('Access-Control-Expose-Headers', 'Content-Disposition')
     }
 
     if (request.method === 'OPTIONS') {
@@ -119,6 +126,8 @@ export const createApp = ({
   fileService,
   applicationService,
   reviewService,
+  resourceService,
+  statisticsService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -157,11 +166,14 @@ export const createApp = ({
         perUserWindowMs: config.fileUploadPerUserWindowMs,
       }))
     }
+    if (resourceService) app.use('/api/v1/resources', createResourceRouter(sessions, resourceService))
+    if (resourceService) app.use('/api/v1/admin/resources', createAdminResourceRouter(sessions, resourceService))
   }
   if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
     findPublishedByKeys: async () => [],
   })))
+  if (statisticsService) app.use('/api/v1/public/statistics', createStatisticsRouter(statisticsService))
   app.use(notFound)
   app.use(errorHandler)
 

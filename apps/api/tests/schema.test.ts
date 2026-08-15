@@ -641,6 +641,7 @@ describe('initial PostgreSQL schema', () => {
       '0013_review_workflow.sql',
       '0014_private_review_history.sql',
       '0015_application_status_history_immutability.sql',
+      '0016_resources_publication.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

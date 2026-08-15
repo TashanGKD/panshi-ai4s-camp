@@ -13,6 +13,7 @@ import {
 import {
   buildContentDisposition,
   DOCX_MIME,
+  normalizeMultipartOriginalName,
   validateOriginalFileName,
   validateStoredFileContent,
 } from '../src/modules/files/file-validation.js'
@@ -346,6 +347,12 @@ describe('safe file names and download headers', () => {
     expect(disposition).toContain('attachment; filename="download.pdf"')
     expect(disposition).toContain("filename*=UTF-8''")
     expect(disposition).not.toMatch(/[\r\n]/u)
+  })
+
+  it('restores UTF-8 names decoded as latin1 by multipart parsers without changing normal names', () => {
+    expect(normalizeMultipartOriginalName(Buffer.from('录取学员指南.pdf').toString('latin1'))).toBe('录取学员指南.pdf')
+    expect(normalizeMultipartOriginalName('guide.pdf')).toBe('guide.pdf')
+    expect(normalizeMultipartOriginalName('résumé.pdf')).toBe('résumé.pdf')
   })
 
   it('accepts a bounded DOCX and rejects path traversal and corrupted entry data', () => {

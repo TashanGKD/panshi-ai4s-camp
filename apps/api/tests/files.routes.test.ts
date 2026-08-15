@@ -36,6 +36,7 @@ const makeService = (upload: FileService['upload']): FileService => ({
     return result
   },
   openForDownload: async () => { throw new Error('unused') },
+  openPublishedResource: async () => { throw new Error('unused') },
   hide: async () => undefined,
   remove: async () => undefined,
 })

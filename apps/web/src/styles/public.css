@@ -42,12 +42,21 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .schedule-list > li { padding: 18px; border: 1px solid var(--panshi-color-gray-light); border-radius: var(--panshi-radius-lg); }
 .schedule-list h3 { margin: 4px 0 0; font-size: 18px; }
 .schedule-list__date { margin: 0; color: var(--panshi-color-gray); font-size: 13.5px; }
+.application-count { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 24px; padding: 18px 20px; border: 1px solid var(--panshi-color-gray-light); border-left: 4px solid var(--panshi-color-primary); border-radius: var(--panshi-radius-lg); background: var(--panshi-color-surface-muted); }
+.application-count strong { color: var(--panshi-color-primary); font-size: 30px; line-height: 1; }
+.application-count small { width: 100%; color: var(--panshi-color-gray); }
+.resource-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.resource-list li { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border: 1px solid var(--panshi-color-gray-light); border-radius: var(--panshi-radius-lg); background: #fff; }
+.resource-list p { margin: 4px 0 0; color: var(--panshi-color-gray); }
+.resource-list a { flex: 0 0 auto; padding: 8px 14px; border-radius: var(--panshi-radius-md); color: #fff; background: var(--panshi-color-primary); font-weight: 700; text-decoration: none; }
 
 @media (max-width: 640px) {
   .public-layout { display: flex; flex-direction: column; gap: 0; padding-bottom: 64px; }
   .public-sidebar { width: 100%; order: 2; }
   .organization-list div { flex-direction: column; gap: 6px; }
   .organization-list dt { flex-basis: auto; }
+  .resource-list li { align-items: stretch; flex-direction: column; }
+  .resource-list a { text-align: center; }
 }
 
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

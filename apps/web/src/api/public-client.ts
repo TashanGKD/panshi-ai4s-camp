@@ -9,6 +9,10 @@ import {
   type TravelContent,
   type AdminContentPreviewResponse,
   type ContentModuleKey,
+  ResourceListResponseSchema,
+  ApplicationCountResponseSchema,
+  type ResourceListResponse,
+  type ApplicationCountResponse,
 } from '@panshi/contracts'
 
 export class PublicContentNotFoundError extends Error {
@@ -105,7 +109,22 @@ export const createPublicClient = (apiBaseUrl?: string, runtime: PublicClientRun
     return TravelContentSchema.parse(response.data.payload)
   }
 
-  return { getDraftPreview, getPublicSchedule, getPublicSite, getPublicTravel }
+  const getResources = async (): Promise<ResourceListResponse> => ResourceListResponseSchema.parse(await getJson('/api/v1/resources'))
+  const getApplicationCount = async (signal?: AbortSignal): Promise<ApplicationCountResponse['data']> => {
+    const response = await fetch(`${prefix}/api/v1/public/statistics/applications`, { credentials, headers: { Accept: 'application/json' }, signal })
+    if (!response.ok) throw new Error('Application count request failed')
+    return ApplicationCountResponseSchema.parse(await response.json()).data
+  }
+  const downloadResource = async (downloadUrl: string): Promise<{ blob: Blob, filename: string }> => {
+    if (!/^\/api\/v1\/resources\/[0-9a-f-]+\/download$/u.test(downloadUrl)) throw new Error('Invalid resource download URL')
+    const response = await fetch(`${prefix}${downloadUrl}`, { credentials, headers: { Accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document' } })
+    if (!response.ok) throw new Error(response.status === 404 ? 'RESOURCE_NOT_AVAILABLE' : 'RESOURCE_DOWNLOAD_FAILED')
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/iu)?.[1]
+    return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : '资料文件' }
+  }
+
+  return { downloadResource, getApplicationCount, getDraftPreview, getPublicSchedule, getPublicSite, getPublicTravel, getResources }
 }
 
 const publicClient = createPublicClient(import.meta.env.VITE_API_BASE_URL, { production: import.meta.env.PROD })
@@ -114,3 +133,6 @@ export const getPublicSite = publicClient.getPublicSite
 export const getPublicSchedule = publicClient.getPublicSchedule
 export const getPublicTravel = publicClient.getPublicTravel
 export const getDraftPreview = publicClient.getDraftPreview
+export const getResources = publicClient.getResources
+export const getApplicationCount = publicClient.getApplicationCount
+export const downloadResource = publicClient.downloadResource

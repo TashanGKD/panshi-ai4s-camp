@@ -13,6 +13,12 @@ export class FileValidationError extends Error {
   }
 }
 
+export const normalizeMultipartOriginalName = (input: string): string => {
+  const bytes = Buffer.from(input, 'latin1')
+  const decoded = bytes.toString('utf8')
+  return decoded.includes('\uFFFD') || !Buffer.from(decoded, 'utf8').equals(bytes) ? input : decoded
+}
+
 const allowedByExtension: Record<AllowedFileExtension, string> = {
   pdf: PDF_MIME,
   docx: DOCX_MIME,

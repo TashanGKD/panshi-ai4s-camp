@@ -9,7 +9,7 @@ import { z } from 'zod'
 import { HttpError } from '../../middleware/error-handler.js'
 import { createRequireUser, type AuthenticatedLocals } from '../../middleware/require-user.js'
 import type { SessionService } from '../identity/session.service.js'
-import { buildContentDisposition, FileValidationError } from './file-validation.js'
+import { buildContentDisposition, FileValidationError, normalizeMultipartOriginalName } from './file-validation.js'
 import { FileStorageError, preparePrivateDirectory } from './local-file-storage.js'
 import { FileServiceError, type FileService } from './file.service.js'
 import { FILE_UPLOAD_HARD_MAX_BYTES } from './file-storage.js'
@@ -243,16 +243,20 @@ export const createFileRouter = (
           const attachmentSlot = typeof request.body.attachmentSlot === 'string' && request.body.attachmentSlot !== ''
             ? request.body.attachmentSlot
             : undefined
+          const visibility = typeof request.body.visibility === 'string' && ['public', 'authenticated', 'admitted'].includes(request.body.visibility)
+            ? request.body.visibility as 'public' | 'authenticated' | 'admitted'
+            : undefined
           source = createReadStream(request.file.path)
           // A service may reject metadata before consuming the stream; keep its asynchronous open error observed.
           source.on('error', () => undefined)
           const file = await service.upload({
             stream: source,
-            originalName: request.file.originalname,
+            originalName: normalizeMultipartOriginalName(request.file.originalname),
             mimeType: request.file.mimetype,
             sizeBytes: request.file.size,
             purpose,
             ...(attachmentSlot ? { attachmentSlot } : {}),
+            ...(visibility ? { visibility } : {}),
           }, actor)
           response.status(201).json({ apiVersion: 'v1', data: { file } })
         } catch (error) {

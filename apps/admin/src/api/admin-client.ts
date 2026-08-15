@@ -85,7 +85,15 @@ export type AdminClient = {
   transitionApplication: (id: string, input: ReviewTransitionInput) => Promise<{ data: { id: string, revision: number, status: string } }>
   bulkTransitionApplications: (input: { applicationIds: string[], targetStatus: string, publicMessage?: string, internalNote?: string }) => Promise<{ data: { results: Array<{ applicationId: string, success: boolean, status?: string, code?: string, message?: string }> } }>
   exportApplications: (query: URLSearchParams) => Promise<Blob>
+  listResources: () => Promise<{ data: { resources: AdminResource[] } }>
+  uploadResourceFile: (file: File, accessScope: AdminResource['accessScope']) => Promise<{ data: { file: { id: string } } }>
+  createResource: (input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
+  updateResource: (id: string, input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
+  publishResource: (id: string, active: boolean) => Promise<{ data: { resource: AdminResource } }>
 }
+
+export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean }
+export type AdminResourceInput = Omit<AdminResource, 'id' | 'active'>
 
 export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
 export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, string | string[]>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null, changedBy: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
@@ -142,6 +150,14 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     transitionApplication: async (id, input) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     bulkTransitionApplications: async (input) => (await send('/api/v1/admin/applications/bulk-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     exportApplications: async (query) => (await send(`/api/v1/admin/applications/export.csv?${query.toString()}`)).blob(),
+    listResources: async () => (await send('/api/v1/admin/resources')).json(),
+    uploadResourceFile: async (file, accessScope) => {
+      const body = new FormData(); body.append('file', file); body.append('purpose', 'resource'); body.append('visibility', accessScope)
+      return (await send('/api/v1/files', { method: 'POST', body })).json()
+    },
+    createResource: async (input) => (await send('/api/v1/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    updateResource: async (id, input) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    publishResource: async (id, active) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}/${active ? 'publish' : 'unpublish'}`, { method: 'POST' })).json(),
   }
 }
 

@@ -25,11 +25,13 @@ const renderRoute = (path = '/') => render(<MemoryRouter initialEntries={[path]}
 
 beforeEach(() => {
   vi.restoreAllMocks()
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-    json: async () => siteResponse,
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => ({
+    json: async () => String(input).includes('/api/v1/resources')
+      ? { apiVersion: 'v1', data: { resources: [] } }
+      : String(input).includes('/api/v1/public/statistics/applications') ? { apiVersion: 'v1', data: { visible: false } } : siteResponse,
     ok: true,
     status: 200,
-  } as Response)
+  } as Response))
 })
 
 describe('public event shell', () => {
@@ -73,7 +75,7 @@ describe('public event shell', () => {
 
   it('offers the same skip target on secondary routes', async () => {
     const { container } = renderRoute('/resources')
-    await screen.findByText('相关资料尚未发布')
+    await screen.findByText('暂无当前账号可访问的资料。登录后或录取后可能开放更多资料。')
     const main = screen.getByRole('main')
     const skipLink = screen.getByRole('link', { name: '跳至主要内容' })
     expect(container.querySelector('a')).toBe(skipLink)

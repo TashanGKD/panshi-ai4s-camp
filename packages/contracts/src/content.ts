@@ -174,6 +174,24 @@ export const PublicContentPayloadSchemas = {
 
 export const ResourceAccessSchema = z.enum(['public', 'authenticated', 'admitted'])
 
+export const PublicResourceSchema = z.object({
+  id: z.string().uuid(), key: NonEmptyTextSchema, title: NonEmptyTextSchema,
+  description: z.string().nullable(), accessScope: ResourceAccessSchema,
+  sortOrder: z.number().int().nonnegative(), downloadUrl: z.string().startsWith('/api/v1/resources/'),
+}).strict()
+
+export const ResourceListResponseSchema = z.object({
+  apiVersion: z.literal('v1'), data: z.object({ resources: z.array(PublicResourceSchema) }).strict(),
+}).strict()
+
+export const ApplicationCountResponseSchema = z.object({
+  apiVersion: z.literal('v1'),
+  data: z.discriminatedUnion('visible', [
+    z.object({ visible: z.literal(false) }).strict(),
+    z.object({ visible: z.literal(true), submittedCount: z.number().int().nonnegative(), updatedAt: z.string().datetime() }).strict(),
+  ]),
+}).strict()
+
 export const PublicSiteResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
@@ -213,5 +231,8 @@ export type TravelContent = z.infer<typeof TravelContentSchema>
 export type DisplayContent = z.infer<typeof DisplayContentSchema>
 export type HomeSectionId = z.infer<typeof HomeSectionIdSchema>
 export type ResourceAccess = z.infer<typeof ResourceAccessSchema>
+export type PublicResource = z.infer<typeof PublicResourceSchema>
+export type ResourceListResponse = z.infer<typeof ResourceListResponseSchema>
+export type ApplicationCountResponse = z.infer<typeof ApplicationCountResponseSchema>
 export type PublicSiteResponse = z.infer<typeof PublicSiteResponseSchema>
 export type PublicScheduleResponse = z.infer<typeof PublicScheduleResponseSchema>

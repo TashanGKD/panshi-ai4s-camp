@@ -19,6 +19,10 @@ import { createApplicationRepository } from './modules/registration/application.
 import { createApplicationService } from './modules/registration/application.service.js'
 import { createReviewRepository } from './modules/registration/review.repository.js'
 import { createReviewService } from './modules/registration/review.service.js'
+import { createResourceRepository } from './modules/resources/resource.repository.js'
+import { createResourceService } from './modules/resources/resource.service.js'
+import { createStatisticsRepository } from './modules/statistics/statistics.repository.js'
+import { createStatisticsService } from './modules/statistics/statistics.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -264,6 +268,8 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     applicationService,
     reviewService: createReviewService(createReviewRepository(database.db)),
     fileService,
+    resourceService: createResourceService(createResourceRepository(database.db), fileService),
+    statisticsService: createStatisticsService(createStatisticsRepository(database.db)),
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     config: {
       allowedOrigins: env.CORS_ORIGINS,

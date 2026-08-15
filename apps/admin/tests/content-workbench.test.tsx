@@ -48,6 +48,8 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   listApplications: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }),
   getApplication: async () => { throw new Error('unused') }, transitionApplication: async () => { throw new Error('unused') },
   bulkTransitionApplications: async () => ({ data: { results: [] } }), exportApplications: async () => new Blob(),
+  listResources: async () => ({ data: { resources: [] } }), uploadResourceFile: async () => { throw new Error('unused') },
+  createResource: async () => { throw new Error('unused') }, updateResource: async () => { throw new Error('unused') }, publishResource: async () => { throw new Error('unused') },
   ...overrides,
 })
 
@@ -71,7 +73,7 @@ const deferred = <T,>() => {
 }
 
 describe('content workbench', () => {
-  it('provides the complete business navigation and a truthful resource placeholder', async () => {
+  it('provides the complete business navigation and the resource publishing workbench', async () => {
     renderAdmin()
     expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
     for (const name of ['基本信息', '实训特色', '组织单位', '重要日期', '实训日程与师资', '住宿交通', '联系方式', '相关资料', '展示设置', '表单配置']) {
@@ -80,7 +82,8 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('link', { name: '表单配置' }))
     expect(await screen.findByRole('heading', { name: '表单配置' })).toBeVisible()
     fireEvent.click(screen.getByRole('link', { name: '相关资料' }))
-    expect(await screen.findByText('资料管理将在 Task 15 建设')).toBeVisible()
+    expect(await screen.findByRole('heading', { name: '相关资料' })).toBeVisible()
+    expect(screen.getByText('暂无资料。')).toBeVisible()
   })
 
   it('renders real zero-value summary states instead of invented metrics', async () => {

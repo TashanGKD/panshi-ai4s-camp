@@ -164,7 +164,3 @@ export function ContentPage({ moduleKey, client, publicWebBaseUrl }: { moduleKey
     </div></section><VersionHistory busy={pending || isDirty} publishedVersion={history.data.publishedVersion} versions={history.data.versions} onRollback={(version) => { void rollback(version) }} /></div>
   </section>
 }
-
-export function ResourcesPlaceholderPage() {
-  return <section className="page-section"><div className="page-heading"><div><p>网站内容</p><h1>相关资料</h1></div></div><article className="panel empty-panel"><h2>资料管理将在 Task 15 建设</h2><p>当前尚未提供资料创建、上传或公开范围管理接口。本页不会保存虚构资料。</p></article></section>
-}

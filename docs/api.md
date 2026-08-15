@@ -1,6 +1,6 @@
 # API 契约边界
 
-本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现 API 运行壳、健康检查、公开内容读取、管理员身份、内容草稿／预览／发布／历史／回退、后台摘要、报名表配置及 Task 12 的受保护附件上传下载；报名答案提交和公开资料管理仍属于后续任务。
+本文冻结磐石 AI4S 实训营的共享 API 契约，供服务端与客户端共同遵循。当前已实现公开内容、身份、报名、审核、文件、资料权限和报名人数统计。
 
 ## API 范围
 
@@ -45,13 +45,13 @@
 
 - `GET /api/v1/admin/summary`：从数据库实时返回报名总量、完整状态分布、待审核数量（`submitted + reviewing`）、未来最近五个机器日期、与当前发布版本不同的草稿，以及最近十条管理员操作。“今天”按 `Asia/Shanghai` 业务日期计算，并可通过 repository `todayProvider` 注入测试时间。空库返回完整零值和空数组。最近操作只包含日志 ID、动作、操作者显示名和时间，不返回 audit metadata、正文、联系方式或其他敏感值。未登录返回 401，已登录非管理员返回 403。
 
-Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；服务端读取草稿、预览响应、编辑器写入 DOM 和保存前均执行清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。前端排序使用不进入业务 payload 的稳定编辑器 key。存在未保存编辑时，预览和发布不可用并提示先保存；保存、发布、回退共用单一同步操作锁，模块加载和写操作回调通过 generation guard 隔离。`相关资料` 仍无创建或上传接口，留待 Task 15。
+Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；服务端读取草稿、预览响应、编辑器写入 DOM 和保存前均执行清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。前端排序使用不进入业务 payload 的稳定编辑器 key。存在未保存编辑时，预览和发布不可用并提示先保存；保存、发布、回退共用单一同步操作锁，模块加载和写操作回调通过 generation guard 隔离。相关资料使用独立结构化工作台管理文件、范围、排序和发布状态。
 
 `display.homeSectionOrder` 是可选的首页模块顺序数组，允许值仅为 `intro`、`target`、`features`、`organizations`，且同一数组内不得重复。Task 9 已完成该字段的契约校验、后台排序和草稿保存；当前首页聚合接口尚未返回 `features` 与 `organizations`，因此公开首页暂不消费该字段，避免在 Task 9 中扩张公共聚合与页面发布边界。后续接入时应直接以该字段作为首页模块顺序信息真源。
 
 管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
 
-Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由使用 App 已完成的上述 `GET /api/v1/public/site` 请求与契约校验，不单独重复请求；App 成功后页面显示真实空状态，App 失败时保留顶层错误。`apps/api/src/modules/resources` 及 public/authenticated/admitted 资料权限由 Task 15 实现，不属于当前 API 能力。
+`GET /api/v1/resources` 按匿名、登录、录取身份只返回当前账号可见的已发布资料；`GET /api/v1/resources/:id/download` 复用安全文件流。受限资料统一以 404 隐藏存在性，登录列表及受限下载使用 `private, no-store`。`GET /api/v1/public/statistics/applications` 只返回 `{visible:false}`，或在已发布展示设置开启时返回 `{visible:true,submittedCount,updatedAt}`；统计不包含草稿。
 
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 
@@ -61,7 +61,7 @@ Task 6 不提供资料记录或下载 endpoint。Web 的 `相关资料` 路由�
 - `schedule.days[].sessions[].timeRange` 使用 `{ start: "HH:mm", end: "HH:mm" }` 且 start 严格早于 end。空 `sessions` 合法；每个实际 session 都必须提供机器范围。公共读取仍兼容历史 `time` 显示字符串，但它不能替代新发布所需的 `timeRange`。
 - `schedule.speakers` 使用稳定 `id`，session 使用 `speakerIds`；讲师 ID、单节引用不得重复，每个非空引用必须存在。无讲师课程可省略或使用空 `speakerIds`。历史非空 `instructors` 字符串只保留公共显示兼容，任何新发布或回退都拒绝该字段中的非空值。
 - `contacts` 公开读取继续兼容历史 `{ label, value, href? }` 项和空列表；新发布或回退则至少需要一项 `{ name, responsibility, methods, consultationNote? }`。`methods` 至少含一个安全的 `{ type: "phone" | "email", value }`，所有联系人都必须完整结构化，错误返回 `items.n...` 字段路径。初始 seed 仍为空，不虚构联系人。
-- 资料完整性由 Task 15 的资料公开/可见性变更边界负责，不参与内容模块发布校验。
+- 资料完整性由资料公开/可见性变更边界负责，不参与内容模块发布校验。
 - legacy 关联域缺失不会阻塞其他模块发布；例如旧版无机器键的重要日期不会阻塞 `basic`。但发布 `importantDates`、`schedule` 或 `contacts` 自身时必须满足上述当前规则。
 
 ## API 运行基线

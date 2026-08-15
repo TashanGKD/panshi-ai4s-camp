@@ -1,8 +1,8 @@
 import request from 'supertest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { hashSessionToken } from '../src/modules/identity/session.service.js'
-import type { ReviewService } from '../src/modules/registration/review.service.js'
+import { createReviewService, type ReviewRepository, type ReviewService } from '../src/modules/registration/review.service.js'
 
 const admin = { id: '10000000-0000-4000-8000-000000000001', displayName: '审核员', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'admin' as const, disabledAt: null }
 const student = { ...admin, id: '10000000-0000-4000-8000-000000000002', role: 'user' as const }
@@ -28,5 +28,37 @@ describe('admin application review routes', () => {
       expect(response.headers['cache-control']).toBe('private, no-store')
       expect(response.headers.etag).toBeUndefined()
     }
+  })
+
+  it('rejects malformed application ids consistently before repository access', async () => {
+    const repository: ReviewRepository = {
+      list: vi.fn(async () => ({ items: [], total: 0 })),
+      detail: vi.fn(async () => null),
+      transition: vi.fn(async () => null),
+      bulkTransition: vi.fn(async () => []),
+      exportCsv: vi.fn(async () => ({ csv: '', count: 0, columns: [] })),
+    }
+    const validatingApp = createApp({
+      checkDatabase: async () => undefined,
+      identityRepository,
+      authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+      reviewService: createReviewService(repository),
+      config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 },
+    })
+    const validTransition = { expectedRevision: 1, targetStatus: 'reviewing', editableFieldIds: [], editableAttachmentIds: [] }
+    const responses = [
+      await request(validatingApp).get('/api/v1/admin/applications/not-a-uuid').set('Cookie', 'panshi_session=admin-token'),
+      await request(validatingApp).post('/api/v1/admin/applications/not-a-uuid/status').set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send(validTransition),
+      await request(validatingApp).post('/api/v1/admin/applications/bulk-status').set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send({ applicationIds: ['30000000-0000-4000-8000-000000000001', 'not-a-uuid'], targetStatus: 'reviewing' }),
+    ]
+
+    for (const response of responses) {
+      expect(response.status).toBe(400)
+      expect(response.body.error).toMatchObject({ code: 'INVALID_APPLICATION_ID', message: '报名编号格式错误' })
+      expect(response.headers['cache-control']).toBe('private, no-store')
+    }
+    expect(repository.detail).not.toHaveBeenCalled()
+    expect(repository.transition).not.toHaveBeenCalled()
+    expect(repository.bulkTransition).not.toHaveBeenCalled()
   })
 })

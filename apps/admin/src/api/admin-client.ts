@@ -81,7 +81,7 @@ export type AdminClient = {
   publishRegistrationForm: (expectedRevision: number) => Promise<RegistrationFormPublishResponse>
   getRegistrationFormHistory: () => Promise<RegistrationFormHistoryResponse>
   listApplications: (query: URLSearchParams, signal?: AbortSignal) => Promise<{ data: { items: AdminApplicationListItem[], total: number, page: number, pageSize: number } }>
-  getApplication: (id: string) => Promise<{ data: AdminApplicationDetail }>
+  getApplication: (id: string, signal?: AbortSignal) => Promise<{ data: AdminApplicationDetail }>
   transitionApplication: (id: string, input: ReviewTransitionInput) => Promise<{ data: { id: string, revision: number, status: string } }>
   bulkTransitionApplications: (input: { applicationIds: string[], targetStatus: string, publicMessage?: string, internalNote?: string }) => Promise<{ data: { results: Array<{ applicationId: string, success: boolean, status?: string, code?: string, message?: string }> } }>
   exportApplications: (query: URLSearchParams) => Promise<Blob>
@@ -138,7 +138,7 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     })).json()),
     getRegistrationFormHistory: async () => RegistrationFormHistoryResponseSchema.parse(await (await send('/api/v1/admin/registration-form/history')).json()),
     listApplications: async (query, signal) => (await send(`/api/v1/admin/applications?${query.toString()}`, { signal })).json(),
-    getApplication: async (id) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}`)).json(),
+    getApplication: async (id, signal) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}`, { signal })).json(),
     transitionApplication: async (id, input) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     bulkTransitionApplications: async (input) => (await send('/api/v1/admin/applications/bulk-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     exportApplications: async (query) => (await send(`/api/v1/admin/applications/export.csv?${query.toString()}`)).blob(),

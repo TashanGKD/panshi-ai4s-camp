@@ -39,15 +39,26 @@ export type ReviewRepository = {
 export class ReviewError extends Error { constructor(readonly status: number, readonly code: string, message: string, readonly details?: unknown) { super(message); this.name = 'ReviewError' } }
 const ensureAdmin = (user: AuthenticatedSessionUser) => { if (user.role !== 'admin' || user.disabledAt) throw new ReviewError(403, 'FORBIDDEN', '无权审核报名') }
 const parsedOrError = <T>(result: z.ZodSafeParseResult<T>): T => { if (!result.success) throw new ReviewError(422, 'INVALID_REVIEW_REQUEST', '审核请求格式错误', { fields: result.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })) }); return result.data }
+const parseApplicationId = (raw: unknown): string => {
+  const parsed = uuid.safeParse(raw)
+  if (!parsed.success) throw new ReviewError(400, 'INVALID_APPLICATION_ID', '报名编号格式错误')
+  return parsed.data
+}
+const validateBulkApplicationIds = (raw: unknown) => {
+  const candidate = z.object({ applicationIds: z.array(z.unknown()) }).passthrough().safeParse(raw)
+  if (!candidate.success) return
+  candidate.data.applicationIds.forEach(parseApplicationId)
+}
 
 export type ReviewService = ReturnType<typeof createReviewService>
 export const createReviewService = (repository: ReviewRepository) => ({
   list: async (admin: AuthenticatedSessionUser, raw: unknown) => { ensureAdmin(admin); const query = parsedOrError(ReviewListQuerySchema.safeParse(raw)); return { apiVersion: 'v1' as const, data: { ...(await repository.list(query)), page: query.page, pageSize: query.pageSize } } },
-  detail: async (admin: AuthenticatedSessionUser, id: string) => { ensureAdmin(admin); if (!uuid.safeParse(id).success) throw new ReviewError(400, 'INVALID_APPLICATION_ID', '报名编号格式错误'); const detail = await repository.detail(id); if (!detail) throw new ReviewError(404, 'APPLICATION_NOT_FOUND', '报名不存在'); return { apiVersion: 'v1' as const, data: detail } },
-  transition: async (admin: AuthenticatedSessionUser, applicationId: string, raw: unknown) => { ensureAdmin(admin); const input = parsedOrError(ReviewTransitionInputSchema.safeParse(raw)); const result = await repository.transition({ ...input, applicationId, adminId: admin.id }); if (!result) throw new ReviewError(409, 'APPLICATION_REVISION_CONFLICT', '报名状态已变化，请刷新后重试'); return { apiVersion: 'v1' as const, data: result } },
+  detail: async (admin: AuthenticatedSessionUser, rawId: string) => { ensureAdmin(admin); const id = parseApplicationId(rawId); const detail = await repository.detail(id); if (!detail) throw new ReviewError(404, 'APPLICATION_NOT_FOUND', '报名不存在'); return { apiVersion: 'v1' as const, data: detail } },
+  transition: async (admin: AuthenticatedSessionUser, rawApplicationId: string, raw: unknown) => { ensureAdmin(admin); const applicationId = parseApplicationId(rawApplicationId); const input = parsedOrError(ReviewTransitionInputSchema.safeParse(raw)); const result = await repository.transition({ ...input, applicationId, adminId: admin.id }); if (!result) throw new ReviewError(409, 'APPLICATION_REVISION_CONFLICT', '报名状态已变化，请刷新后重试'); return { apiVersion: 'v1' as const, data: result } },
   bulkTransition: async (admin: AuthenticatedSessionUser, raw: unknown) => {
     ensureAdmin(admin)
     const schema = z.object({ applicationIds: z.array(uuid).min(1).max(100).transform((ids) => [...new Set(ids)]), targetStatus: z.enum(['reviewing', 'admitted', 'waitlisted', 'rejected']), publicMessage: z.string().trim().max(2_000).optional(), internalNote }).strict()
+    validateBulkApplicationIds(raw)
     const input = parsedOrError(schema.safeParse(raw)); return { apiVersion: 'v1' as const, data: { results: await repository.bulkTransition({ ...input, adminId: admin.id }) } }
   },
   exportCsv: async (admin: AuthenticatedSessionUser, raw: unknown) => { ensureAdmin(admin); const query = parsedOrError(ReviewListQuerySchema.safeParse(raw)); return repository.exportCsv({ ...query, includePhone: false, adminId: admin.id }) },

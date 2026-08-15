@@ -47,7 +47,7 @@
 
 Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作台。富文本仅允许 `p`、`br`、`strong`、`em`、`ul`、`ol`、`li` 和安全 `a[href]`，仅接受 `http`、`https`、`mailto` 协议；服务端读取草稿、预览响应、编辑器写入 DOM 和保存前均执行清洗，禁止 `script`、`iframe`、内联事件属性和 `javascript:` URL。基本信息的多段简介、联系人的多种联系方式、日程课程的多条内容要点以及其他集合字段均使用独立字段和显式添加、删除、上移、下移操作，不以 JSON 文本框代替业务表单。前端排序使用不进入业务 payload 的稳定编辑器 key。存在未保存编辑时，预览和发布不可用并提示先保存；保存、发布、回退共用单一同步操作锁，模块加载和写操作回调通过 generation guard 隔离。相关资料使用独立结构化工作台管理文件、范围、排序和发布状态。
 
-`display.homeSectionOrder` 是可选的首页模块顺序数组，允许值仅为 `intro`、`target`、`features`、`organizations`，且同一数组内不得重复。公共聚合接口返回已发布的 `features`、`organizations` 及该顺序，首页直接消费同一内容真源；旧发布版本缺失这些字段时使用契约默认值。
+`display.homeSectionOrder` 是可选的首页模块顺序数组，允许值仅为 `intro`、`target`、`scale`、`features`、`scheduleOverview`、`organizations`、`registrationCta`、`registrationCount`，且同一数组内不得重复。公共聚合接口返回已发布的 `features`、`organizations` 及该顺序，首页直接消费同一内容真源；旧发布版本缺失这些字段时使用契约默认值。
 
 管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
 
@@ -72,7 +72,7 @@ API 进程读取并校验 `DATABASE_URL`、`API_PORT`、`NODE_ENV`、`SESSION_TT
 
 Future：接入真实短信 provider 前仍须补充供应商级手机号累计发送限额和全局费用熔断；现有 IP／认证类别限流不能替代供应商成本风控。
 
-中间件固定顺序为请求 ID、JSON body limit、Cookie 解析、CORS/Origin 保护、分类限流、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。登录失败、认证／验证码、公开、已登录和管理后台使用独立桶；429 均返回结构化错误、`Retry-After` 和 `Cache-Control: no-store`。
+中间件固定顺序为请求 ID、私有路由禁止缓存／ETag、JSON body limit、Cookie 解析、分类限流、CORS/Origin 保护、路由、统一 404/错误处理。安全方法 `GET`、`HEAD`、`OPTIONS` 不受 Origin 拦截；状态变更方法必须携带 allowlist 中的 `Origin`，缺少或不匹配都返回 403。登录失败、认证／验证码、公开、已登录和管理后台使用独立桶；429 均返回结构化错误、`Retry-After` 和 `Cache-Control: no-store`。
 
 JSON parser 的稳定客户端错误由统一错误层转换：格式错误返回 400 `MALFORMED_JSON`，不支持的 charset 或 content encoding 返回 415 `UNSUPPORTED_MEDIA_TYPE`，请求体超限返回 413 `PAYLOAD_TOO_LARGE`；响应不会包含 parser 原始消息或请求片段。
 

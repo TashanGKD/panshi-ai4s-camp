@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 import { PublicShell } from '../src/app/PublicShell'
@@ -26,7 +26,7 @@ const siteResponse = {
   },
 }
 
-const renderRoute = (path = '/') => render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>)
+const renderRoute = (path = '/') => render(<RouterProvider router={createMemoryRouter([{ path: '*', element: <App /> }], { initialEntries: [path] })} />)
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -52,18 +52,24 @@ describe('public event shell', () => {
     expect(within(sidebar).getByRole('link', { name: '立即报名' })).toHaveAttribute('href', '/application')
   })
 
-  it.each(['/register', '/login', '/forgot-password', '/account'])('uses the shared aside on auth and account route %s', async (path) => {
+  it.each(['/', '/schedule', '/travel', '/contact', '/resources', '/register', '/login', '/forgot-password', '/application', '/account'])('shows every shared aside item on public route %s', async (path) => {
     renderRoute(path)
-    expect(await screen.findByRole('complementary')).toHaveTextContent('报名咨询')
+    const sidebar = await screen.findByRole('complementary')
+    expect(sidebar).toHaveTextContent('重要日期')
+    expect(sidebar).toHaveTextContent('报名咨询camp@example.org')
+    expect(sidebar).toHaveTextContent('相关资料')
+    expect(sidebar).toHaveTextContent('立即报名')
   })
 
-  it('avoids registration and resources self-links inside the aside', async () => {
+  it('keeps current registration and resources entries visible without self-links', async () => {
     const registration = render(<MemoryRouter initialEntries={['/application']}><PublicShell site={siteResponse.data as never}><p>报名表</p></PublicShell></MemoryRouter>)
     const registrationAside = screen.getByRole('complementary')
+    expect(within(registrationAside).getByText('立即报名')).toHaveAttribute('aria-current', 'page')
     expect(within(registrationAside).queryByRole('link', { name: '立即报名' })).not.toBeInTheDocument()
     registration.unmount()
     renderRoute('/resources')
     const resourcesAside = await screen.findByRole('complementary')
+    expect(within(resourcesAside).getByText('相关资料')).toHaveAttribute('aria-current', 'page')
     expect(within(resourcesAside).queryByRole('link', { name: '相关资料' })).not.toBeInTheDocument()
   })
 

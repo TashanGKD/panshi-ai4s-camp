@@ -35,8 +35,13 @@ export function PublicShell({ children, site }: {
           <ImportantDatesContent importantDates={site.importantDates} />
         </InfoCard> : null}
         {site.contacts.items.length > 0 ? <InfoCard title="联系咨询"><ContactList contacts={site.contacts} /></InfoCard> : null}
-        {site.visibleNavigation.includes('resources') && pathname !== '/resources' ? <InfoCard title="相关链接"><Link className="sidebar-link" to="/resources">相关资料</Link></InfoCard> : null}
-        {pathname !== site.registrationCta.to ? <Link className="registration-cta sidebar-cta" to={site.registrationCta.to}>{site.registrationCta.label}</Link> : null}
+        <InfoCard title="相关链接">{pathname === '/resources'
+          ? <span className="sidebar-link" aria-current="page">相关资料</span>
+          : <Link className="sidebar-link" to="/resources">相关资料</Link>}
+        </InfoCard>
+        {pathname === site.registrationCta.to
+          ? <span className="registration-cta sidebar-cta" aria-current="page">{site.registrationCta.label}</span>
+          : <Link className="registration-cta sidebar-cta" to={site.registrationCta.to}>{site.registrationCta.label}</Link>}
       </aside>
     </div>
     <footer className="event-footer"><div className="event-container">{site.display.footer}</div></footer>

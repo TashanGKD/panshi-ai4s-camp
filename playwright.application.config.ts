@@ -6,7 +6,7 @@ if (process.env.APPLICATION_E2E !== '1' || databaseUrl !== exact) throw new Erro
 for (const key of ['E2E_VERIFICATION_CODE', 'E2E_REGISTER_PHONE', 'E2E_REGISTER_PASSWORD', 'VERIFICATION_SECRET'] as const) if (!process.env[key]) throw new Error(`${key} is required`)
 
 export default defineConfig({
-  testDir: './e2e', testMatch: 'application-submit.spec.ts', workers: 1, fullyParallel: false,
+  testDir: './e2e', testMatch: 'application-submit.spec.ts', outputDir: './test-results/application', workers: 1, fullyParallel: false,
   globalTeardown: './e2e/application.teardown.ts',
   use: { baseURL: 'http://127.0.0.1:4193', browserName: 'chromium', locale: 'zh-CN', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 800 } },
   webServer: [{

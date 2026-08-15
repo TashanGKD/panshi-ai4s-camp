@@ -12,7 +12,7 @@ if (databaseUrl !== exactDatabaseUrl) throw new Error(`TEST_DATABASE_URL must eq
 for (const name of required) if (!process.env[name]) throw new Error(`${name} is required`)
 
 export default defineConfig({
-  testDir: './e2e', testMatch: 'student-auth.spec.ts', workers: 1, fullyParallel: false,
+  testDir: './e2e', testMatch: 'student-auth.spec.ts', outputDir: './test-results/student-auth', workers: 1, fullyParallel: false,
   globalTeardown: './e2e/student-auth.teardown.ts',
   use: {
     baseURL: 'http://127.0.0.1:4183', browserName: 'chromium', locale: 'zh-CN',

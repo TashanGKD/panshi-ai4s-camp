@@ -246,9 +246,9 @@ VERIFICATION_SECRET='<64-hex-characters-from-32-random-bytes>' \
   npx playwright test
 ```
 
-这两项 Playwright 用例覆盖完整发布／报名／附件／补充／录取／资料／公开计数旅程和匿名、普通学员、录取学员、管理员访问矩阵；同时在 `1440x900`、`1280x800`、`390x844` 检查公开与管理关键页面并把截图写入被 Git 忽略的 `test-results`。不要指向开发或生产库。Chromium 缺失时只安装项目 Playwright 对应浏览器：`npx playwright install chromium`。
+这两项 Playwright 用例覆盖完整发布／报名／附件／补充／录取／资料／公开计数旅程和匿名、普通学员、录取学员、管理员访问矩阵；同时在 `1440x900`、`1280x800`、`390x844` 检查 16 个公开与管理关键页面并把 48 张截图写入被 Git 忽略的 `test-results/launch`。不要指向开发或生产库。Chromium 缺失时只安装项目 Playwright 对应浏览器：`npx playwright install chromium`。
 
-发布前的单入口浏览器门禁是 `npm run test:e2e:all`。它依次执行 launch、visual/source、review、content publishing、student auth 和 application submission 六个配置；调用前必须同时提供各配置上文列出的显式开关、精确 `TEST_DATABASE_URL`、64 位十六进制 `VERIFICATION_SECRET` 以及专用测试手机号/密码。各配置串行清理同一专用测试库并使用各自固定的 `var/*-e2e-*` 存储目录，不得并行执行，也不得复用生产凭据。
+发布前的单入口浏览器门禁是 `npm run test:e2e:all`。它依次执行 launch、visual/source、review、content publishing、student auth 和 application submission 六个配置；调用前必须同时提供各配置上文列出的显式开关、精确 `TEST_DATABASE_URL`、64 位十六进制 `VERIFICATION_SECRET` 以及专用测试手机号/密码。各配置串行清理同一专用测试库并使用各自固定的 `var/*-e2e-*` 存储目录，不得并行执行，也不得复用生产凭据。六个配置分别写入 `test-results/launch`、`visual`、`review`、`content`、`student-auth` 和 `application`，后运行的配置不会清除 launch 证据；门禁最后校验 launch 目录中恰有当前清单的 48 个 PNG 文件及本次运行标记，缺失、陈旧或额外文件都会失败。
 
 API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -- health.test.ts dev-command.test.ts`。内容仓库、发布指针和种子幂等性属于必须的 PostgreSQL 集成边界，使用 `npm run test:integration:content -w @panshi/api`；该命令缺少 `TEST_DATABASE_URL` 时立即失败，且只接受数据库名精确为 `panshi_ai4s_camp_test` 的 PostgreSQL URL。API schema 集成测试同样必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 身份 SQL/session 生命周期的必须集成边界使用 `npm run test:integration:auth -w @panshi/api`；它同样要求显式 `TEST_DATABASE_URL` 且数据库名必须精确为 `panshi_ai4s_camp_test`，缺少时在加载测试前失败。

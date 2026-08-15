@@ -71,6 +71,8 @@ test('anonymous, student, admitted student and admin enforce the launch access m
   const admittedData = await submitApplication(admitted, 'admitted')
   const adminLogin = await admin.request.post(`${apiBase}/api/v1/auth/admin/login`, { headers: { Origin: adminOrigin }, data: { phone: '+8613999999999', password: process.env.E2E_ADMIN_PASSWORD } })
   expect(adminLogin.status()).toBe(200)
+  const actors = { anonymous, ordinary, admitted, admin } as const
+  type ActorName = keyof typeof actors
 
   const admittedDetail = await admin.request.get(`${apiBase}/api/v1/admin/applications/${admittedData.applicationId}`)
   let revision = (await admittedDetail.json()).data.application.revision
@@ -100,20 +102,51 @@ test('anonymous, student, admitted student and admin enforce the launch access m
   }
   await assertError(await admin.request.get(`${apiBase}/api/v1/me/application`), 403, 'FORBIDDEN')
 
-  await assertPrivateBytes(await ordinary.request.get(`${apiBase}/api/v1/files/${ordinaryData.fileId}/download`), pdf)
-  await assertPrivateBytes(await admitted.request.get(`${apiBase}/api/v1/files/${admittedData.fileId}/download`), pdf)
-  await assertError(await anonymous.request.get(`${apiBase}/api/v1/files/${ordinaryData.fileId}/download`), 401, 'UNAUTHORIZED')
-  await assertError(await ordinary.request.get(`${apiBase}/api/v1/files/${admittedData.fileId}/download`), 404, 'FILE_NOT_AVAILABLE')
-  await assertError(await admitted.request.get(`${apiBase}/api/v1/files/${ordinaryData.fileId}/download`), 404, 'FILE_NOT_AVAILABLE')
-  await assertError(await ordinary.request.get(`${apiBase}/api/v1/files/${missingUuid}/download`), 404, 'FILE_NOT_AVAILABLE')
-  await assertError(await ordinary.request.get(`${apiBase}/api/v1/files/not-a-uuid/download`), 400, 'FILE_ID_INVALID')
-  await assertPrivateBytes(await admin.request.get(`${apiBase}/api/v1/files/${ordinaryData.fileId}/download`), pdf)
+  // Attachment matrix: authentication precedes ID parsing; owners and admins receive exact private bytes.
+  for (const [actorName, fileId] of [
+    ['ordinary', ordinaryData.fileId],
+    ['admitted', admittedData.fileId],
+    ['admin', ordinaryData.fileId],
+    ['admin', admittedData.fileId],
+  ] as const satisfies readonly (readonly [ActorName, string])[]) {
+    await assertPrivateBytes(await actors[actorName].request.get(`${apiBase}/api/v1/files/${fileId}/download`), pdf)
+  }
+  const attachmentDenials = [
+    ['anonymous', ordinaryData.fileId, 401, 'UNAUTHORIZED'],
+    ['anonymous', missingUuid, 401, 'UNAUTHORIZED'],
+    ['anonymous', 'not-a-uuid', 401, 'UNAUTHORIZED'],
+    ['ordinary', admittedData.fileId, 404, 'FILE_NOT_AVAILABLE'],
+    ['ordinary', missingUuid, 404, 'FILE_NOT_AVAILABLE'],
+    ['ordinary', 'not-a-uuid', 400, 'FILE_ID_INVALID'],
+    ['admitted', ordinaryData.fileId, 404, 'FILE_NOT_AVAILABLE'],
+    ['admitted', missingUuid, 404, 'FILE_NOT_AVAILABLE'],
+    ['admitted', 'not-a-uuid', 400, 'FILE_ID_INVALID'],
+    ['admin', missingUuid, 404, 'FILE_NOT_AVAILABLE'],
+    ['admin', 'not-a-uuid', 400, 'FILE_ID_INVALID'],
+  ] as const satisfies readonly (readonly [ActorName, string, number, string])[]
+  for (const [actorName, fileId, status, errorCode] of attachmentDenials) {
+    await assertError(await actors[actorName].request.get(`${apiBase}/api/v1/files/${fileId}/download`), status, errorCode)
+  }
 
-  await assertError(await anonymous.request.get(`${apiBase}/api/v1/resources/${resource.id}/download`), 404, 'RESOURCE_NOT_AVAILABLE')
-  await assertError(await ordinary.request.get(`${apiBase}/api/v1/resources/${resource.id}/download`), 404, 'RESOURCE_NOT_AVAILABLE')
-  const admittedDownload = await admitted.request.get(`${apiBase}/api/v1/resources/${resource.id}/download`)
-  await assertPrivateBytes(admittedDownload, pdf)
-  await assertPrivateBytes(await admin.request.get(`${apiBase}/api/v1/resources/${resource.id}/download`), pdf)
+  // Admitted-resource matrix: malformed IDs are rejected before optional session resolution.
+  for (const actorName of ['admitted', 'admin'] as const) {
+    await assertPrivateBytes(await actors[actorName].request.get(`${apiBase}/api/v1/resources/${resource.id}/download`), pdf)
+  }
+  const resourceDenials = [
+    ['anonymous', resource.id, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['anonymous', missingUuid, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['anonymous', 'not-a-uuid', 400, 'RESOURCE_ID_INVALID'],
+    ['ordinary', resource.id, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['ordinary', missingUuid, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['ordinary', 'not-a-uuid', 400, 'RESOURCE_ID_INVALID'],
+    ['admitted', missingUuid, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admitted', 'not-a-uuid', 400, 'RESOURCE_ID_INVALID'],
+    ['admin', missingUuid, 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admin', 'not-a-uuid', 400, 'RESOURCE_ID_INVALID'],
+  ] as const satisfies readonly (readonly [ActorName, string, number, string])[]
+  for (const [actorName, resourceId, status, errorCode] of resourceDenials) {
+    await assertError(await actors[actorName].request.get(`${apiBase}/api/v1/resources/${resourceId}/download`), status, errorCode)
+  }
   for (const actor of [anonymous, ordinary]) {
     const existing = await actor.request.get(`${apiBase}/api/v1/resources/${resource.id}/download`)
     const missing = await actor.request.get(`${apiBase}/api/v1/resources/${missingUuid}/download`)
@@ -122,9 +155,6 @@ test('anonymous, student, admitted student and admin enforce the launch access m
     expect((await existing.json()).error).toMatchObject({ code: 'RESOURCE_NOT_AVAILABLE' })
     expect((await missing.json()).error).toMatchObject({ code: 'RESOURCE_NOT_AVAILABLE' })
   }
-  await assertError(await admitted.request.get(`${apiBase}/api/v1/resources/${missingUuid}/download`), 404, 'RESOURCE_NOT_AVAILABLE')
-  await assertError(await anonymous.request.get(`${apiBase}/api/v1/resources/not-a-uuid/download`), 400, 'RESOURCE_ID_INVALID')
-
   for (const actor of [anonymous, ordinary, admitted]) {
     const existing = await actor.request.get(`${apiBase}/api/v1/admin/applications/${ordinaryData.applicationId}`)
     const missing = await actor.request.get(`${apiBase}/api/v1/admin/applications/${missingUuid}`)
@@ -146,13 +176,7 @@ test('anonymous, student, admitted student and admin enforce the launch access m
   const auditDetail = await admin.request.get(`${apiBase}/api/v1/admin/audit-logs/${auditId}`)
   expect(auditDetail.status()).toBe(200); assertPrivate(auditDetail)
   expect(await auditDetail.text()).not.toMatch(/TASK19_INTERNAL_NOTE_DO_NOT_LEAK|storage_key|var\/e2e|postgres/iu)
-  await assertError(await admin.request.get(`${apiBase}/api/v1/admin/audit-logs/not-a-uuid`), 422, 'AUDIT_LOG_ID_INVALID')
-  await assertError(await admin.request.get(`${apiBase}/api/v1/admin/applications/not-a-uuid`), 400, 'INVALID_APPLICATION_ID')
-
   await assertError(await anonymous.request.post(`${apiBase}/api/v1/me/application`), 403, 'ORIGIN_REQUIRED')
-  await assertError(await anonymous.request.post(`${apiBase}/api/v1/me/application`, { headers: { Origin: webOrigin }, data: {} }), 401, 'UNAUTHORIZED')
-  await assertError(await ordinary.request.post(`${apiBase}/api/v1/me/application`, { headers: { Origin: webOrigin }, data: {} }), 404, 'NOT_FOUND')
-  await assertError(await admin.request.patch(`${apiBase}/api/v1/admin/audit-logs/${auditId}`, { headers: { Origin: adminOrigin }, data: {} }), 404, 'NOT_FOUND')
 
   for (const actor of [anonymous, ordinary, admitted]) {
     for (const url of [`${apiBase}/api/v1/public/site`, `${apiBase}/api/v1/resources`, `${apiBase}/api/v1/me/application`]) {
@@ -160,17 +184,57 @@ test('anonymous, student, admitted student and admin enforce the launch access m
     }
   }
 
+  // Defined boundary families cover every private/admin router class once and every actor where
+  // authentication precedence changes the contract. File/resource malformed IDs are exhaustive above.
   const boundaries = [
-    [anonymous, 'GET', '/api/v1/files/not-a-uuid/download', 401, 'UNAUTHORIZED'],
-    [ordinary, 'GET', '/api/v1/files/not-a-uuid/download', 400, 'FILE_ID_INVALID'],
-    [ordinary, 'POST', '/api/v1/me/application', 404, 'NOT_FOUND'],
-    [anonymous, 'GET', '/api/v1/admin/applications/not-a-uuid', 403, 'FORBIDDEN'],
-    [admin, 'GET', '/api/v1/admin/applications/not-a-uuid', 400, 'INVALID_APPLICATION_ID'],
-    [admin, 'GET', '/api/v1/admin/audit-logs/not-a-uuid', 422, 'AUDIT_LOG_ID_INVALID'],
-    [admin, 'PATCH', `/api/v1/admin/audit-logs/${auditId}`, 404, 'NOT_FOUND'],
-  ] as const
-  for (const [actor, method, path, status, errorCode] of boundaries) {
-    const response = await actor.request.fetch(`${apiBase}${path}`, { method, ...(method === 'GET' ? {} : { headers: { Origin: actor === admin ? adminOrigin : webOrigin }, data: {} }) })
+    ['student application', 'anonymous', 'POST', '/api/v1/me/application', 401, 'UNAUTHORIZED'],
+    ['student application', 'ordinary', 'POST', '/api/v1/me/application', 404, 'NOT_FOUND'],
+    ['student application', 'admitted', 'POST', '/api/v1/me/application', 404, 'NOT_FOUND'],
+    ['student application', 'admin', 'POST', '/api/v1/me/application', 403, 'FORBIDDEN'],
+    ['attachment', 'anonymous', 'POST', `/api/v1/files/${ordinaryData.fileId}/download`, 401, 'UNAUTHORIZED'],
+    ['attachment', 'ordinary', 'POST', `/api/v1/files/${ordinaryData.fileId}/download`, 404, 'NOT_FOUND'],
+    ['attachment', 'admitted', 'POST', `/api/v1/files/${admittedData.fileId}/download`, 404, 'NOT_FOUND'],
+    ['attachment', 'admin', 'POST', `/api/v1/files/${ordinaryData.fileId}/download`, 404, 'NOT_FOUND'],
+    ['admitted resource', 'anonymous', 'PUT', `/api/v1/resources/${resource.id}/download`, 404, 'NOT_FOUND'],
+    ['admitted resource', 'ordinary', 'PUT', `/api/v1/resources/${resource.id}/download`, 404, 'NOT_FOUND'],
+    ['admitted resource', 'admitted', 'PUT', `/api/v1/resources/${resource.id}/download`, 404, 'NOT_FOUND'],
+    ['admitted resource', 'admin', 'PUT', `/api/v1/resources/${resource.id}/download`, 404, 'NOT_FOUND'],
+    ['admin applications malformed', 'anonymous', 'GET', '/api/v1/admin/applications/not-a-uuid', 403, 'FORBIDDEN'],
+    ['admin applications malformed', 'ordinary', 'GET', '/api/v1/admin/applications/not-a-uuid', 403, 'FORBIDDEN'],
+    ['admin applications malformed', 'admitted', 'GET', '/api/v1/admin/applications/not-a-uuid', 403, 'FORBIDDEN'],
+    ['admin applications malformed', 'admin', 'GET', '/api/v1/admin/applications/not-a-uuid', 400, 'INVALID_APPLICATION_ID'],
+    ['admin applications method', 'anonymous', 'PUT', `/api/v1/admin/applications/${ordinaryData.applicationId}`, 403, 'FORBIDDEN'],
+    ['admin applications method', 'ordinary', 'PUT', `/api/v1/admin/applications/${ordinaryData.applicationId}`, 403, 'FORBIDDEN'],
+    ['admin applications method', 'admitted', 'PUT', `/api/v1/admin/applications/${ordinaryData.applicationId}`, 403, 'FORBIDDEN'],
+    ['admin applications method', 'admin', 'PUT', `/api/v1/admin/applications/${ordinaryData.applicationId}`, 404, 'NOT_FOUND'],
+    ['admin resource preview malformed', 'anonymous', 'GET', '/api/v1/admin/resources/not-a-uuid/preview', 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admin resource preview malformed', 'ordinary', 'GET', '/api/v1/admin/resources/not-a-uuid/preview', 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admin resource preview malformed', 'admitted', 'GET', '/api/v1/admin/resources/not-a-uuid/preview', 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admin resource preview malformed', 'admin', 'GET', '/api/v1/admin/resources/not-a-uuid/preview', 404, 'RESOURCE_NOT_AVAILABLE'],
+    ['admin resource method', 'anonymous', 'DELETE', `/api/v1/admin/resources/${resource.id}`, 401, 'UNAUTHORIZED'],
+    ['admin resource method', 'ordinary', 'DELETE', `/api/v1/admin/resources/${resource.id}`, 403, 'FORBIDDEN'],
+    ['admin resource method', 'admitted', 'DELETE', `/api/v1/admin/resources/${resource.id}`, 403, 'FORBIDDEN'],
+    ['admin resource method', 'admin', 'DELETE', `/api/v1/admin/resources/${resource.id}`, 404, 'NOT_FOUND'],
+    ['audit malformed', 'anonymous', 'GET', '/api/v1/admin/audit-logs/not-a-uuid', 403, 'FORBIDDEN'],
+    ['audit malformed', 'ordinary', 'GET', '/api/v1/admin/audit-logs/not-a-uuid', 403, 'FORBIDDEN'],
+    ['audit malformed', 'admitted', 'GET', '/api/v1/admin/audit-logs/not-a-uuid', 403, 'FORBIDDEN'],
+    ['audit malformed', 'admin', 'GET', '/api/v1/admin/audit-logs/not-a-uuid', 422, 'AUDIT_LOG_ID_INVALID'],
+    ['audit method', 'anonymous', 'PATCH', `/api/v1/admin/audit-logs/${auditId}`, 403, 'FORBIDDEN'],
+    ['audit method', 'ordinary', 'PATCH', `/api/v1/admin/audit-logs/${auditId}`, 403, 'FORBIDDEN'],
+    ['audit method', 'admitted', 'PATCH', `/api/v1/admin/audit-logs/${auditId}`, 403, 'FORBIDDEN'],
+    ['audit method', 'admin', 'PATCH', `/api/v1/admin/audit-logs/${auditId}`, 404, 'NOT_FOUND'],
+    ['admin users malformed', 'anonymous', 'POST', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users malformed', 'ordinary', 'POST', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users malformed', 'admitted', 'POST', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users malformed', 'admin', 'POST', '/api/v1/admin/users/not-a-uuid/disable', 422, 'VALIDATION_FAILED'],
+    ['admin users method', 'anonymous', 'PUT', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users method', 'ordinary', 'PUT', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users method', 'admitted', 'PUT', '/api/v1/admin/users/not-a-uuid/disable', 403, 'FORBIDDEN'],
+    ['admin users method', 'admin', 'PUT', '/api/v1/admin/users/not-a-uuid/disable', 404, 'NOT_FOUND'],
+  ] as const satisfies readonly (readonly [string, ActorName, string, string, number, string])[]
+  for (const [, actorName, method, path, status, errorCode] of boundaries) {
+    const actor = actors[actorName]
+    const response = await actor.request.fetch(`${apiBase}${path}`, { method, ...(method === 'GET' ? {} : { headers: { Origin: actorName === 'admin' ? adminOrigin : webOrigin }, data: {} }) })
     await assertError(response, status, errorCode)
   }
 

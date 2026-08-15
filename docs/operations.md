@@ -203,7 +203,7 @@ npm run test:deployment:build
 bash tests/backup-restore.test.sh
 ```
 
-Run the browser release gate separately against the exact local test database with all six E2E safety switches and dedicated test credentials: `npm run test:e2e:all`. The script runs launch, visual/source, review workflow, content publishing, student authentication and application submission in that order. Never parallelize these configurations because they intentionally reset the same dedicated database; each configuration uses and cleans only its named test storage root. Generated 48-page launch screenshots remain under `test-results/launch/**/launch-visual/` and are not deployment inputs.
+Run the browser release gate separately against the exact local test database with all six E2E safety switches and dedicated test credentials: `npm run test:e2e:all`. The script runs launch, visual/source, review workflow, content publishing, student authentication and application submission in that order. Never parallelize these configurations because they intentionally reset the same dedicated database; each configuration uses and cleans only its named test storage root. Every Playwright configuration also owns a unique `test-results/<suite>` output directory, so later suites cannot remove launch evidence. The final command verifies the exact 16-page by 3-viewport manifest: exactly 48 current PNG files and one current-run marker must remain under `test-results/launch/**/launch-visual/`; missing, stale or extra PNGs fail the gate. These generated files are not deployment inputs.
 
 On a Docker-capable release host, the clean-build gate must report its container checks as executed, not skipped. Then validate the exact production model and deploy only the reviewed image tag:
 

@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page, type TestInfo } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { runLaunchFixture } from '../apps/api/src/cli/launch-e2e-fixture'
 
 const apiBase = 'http://127.0.0.1:3030'
@@ -191,6 +192,9 @@ test.describe.serial('launch journey and visual acceptance', () => {
       for (const [name, path, heading] of adminPages) await captureUsablePage(page, `${adminBase}${path}`, `admin-${name}-${viewport.name}`, testInfo, heading)
       await context.close()
     }
+    const screenshots = [...publicPages.map(([name]) => `public-${name}`), 'admin-login', ...adminPages.map(([name]) => `admin-${name}`)]
+      .flatMap((name) => viewports.map((viewport) => `${name}-${viewport.name}.png`)).sort()
+    await writeFile(testInfo.outputPath('launch-visual', 'current-run.json'), JSON.stringify({ runId: testInfo.testId, screenshots }, null, 2))
   })
 })
 

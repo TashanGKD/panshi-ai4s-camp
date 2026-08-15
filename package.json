@@ -26,7 +26,7 @@
     "e2e:student-auth": "playwright test e2e/student-auth.spec.ts --config=playwright.student-auth.config.ts",
     "e2e:application": "playwright test e2e/application-submit.spec.ts --config=playwright.application.config.ts",
     "e2e:review": "playwright test e2e/review-workflow.spec.ts --config=playwright.review.config.ts",
-    "test:e2e:all": "npm run e2e:launch && npm run visual:test && npm run e2e:review && npm run e2e:content && npm run e2e:student-auth && npm run e2e:application",
+    "test:e2e:all": "npm run e2e:launch && npm run visual:test && npm run e2e:review && npm run e2e:content && npm run e2e:student-auth && npm run e2e:application && node tests/verify-launch-screenshots.mjs",
     "dev:web": "npm run dev -w @panshi/web",
     "dev:admin": "npm run dev -w @panshi/admin",
     "dev:api": "npm run dev -w @panshi/api"

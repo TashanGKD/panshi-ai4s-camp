@@ -35,11 +35,14 @@ export const createResourceRouter = (sessions: SessionService, service: Resource
       response.json({ apiVersion: 'v1', data: { resources } })
     } catch (error) { next(mapError(error)) }
   })
+  router.use('/:id/download', (_request, response, next) => {
+    privateNoStore(response)
+    next()
+  })
   router.get('/:id/download', async (request, response, next) => {
     let stream: Awaited<ReturnType<ResourceService['open']>>['stream'] | undefined
     const abort = () => stream?.destroy(new Error('Download client disconnected'))
     try {
-      privateNoStore(response)
       const parsed = Id.safeParse(request.params.id)
       if (!parsed.success) throw new HttpError(400, 'RESOURCE_ID_INVALID', '资料标识无效')
       const actor = await resolveOptional(sessions, request.cookies)

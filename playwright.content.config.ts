@@ -12,6 +12,7 @@ if (!adminPhone || !adminPassword) throw new Error('E2E_ADMIN_PHONE and E2E_ADMI
 export default defineConfig({
   testDir: './e2e',
   testMatch: 'content-publishing.spec.ts',
+  outputDir: './test-results/content',
   workers: 1,
   fullyParallel: false,
   globalTeardown: './e2e/content-publishing.teardown.ts',

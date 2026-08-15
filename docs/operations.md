@@ -11,6 +11,9 @@ Store production values in the operator-managed, untracked file `/secure/path/pa
 - `POSTGRES_PASSWORD`: strong PostgreSQL password; there is no production default.
 - `DATABASE_URL`: complete PostgreSQL URL for migrations and the API. URL-encode special characters and keep the database, user, and password consistent with the PostgreSQL variables.
 - `CORS_ORIGINS`: comma-separated public HTTPS origins accepted by the API, for example `https://camp.example.org`.
+- `TRUST_PROXY_HOPS`: exact trusted proxy count. Use `2` only for the reviewed external TLS proxy → Nginx → API chain; the safe default for direct/local execution is `0`.
+- `RATE_LIMIT_STORE_MAX_BUCKETS`, `RATE_LIMIT_STORE_SWEEP_INTERVAL_MS`: bounded in-process bucket cap and expired-bucket sweep interval.
+- `RATE_LIMIT_LOGIN_FAILURE_MAX`, `RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_MS`, `RATE_LIMIT_PUBLIC_MAX`, `RATE_LIMIT_PUBLIC_WINDOW_MS`, `RATE_LIMIT_AUTHENTICATED_MAX`, `RATE_LIMIT_AUTHENTICATED_WINDOW_MS`, `RATE_LIMIT_ADMIN_MAX`, `RATE_LIMIT_ADMIN_WINDOW_MS`: explicit limits and windows for the five independent request families.
 - `OPERATIONS_UID`, `OPERATIONS_GID`: required numeric owner IDs for operations processes and the host-mounted `0600` password files. Export values derived from `id -u` and `id -g`; do not assume UID/GID 1000.
 - `MAINTENANCE_API_HEALTH_URL`: API health URL as seen by an operations container, normally `http://api:3001/healthz`. Backup and restore refuse to run while it is reachable.
 - `UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES`, `UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES`, `UPLOAD_ARCHIVE_MAX_ENTRIES`, `UPLOAD_ARCHIVE_MAX_PATH_DEPTH`: explicit positive restoreability limits enforced when creating and restoring upload archives.
@@ -42,6 +45,24 @@ The one-shot `operations-volume-init` service assigns only `/data` and `/backups
 
 Do not commit the production environment file. The checked-in `.env.example` is for local development only.
 
+For the reviewed single-replica production topology, include these exact values in the operator-managed environment file (tighten only after observing dedicated staging traffic):
+
+```dotenv
+TRUST_PROXY_HOPS=2
+RATE_LIMIT_STORE_MAX_BUCKETS=50000
+RATE_LIMIT_STORE_SWEEP_INTERVAL_MS=60000
+RATE_LIMIT_LOGIN_FAILURE_MAX=5
+RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS=900000
+RATE_LIMIT_AUTH_MAX=20
+RATE_LIMIT_AUTH_WINDOW_MS=900000
+RATE_LIMIT_PUBLIC_MAX=120
+RATE_LIMIT_PUBLIC_WINDOW_MS=60000
+RATE_LIMIT_AUTHENTICATED_MAX=300
+RATE_LIMIT_AUTHENTICATED_WINDOW_MS=60000
+RATE_LIMIT_ADMIN_MAX=180
+RATE_LIMIT_ADMIN_WINDOW_MS=60000
+```
+
 ## Local and production isolation
 
 Always give local and production stacks distinct Compose project names. This namespaces their resources: for example, local PostgreSQL uses `panshi-ai4s-camp-local_database-data`, while production uses `panshi-ai4s-camp-prod_database-data`. Production also has separately namespaced upload and backup volumes and therefore cannot resolve the local volumes on the same host.
@@ -56,9 +77,9 @@ Every production command must use the explicit environment file, production proj
 
 ## TLS and proxy boundary
 
-Place an external TLS reverse proxy on the same host in front of the loopback-only Nginx listener. The TLS terminator is the public ingress and should proxy to `127.0.0.1:8080`; it must overwrite client-supplied `X-Forwarded-For` and `X-Forwarded-Proto` values. Nginx forwards `Host`, client-address headers, and a controlled forwarded protocol to the API.
+Place an external TLS reverse proxy on the same host in front of the loopback-only Nginx listener. The TLS terminator is the public ingress and should proxy to `127.0.0.1:8080`; it must overwrite client-supplied `X-Forwarded-For` and `X-Forwarded-Proto` values. Nginx forwards `Host`, client-address headers, and a controlled forwarded protocol to the API. The security invariant is that this `127.0.0.1` listener is reachable only by the trusted TLS proxy and the API is reachable only from the internal Compose network; do not publish either as a direct untrusted ingress.
 
-The API currently does not enable Express `trust proxy`, so forwarded headers are not used as an authorization or client-identity source. Production authentication cookies are marked `Secure` because `NODE_ENV=production`, independent of Express protocol inference. Keep direct access to the loopback listener unavailable to remote clients.
+Set production `TRUST_PROXY_HOPS=2` for exactly this two-proxy chain. Express then selects the client address two hops from the API; prepending a spoofed `X-Forwarded-For` value does not move that trusted boundary. Direct/local execution retains `0` and ignores forwarded client addresses. Production authentication cookies are marked `Secure` because `NODE_ENV=production`, independent of Express protocol inference.
 
 Nginx adds frame denial (`X-Frame-Options` and CSP `frame-ancestors`), `nosniff`, a strict referrer policy, and a same-origin-oriented CSP. HSTS must be configured only at the external TLS terminator, where HTTPS is actually established; it is intentionally absent from this HTTP Nginx layer.
 
@@ -204,7 +225,7 @@ npm run test:deployment:build
 bash tests/backup-restore.test.sh
 ```
 
-Set `TRUST_PROXY=true` only when the production API is reached through the reviewed single Nginx hop; otherwise retain the default `false`. Configure the five `RATE_LIMIT_*_MAX` and `RATE_LIMIT_*_WINDOW_MS` pairs conservatively. The current limiter store is process-local and supports one API replica only; before adding replicas, deploy and test an external shared atomic store. A 429 response must retain structured error JSON and `Retry-After`; private auth families also retain `Cache-Control: private, no-store`.
+Retain the exact proxy and limiter values above unless the deployed topology or measured staging load is formally reviewed. The in-process store performs TTL sweeping and deterministic least-recently-used eviction at its hard cap, but supports one API replica only; before adding replicas, deploy and test an external shared atomic store. Every 429 response, including public and resource routes, must retain structured error JSON, `Cache-Control: no-store`, and `Retry-After`.
 
 Run the browser release gate separately against the exact local test database with all six E2E safety switches and dedicated test credentials: `npm run test:e2e:all`. Its Node orchestrator creates one cryptographically random run token and start timestamp, passes both through launch, then runs visual/source, review workflow, content publishing, student authentication and application submission in order before verifying launch evidence again with the same identity. Never parallelize these configurations because they intentionally reset the same dedicated database. Launch, review and application submission sequentially reuse `var/e2e-uploads` and `var/e2e-temp`; visual/source, content publishing and student authentication use their separate `var/visual-e2e-*`, `var/content-e2e-*` and `var/student-auth-e2e-*` roots. Every API startup uses the shared fail-fast Node lifecycle: the cleanup guarantee is installed before migration begins, failed migration prevents seed/server, and exit cleanup is backed by Playwright global teardown, including review. Every configuration owns a unique `test-results/<suite>` output directory, so later suites cannot remove launch evidence. The final verifier accepts only `test-results/launch/evidence/launch-visual`: its exact 48 PNG names plus one matching marker, regular non-symlink files, valid PNG signature/IHDR, filename-matched viewport dimensions, current run timestamps and no extras. These generated files are not deployment inputs.
 

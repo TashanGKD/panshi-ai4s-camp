@@ -56,6 +56,13 @@ describe('administrator management PostgreSQL truth', () => {
     expect(JSON.stringify(await service.list())).not.toMatch(/passwordHash|session|token/iu)
   })
 
+  it('maps a case-insensitive self-rename collision through repository and service', async () => {
+    await database.db.update(users).set({ displayName: 'Duplicate Admin' }).where(eq(users.id, ids[1]))
+    const repository = createAdminManagementRepository(database.db)
+    expect(await repository.updateOwnDisplayName({ actorId: ids[0], displayName: 'duplicate admin' })).toBe('name_conflict')
+    await expect(createAdminManagementService(repository).updateSelf(await readActor(ids[0]), { currentPassword: password, displayName: 'DUPLICATE ADMIN' })).rejects.toMatchObject({ status: 409, code: 'ADMIN_NAME_CONFLICT' })
+  })
+
   it('rejects self-disable and atomically preserves one active administrator under concurrent disable', async () => {
     await database.pool.query('DELETE FROM users WHERE id = $1', [ids[2]])
     const service = createAdminManagementService(createAdminManagementRepository(database.db))

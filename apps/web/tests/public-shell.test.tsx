@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
+import { PublicShell } from '../src/app/PublicShell'
 
 const siteResponse = {
   apiVersion: 'v1',
@@ -16,8 +17,12 @@ const siteResponse = {
       target: '青年科研人员与学生',
     },
     importantDates: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] },
-    contacts: { items: [] },
-    display: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营' },
+    contacts: { items: [{ label: '报名咨询', value: 'camp@example.org' }] },
+    display: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营', registrationCta: { label: '立即报名', to: '/application' } },
+    features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
+    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+    visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
+    registrationCta: { label: '立即报名', to: '/application' },
   },
 }
 
@@ -40,7 +45,26 @@ describe('public event shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: /磐石.*科学智能/u })).toBeVisible()
     expect(screen.getByLabelText('活动信息')).toHaveTextContent('2026-08-23 至 2026-08-27')
     expect(screen.getByRole('navigation')).toHaveTextContent('实训日程')
-    expect(screen.getByRole('complementary')).toHaveTextContent('重要日期')
+    const sidebar = screen.getByRole('complementary')
+    expect(sidebar).toHaveTextContent('重要日期')
+    expect(sidebar).toHaveTextContent('报名咨询camp@example.org')
+    expect(within(sidebar).getByRole('link', { name: '相关资料' })).toHaveAttribute('href', '/resources')
+    expect(within(sidebar).getByRole('link', { name: '立即报名' })).toHaveAttribute('href', '/application')
+  })
+
+  it.each(['/register', '/login', '/forgot-password', '/account'])('uses the shared aside on auth and account route %s', async (path) => {
+    renderRoute(path)
+    expect(await screen.findByRole('complementary')).toHaveTextContent('报名咨询')
+  })
+
+  it('avoids registration and resources self-links inside the aside', async () => {
+    const registration = render(<MemoryRouter initialEntries={['/application']}><PublicShell site={siteResponse.data as never}><p>报名表</p></PublicShell></MemoryRouter>)
+    const registrationAside = screen.getByRole('complementary')
+    expect(within(registrationAside).queryByRole('link', { name: '立即报名' })).not.toBeInTheDocument()
+    registration.unmount()
+    renderRoute('/resources')
+    const resourcesAside = await screen.findByRole('complementary')
+    expect(within(resourcesAside).queryByRole('link', { name: '相关资料' })).not.toBeInTheDocument()
   })
 
   it('provides the exact seven event routes and marks home current', async () => {

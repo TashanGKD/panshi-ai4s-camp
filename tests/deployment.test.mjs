@@ -59,6 +59,9 @@ assert.deepEqual(new Set(api.volumes), new Set(['uploads-data:/data', 'backups-d
 assert.ok(api.healthcheck?.test, 'effective production API needs a healthcheck')
 assert.equal(api.environment.DATABASE_URL, '${DATABASE_URL:?set DATABASE_URL}')
 assert.equal(api.environment.CORS_ORIGINS, '${CORS_ORIGINS:?set CORS_ORIGINS}')
+for (const key of ['TRUST_PROXY_HOPS', 'RATE_LIMIT_STORE_MAX_BUCKETS', 'RATE_LIMIT_STORE_SWEEP_INTERVAL_MS', 'RATE_LIMIT_LOGIN_FAILURE_MAX', 'RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 'RATE_LIMIT_AUTH_MAX', 'RATE_LIMIT_AUTH_WINDOW_MS', 'RATE_LIMIT_PUBLIC_MAX', 'RATE_LIMIT_PUBLIC_WINDOW_MS', 'RATE_LIMIT_AUTHENTICATED_MAX', 'RATE_LIMIT_AUTHENTICATED_WINDOW_MS', 'RATE_LIMIT_ADMIN_MAX', 'RATE_LIMIT_ADMIN_WINDOW_MS']) {
+  assert.equal(api.environment[key], `\${${key}:?set ${key}}`, `production API must receive ${key}`)
+}
 assert.equal(api.environment.FILE_STORAGE_ROOT, '/data/uploads')
 assert.equal(api.environment.BACKUP_ROOT, '/backups')
 assert.equal(api.environment.APP_VERSION, '${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}')
@@ -176,7 +179,7 @@ assert.match(packageJson.scripts.test, /npm run test:deployment/u)
 assert.doesNotMatch(packageJson.scripts.test, /test:deployment:build/u, 'normal tests must not perform clean installs or Docker checks')
 
 const operations = await readProjectFile('docs/operations.md')
-for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS', 'OPERATIONS_UID', 'OPERATIONS_GID', 'MAINTENANCE_API_HEALTH_URL', 'MAINTENANCE_ACK', 'UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES', 'UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES', 'UPLOAD_ARCHIVE_MAX_ENTRIES', 'UPLOAD_ARCHIVE_MAX_PATH_DEPTH', 'RESTORE_MIN_FREE_BYTES', 'BACKUP_ROOT', 'BACKUP_RETENTION_DAYS', 'BACKUP_PGHOST', 'BACKUP_PGDATABASE', 'BACKUP_PGUSER', 'BACKUP_PGPASSFILE', 'BACKUP_UPLOAD_DIR', 'BACKUP_APP_VERSION', 'RESTORE_PGHOST', 'RESTORE_PGDATABASE', 'RESTORE_PGUSER', 'RESTORE_PGPASSFILE', 'RESTORE_UPLOAD_DIR']) {
+for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS', 'TRUST_PROXY_HOPS', 'RATE_LIMIT_STORE_MAX_BUCKETS', 'RATE_LIMIT_STORE_SWEEP_INTERVAL_MS', 'RATE_LIMIT_LOGIN_FAILURE_MAX', 'RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS', 'RATE_LIMIT_AUTH_MAX', 'RATE_LIMIT_AUTH_WINDOW_MS', 'RATE_LIMIT_PUBLIC_MAX', 'RATE_LIMIT_PUBLIC_WINDOW_MS', 'RATE_LIMIT_AUTHENTICATED_MAX', 'RATE_LIMIT_AUTHENTICATED_WINDOW_MS', 'RATE_LIMIT_ADMIN_MAX', 'RATE_LIMIT_ADMIN_WINDOW_MS', 'OPERATIONS_UID', 'OPERATIONS_GID', 'MAINTENANCE_API_HEALTH_URL', 'MAINTENANCE_ACK', 'UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES', 'UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES', 'UPLOAD_ARCHIVE_MAX_ENTRIES', 'UPLOAD_ARCHIVE_MAX_PATH_DEPTH', 'RESTORE_MIN_FREE_BYTES', 'BACKUP_ROOT', 'BACKUP_RETENTION_DAYS', 'BACKUP_PGHOST', 'BACKUP_PGDATABASE', 'BACKUP_PGUSER', 'BACKUP_PGPASSFILE', 'BACKUP_UPLOAD_DIR', 'BACKUP_APP_VERSION', 'RESTORE_PGHOST', 'RESTORE_PGDATABASE', 'RESTORE_PGUSER', 'RESTORE_PGPASSFILE', 'RESTORE_UPLOAD_DIR']) {
   assert.match(operations, new RegExp(variable, 'u'), `operations guide must document ${variable}`)
 }
 const productionPrefix = 'docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml'
@@ -189,8 +192,11 @@ for (const command of composeCommands) {
   )
 }
 assert.match(operations, /external TLS reverse proxy/iu)
+assert.match(operations, /TRUST_PROXY_HOPS=2/u)
+assert.match(operations, /127\.0\.0\.1[\s\S]+trusted TLS proxy/iu)
+assert.match(operations, /429[\s\S]+Cache-Control: no-store[\s\S]+Retry-After/iu)
 assert.match(operations, /Secure/iu)
-assert.match(operations, /trust proxy/iu)
+assert.match(operations, /TRUST_PROXY_HOPS/u)
 assert.match(operations, /HSTS/iu)
 assert.match(operations, /5 MiB[^\n]+64 KiB[^\n]+6 MiB/iu)
 assert.match(operations, /node apps\/api\/dist\/src\/cli\/create-admin\.js --phone/u)

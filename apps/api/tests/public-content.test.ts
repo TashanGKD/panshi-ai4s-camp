@@ -26,7 +26,7 @@ const publishedSiteRows: PublishedRow[] = [
   { key: 'features', payload: { items: [{ title: '真实问题', description: '围绕真实科研问题实践' }] }, version: 2 },
   { key: 'organizations', payload: { items: [{ role: '承办单位', name: '测试组织' }] }, version: 3 },
   { key: 'importantDates', payload: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] }, version: 1 },
-  { key: 'contacts', payload: { items: [] }, version: 1 },
+  { key: 'contacts', payload: { items: [{ label: '报名咨询', value: 'camp@example.org' }] }, version: 1 },
   { key: 'display', payload: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营' }, version: 1 },
   { key: 'schedule', payload: { days: [
     { date: '2026-08-23', label: '第一天', theme: '主题一', sessions: [] },
@@ -137,6 +137,8 @@ describe('public published content', () => {
     expect(site.data.scheduleOverview).toEqual([{ date: '2026-08-23', label: '第一天', theme: '科研智能体' }])
     expect(site.data.visibleNavigation).toEqual(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'])
     expect(site.data.registrationCta).toEqual({ label: '在线注册', to: '/application' })
+    expect(site.data.importantDates).toEqual({ items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] })
+    expect(site.data.contacts).toEqual({ items: [{ label: '报名咨询', value: 'camp@example.org' }] })
 
     expect(scheduleResponse.status).toBe(200)
     expect(scheduleResponse.body).toEqual({

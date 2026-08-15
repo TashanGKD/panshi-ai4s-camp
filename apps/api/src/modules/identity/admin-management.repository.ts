@@ -26,12 +26,20 @@ export const createAdminManagementRepository = (db: NodePgDatabase<typeof schema
   return {
     listAdmins: async (): Promise<AdminRecord[]> => db.select(adminSelection).from(users).where(eq(users.role, 'admin')).orderBy(asc(users.createdAt), asc(users.id)),
     listStudents: async (search?: string): Promise<AdminRecord[]> => db.select(adminSelection).from(users).where(and(eq(users.role, 'user'), search ? or(ilike(users.displayName, `%${search}%`), ilike(users.phoneNormalized, `%${search}%`)) : undefined)).orderBy(desc(users.createdAt), desc(users.id)).limit(200),
-    updateOwnDisplayName: async (input: { actorId: string, displayName: string }) => db.transaction(async (transaction) => {
-      const [updated] = await transaction.update(users).set({ displayName: input.displayName }).where(and(eq(users.id, input.actorId), eq(users.role, 'admin'), isNull(users.disabledAt))).returning(adminSelection)
-      if (!updated) return 'actor_invalid' as const
-      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.profile_updated', entityType: 'user', entityId: input.actorId, metadata: { changedFields: ['displayName'] } })
-      return updated
-    }),
+    updateOwnDisplayName: async (input: { actorId: string, displayName: string }) => {
+      try {
+        return await db.transaction(async (transaction) => {
+          const [updated] = await transaction.update(users).set({ displayName: input.displayName }).where(and(eq(users.id, input.actorId), eq(users.role, 'admin'), isNull(users.disabledAt))).returning(adminSelection)
+          if (!updated) return 'actor_invalid' as const
+          await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.profile_updated', entityType: 'user', entityId: input.actorId, metadata: { changedFields: ['displayName'] } })
+          return updated
+        })
+      } catch (error) {
+        const candidate = databaseError(error)
+        if (candidate.code === '23505' && candidate.constraint === 'users_admin_display_name_unique') return 'name_conflict' as const
+        throw error
+      }
+    },
     changeOwnPassword: async (input: { actorId: string, expectedPasswordHash: string, passwordHash: string, changedAt: Date }) => db.transaction(async (transaction) => {
       const [actor] = await transaction.select({ id: users.id, passwordHash: users.passwordHash, disabledAt: users.disabledAt }).from(users).where(eq(users.id, input.actorId)).for('update')
       if (!actor || actor.disabledAt || actor.passwordHash !== input.expectedPasswordHash) return 'actor_invalid' as const

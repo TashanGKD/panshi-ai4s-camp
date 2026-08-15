@@ -290,7 +290,9 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
       jsonLimitBytes: env.JSON_BODY_LIMIT_BYTES,
       secureCookies: env.SECURE_COOKIES,
       sessionTtlSeconds: env.SESSION_TTL_SECONDS,
-      trustProxy: env.TRUST_PROXY,
+      trustProxyHops: env.TRUST_PROXY_HOPS,
+      rateLimitStoreMaxBuckets: env.RATE_LIMIT_STORE_MAX_BUCKETS,
+      rateLimitStoreSweepIntervalMs: env.RATE_LIMIT_STORE_SWEEP_INTERVAL_MS,
       rateLimits: {
         login_failure: { max: env.RATE_LIMIT_LOGIN_FAILURE_MAX, windowMs: env.RATE_LIMIT_LOGIN_FAILURE_WINDOW_MS },
         auth_verification: { max: env.RATE_LIMIT_AUTH_MAX, windowMs: env.RATE_LIMIT_AUTH_WINDOW_MS },

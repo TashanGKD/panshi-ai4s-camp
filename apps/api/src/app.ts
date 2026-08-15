@@ -32,7 +32,7 @@ import { createAdminUsersRouter, createMyAccountRouter } from './modules/identit
 import { createAuditRouter } from './modules/audit/audit.routes.js'
 import type { AdminManagementService } from './modules/identity/admin-management.service.js'
 import { createAdminHealthRouter, type AdminHealthService } from './modules/health/admin-health.routes.js'
-import { createRateLimiter, createRateLimitMiddleware, defaultRateLimits, type RateLimiter, type RateLimitCategory, type RateLimitPolicy, type RateLimitStore } from './middleware/rate-limit.js'
+import { createRateLimiter, createRateLimitMiddleware, defaultRateLimits, InMemoryRateLimitStore, type RateLimiter, type RateLimitCategory, type RateLimitPolicy, type RateLimitStore } from './middleware/rate-limit.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -48,7 +48,9 @@ export type ApiRuntimeConfig = {
   fileUploadPerUserConcurrency?: number
   fileUploadPerUserWindowMax?: number
   fileUploadPerUserWindowMs?: number
-  trustProxy?: boolean
+  trustProxyHops?: number
+  rateLimitStoreMaxBuckets?: number
+  rateLimitStoreSweepIntervalMs?: number
   rateLimits?: Partial<Record<RateLimitCategory, RateLimitPolicy>>
 }
 
@@ -149,10 +151,11 @@ export const createApp = ({
 }: AppDependencies) => {
   const app = express()
   const sessionTtlSeconds = config.sessionTtlSeconds ?? 28_800
-  const rateLimiter: RateLimiter = createRateLimiter({ ...(rateLimitStore ? { store: rateLimitStore } : {}), ...(rateLimitNow ? { now: rateLimitNow } : {}) })
+  const limiterNow = rateLimitNow ?? Date.now
+  const rateLimiter: RateLimiter = createRateLimiter({ store: rateLimitStore ?? new InMemoryRateLimitStore({ now: limiterNow, maxBuckets: config.rateLimitStoreMaxBuckets, sweepIntervalMs: config.rateLimitStoreSweepIntervalMs }), now: limiterNow })
   const rateLimits = { ...defaultRateLimits, ...config.rateLimits }
 
-  app.set('trust proxy', config.trustProxy ? 1 : false)
+  app.set('trust proxy', config.trustProxyHops && config.trustProxyHops > 0 ? config.trustProxyHops : false)
   app.use(requestId)
   app.use(['/api/v1/me', '/api/v1/files', '/api/v1/auth', '/api/v1/admin'], privateNoStore)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))

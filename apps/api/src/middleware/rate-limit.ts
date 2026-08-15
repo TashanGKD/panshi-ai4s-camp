@@ -14,8 +14,36 @@ export interface RateLimitStore {
 
 export class InMemoryRateLimitStore implements RateLimitStore {
   private readonly buckets = new Map<string, Bucket>()
-  get(key: string) { return this.buckets.get(key) }
-  set(key: string, value: Bucket) { this.buckets.set(key, value) }
+  private nextSweepAt: number
+  constructor(private readonly options: { now?: () => number, maxBuckets?: number, sweepIntervalMs?: number } = {}) {
+    this.nextSweepAt = this.now() + this.sweepIntervalMs
+  }
+  private get now() { return this.options.now ?? Date.now }
+  private get maxBuckets() { return this.options.maxBuckets ?? 50_000 }
+  private get sweepIntervalMs() { return this.options.sweepIntervalMs ?? 60_000 }
+  private sweepExpired(currentTime: number) {
+    for (const [key, bucket] of this.buckets) if (bucket.resetAt <= currentTime) this.buckets.delete(key)
+    this.nextSweepAt = currentTime + this.sweepIntervalMs
+  }
+  get size() { return this.buckets.size }
+  get(key: string) {
+    const currentTime = this.now()
+    if (currentTime >= this.nextSweepAt) this.sweepExpired(currentTime)
+    const value = this.buckets.get(key)
+    if (value) { this.buckets.delete(key); this.buckets.set(key, value) }
+    return value
+  }
+  set(key: string, value: Bucket) {
+    const currentTime = this.now()
+    if (currentTime >= this.nextSweepAt || (!this.buckets.has(key) && this.buckets.size >= this.maxBuckets)) this.sweepExpired(currentTime)
+    if (this.buckets.has(key)) this.buckets.delete(key)
+    while (this.buckets.size >= this.maxBuckets) {
+      const oldest = this.buckets.keys().next().value as string | undefined
+      if (oldest === undefined) break
+      this.buckets.delete(oldest)
+    }
+    this.buckets.set(key, value)
+  }
   delete(key: string) { this.buckets.delete(key) }
 }
 
@@ -63,6 +91,7 @@ export const createRateLimitMiddleware = (limiter: RateLimiter, policies: Record
   const result = limiter.consume(category, actor, policies[category])
   if (!result.allowed) {
     response.setHeader('Retry-After', String(result.retryAfterSeconds))
+    response.setHeader('Cache-Control', 'no-store')
     next(new HttpError(429, 'RATE_LIMITED', '请求过于频繁，请稍后重试'))
     return
   }

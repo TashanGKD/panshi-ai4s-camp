@@ -173,4 +173,17 @@ describe('administrator route guard', () => {
     await waitFor(() => expect(logout).toHaveBeenCalledOnce())
     expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
   })
+
+  it('shows the stable duplicate-name conflict during self rename', async () => {
+    const updateSelf = vi.fn(async () => { throw new AdminApiError(409, '管理员名称已存在', 'ADMIN_NAME_CONFLICT') })
+    renderApp(client({ updateSelf }), '/account')
+
+    await screen.findByRole('heading', { name: '我的账号' })
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'duplicate admin' } })
+    fireEvent.change(screen.getAllByLabelText('当前密码')[0]!, { target: { value: 'CurrentAdmin!2026' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存名称' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('管理员名称已存在')
+    expect(updateSelf).toHaveBeenCalledWith({ displayName: 'duplicate admin', currentPassword: 'CurrentAdmin!2026' })
+  })
 })

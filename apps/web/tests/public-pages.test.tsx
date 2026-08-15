@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
@@ -144,11 +144,13 @@ describe('API-driven public pages', () => {
 
     renderRoute('/contact')
 
-    expect(await screen.findByText('测试联系人')).toBeVisible()
-    expect(screen.getByText('课程咨询')).toBeVisible()
-    expect(screen.getByRole('link', { name: '+8613800138000' })).toHaveAttribute('href', 'tel:+8613800138000')
-    expect(screen.getByRole('link', { name: 'test@example.com' })).toHaveAttribute('href', 'mailto:test@example.com')
-    expect(screen.getByText('工作日回复')).toBeVisible()
+    const contactName = (await screen.findAllByText('测试联系人')).find((element) => element.closest('main'))
+    expect(contactName).toBeVisible()
+    const pageContent = within(contactName!.closest('main')!)
+    expect(pageContent.getByText('课程咨询')).toBeVisible()
+    expect(pageContent.getByRole('link', { name: '+8613800138000' })).toHaveAttribute('href', 'tel:+8613800138000')
+    expect(pageContent.getByRole('link', { name: 'test@example.com' })).toHaveAttribute('href', 'mailto:test@example.com')
+    expect(pageContent.getByText('工作日回复')).toBeVisible()
   })
 
   it('does not render ResourcesPage until the shared site request succeeds', async () => {

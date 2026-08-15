@@ -63,6 +63,10 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, nex
   }
 
   response.setHeader('X-Request-Id', requestId)
+  if (status === 429) {
+    if (!String(response.getHeader('Cache-Control') ?? '').includes('no-store')) response.setHeader('Cache-Control', 'no-store')
+    if (!response.hasHeader('Retry-After')) response.setHeader('Retry-After', '60')
+  }
   response.status(status).json(ApiErrorSchema.parse({
     error: { code, message, requestId, ...(error instanceof HttpError && error.details ? { details: error.details } : {}) },
   }))

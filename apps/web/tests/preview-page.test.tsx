@@ -64,7 +64,9 @@ describe('protected public Web draft preview', () => {
     ['display', { series: '草稿系列', footer: '草稿页脚' }, '草稿展示设置'],
   ] as const)('renders %s with its canonical public module renderer', async (key, payload, expected) => {
     render(<MemoryRouter><PreviewPage site={site} moduleKey={key} client={{ getDraftPreview: async () => preview(key, payload) }} /></MemoryRouter>)
-    expect(await screen.findByText(expected)).toBeVisible()
+    const matches = await screen.findAllByText(expected)
+    const previewContent = matches.find((element) => element.closest('main')) ?? (key === 'basic' ? matches[0] : undefined)
+    expect(previewContent).toBeVisible()
   })
 
   it.each([401, 403] as const)('shows a login/forbidden state for preview status %i without exposing draft', async (status) => {

@@ -6,6 +6,8 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .skip-link:focus { width: auto; height: auto; overflow: visible; padding: 10px 14px; clip-path: none; border: 2px solid var(--panshi-color-primary); border-radius: var(--panshi-radius-md); outline: 2px solid var(--panshi-color-light); outline-offset: 2px; }
 .public-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; align-items: start; padding-bottom: 96px; }
 .public-sidebar { display: grid; gap: 18px; padding-top: 44px; }
+.sidebar-link { color: var(--panshi-color-primary); font-weight: 700; }
+.sidebar-cta { justify-content: center; width: 100%; }
 .feature-list { display: grid; gap: 14px; }
 .contact-copy { margin: 0; color: var(--panshi-color-gray-dark); font-size: 13.5px; line-height: 1.8; }
 .contact-list { display: grid; gap: 12px; margin: 0; }

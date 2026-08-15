@@ -73,7 +73,7 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 后台按基本信息、实训特色、组织单位、重要日期、实训日程与师资、住宿交通、联系方式和展示设置提供专用结构化表单。多段简介、每位联系人的多种联系方式、每节课程的多条内容要点及其他集合项均可独立编辑，并通过明确按钮添加、删除和排序；排序节点使用仅存在于前端的稳定 key，不写入严格业务 schema。后台不提供任意 JSON 编辑入口。富文本在服务端草稿读取、预览响应、编辑器 DOM 写入及保存前均使用严格白名单清洗。未保存编辑会禁用预览和发布；保存成功响应成为新的 clean baseline。保存、发布和回退共享同步操作锁，异步加载及写回按模块 generation 隔离。保存必须提交加载时的 `expectedRevision`，冲突返回 `CONTENT_CONFLICT`；发布错误会关联到具体字段。公共 Web 的 `/preview/:module` 使用管理员 HttpOnly Cookie 读取受保护草稿，并通过与正式页面相同的模块渲染组件和 `PublicShell` 展示；未登录或无权限时只显示登录／禁止状态。
 
-展示设置新增可选 `homeSectionOrder`，仅接受不重复的 `intro`、`target`、`features`、`organizations`，后台可访问地排序并随草稿保存。当前公共首页聚合尚不包含实训特色和组织单位，Task 9 不扩大该接口边界；公开页消费点留待首页聚合完整后接入。
+展示设置的 `homeSectionOrder` 仅接受不重复的 `intro`、`target`、`features`、`organizations`，后台可访问地排序并随草稿保存。公共内容接口聚合已发布的实训特色和组织单位，首页按该顺序渲染，并为旧版本缺失字段提供兼容默认值。
 
 工作台通过 `GET /api/v1/admin/summary` 从 PostgreSQL 汇总报名总量与状态、待审核数量、临近重要日期、未发布草稿和最近操作；临近日期的“今天”按 `Asia/Shanghai` 业务日期计算。空库只显示零值与空状态，不填充演示数字；最近操作不返回 audit metadata 或内容正文。相关资料由独立后台上传、配置访问范围并发布。
 
@@ -168,7 +168,7 @@ CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何�
 
 `SESSION_TTL_SECONDS` 默认 `28800` 秒（8 小时），允许 300–604800 秒。登录事务锁定对应用户行，在同一事务内撤销旧会话、写入 replacement session 并追加成功登录审计；同一用户并发登录时最后提交的轮换获胜，最终仅一个返回 token 有效，审计失败会整体回滚。token 使用 32 字节安全随机数，数据库只保存 SHA-256 摘要，审计 metadata 不含 token 或密码。`panshi_session` Cookie 设置 `HttpOnly; SameSite=Lax; Path=/`，仅 `NODE_ENV=production` 增加 `Secure`；退出对缺失、未知、过期、已撤销或已轮换 token 都幂等返回 204，并用匹配属性清除 Cookie。只在真实 identity 与 auth transaction 依赖同时存在时挂载身份路由；生产服务器始终提供两者。
 
-写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。API 按登录失败、认证／验证码、公开、已登录和管理后台五类独立限流；登录失败键由客户端 IP 与规范化账号的 SHA-256 摘要组合，成功登录会重置对应失败桶。`TRUST_PROXY=false` 是安全默认；只有生产 Nginx 与 API 之间确认为单跳时才设置 `TRUST_PROXY=true`。当前内存存储仅适用于单 API 副本，多副本部署前必须替换为共享原子限流存储。
+写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。API 按登录失败、认证／验证码、公开、已登录和管理后台五类独立限流；登录失败键由客户端 IP 与规范化账号的 SHA-256 摘要组合，成功登录会重置对应失败桶。`TRUST_PROXY_HOPS=0` 是安全默认；经审核的生产链路为外部 TLS proxy → Nginx → API，因此使用精确值 `2`，且 loopback Nginx 入口只能由受信 TLS proxy 到达。内存存储有 TTL 清扫和确定性容量上限，但仅适用于单 API 副本；多副本部署前必须替换为共享原子限流存储。
 
 ## 学员手机号账号
 

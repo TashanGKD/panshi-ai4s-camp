@@ -43,7 +43,9 @@ export const createAdminManagementService = (repository: AdminManagementReposito
       await reauthenticate(actor, input.currentPassword)
       const displayName = input.displayName.trim()
       if (!displayName || displayName.length > 100) throw new AdminManagementError(422, 'ADMIN_NAME_INVALID', '管理员名称无效')
-      return { apiVersion: 'v1' as const, data: { administrator: presentForActor(ensureActor(await repository.updateOwnDisplayName({ actorId: actor.id, displayName })), actor.id) } }
+      const result = ensureActor(await repository.updateOwnDisplayName({ actorId: actor.id, displayName }))
+      if (result === 'name_conflict') throw new AdminManagementError(409, 'ADMIN_NAME_CONFLICT', '管理员名称已存在')
+      return { apiVersion: 'v1' as const, data: { administrator: presentForActor(result, actor.id) } }
     },
     changeOwnPassword: async (actor: IdentityUser, input: { currentPassword: string, newPassword: string }) => {
       await reauthenticate(actor, input.currentPassword)

@@ -360,8 +360,10 @@ async function captureUsablePage(page: Page, url: string, name: string, expected
     expect(hit, `${name} action ${index} center hit-test`).toBe(true)
   }
   await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = 'auto'
     for (const scroller of document.querySelectorAll<HTMLElement>('.table-scroll')) scroller.scrollLeft = 0
     scrollTo(0, 0)
   })
+  await expect.poll(() => page.evaluate(() => scrollY), { message: `${name} evidence starts at page top` }).toBe(0)
   await page.screenshot({ path: resolve(evidenceDirectory, `${name}.png`), fullPage: false, animations: 'disabled' })
 }

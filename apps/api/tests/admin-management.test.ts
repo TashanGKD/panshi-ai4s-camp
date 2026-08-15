@@ -3,6 +3,7 @@ import request from 'supertest'
 import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { createAuditService } from '../src/modules/audit/audit.service.js'
+import { AdminManagementError } from '../src/modules/identity/admin-management.service.js'
 
 const token = 'admin-token'
 const tokenHash = createHash('sha256').update(token).digest('hex')
@@ -73,6 +74,14 @@ describe('administrator management and audit routes', () => {
     await request(app).post('/api/v1/admin/users/students/not-a-uuid/status').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example').send({ currentPassword: 'Current!2026', disabled: true }).expect(422)
     await request(app).post('/api/v1/me/account/password').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example').send({ currentPassword: 'Current!2026', newPassword: 'Replacement!2026' }).expect(200)
     expect(adminManagementService.changeOwnPassword).toHaveBeenCalled()
+  })
+
+  it('returns the stable conflict contract for a duplicate self rename', async () => {
+    adminManagementService.updateSelf.mockRejectedValueOnce(new AdminManagementError(409, 'ADMIN_NAME_CONFLICT', '管理员名称已存在'))
+    const response = await request(makeApp()).patch('/api/v1/admin/users/me').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example')
+      .send({ displayName: 'duplicate admin', currentPassword: 'Current!2026' }).expect(409)
+    expect(response.body.error.code).toBe('ADMIN_NAME_CONFLICT')
+    expect(response.headers['cache-control']).toBe('private, no-store')
   })
 
   it('provides filtered read-only audit access without mutation routes', async () => {

@@ -369,6 +369,7 @@ describe('initial PostgreSQL schema', () => {
       'audit_logs_append_only',
       'content_versions_immutable',
       'registration_form_versions_immutable',
+      'users_preserve_last_active_administrator',
     ])
   })
 
@@ -644,6 +645,7 @@ describe('initial PostgreSQL schema', () => {
       '0015_application_status_history_immutability.sql',
       '0016_resources_publication.sql',
       '0017_resource_revision.sql',
+      '0018_admin_management_integrity.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

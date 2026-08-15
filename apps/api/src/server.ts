@@ -23,6 +23,8 @@ import { createResourceRepository } from './modules/resources/resource.repositor
 import { createResourceService } from './modules/resources/resource.service.js'
 import { createStatisticsRepository } from './modules/statistics/statistics.repository.js'
 import { createStatisticsService } from './modules/statistics/statistics.service.js'
+import { createAdminManagementRepository } from './modules/identity/admin-management.repository.js'
+import { createAdminManagementService } from './modules/identity/admin-management.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -250,6 +252,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     })
     : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
+  const adminManagementService = createAdminManagementService(createAdminManagementRepository(database.db))
   const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
   const applicationService = createApplicationService(createApplicationRepository(database.db))
   const fileService = createFileService(
@@ -271,6 +274,8 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     resourceService: createResourceService(createResourceRepository(database.db), fileService),
     statisticsService: createStatisticsService(createStatisticsRepository(database.db)),
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
+    adminManagementService,
+    auditQueryService: adminManagementService,
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

@@ -40,6 +40,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   bulkTransitionApplications: async () => ({ data: { results: [] } }), exportApplications: async () => new Blob(),
   listResources: async () => ({ data: { resources: [] } }), previewResource: async () => { throw new Error('unused') }, uploadResourceFile: async () => { throw new Error('unused') },
   createResource: async () => { throw new Error('unused') }, updateResource: async () => { throw new Error('unused') }, publishResource: async () => { throw new Error('unused') },
+  listAdministrators: async () => ({ data: { administrators: [] } }), createAdministrator: async () => { throw new Error('unused') }, disableAdministrator: async () => { throw new Error('unused') }, resetAdministratorPassword: async () => { throw new Error('unused') }, listAuditLogs: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }), getAuditLog: async () => { throw new Error('unused') },
   ...overrides,
 })
 

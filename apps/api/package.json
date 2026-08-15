@@ -23,6 +23,7 @@
     "test:integration:files": "node tests/require-files-integration-env.mjs && vitest run tests/files.integration.test.ts tests/files-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:application": "node tests/require-registration-integration-env.mjs && vitest run tests/application.integration.test.ts tests/review-workflow.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:resources": "node tests/require-registration-integration-env.mjs && vitest run tests/resources-statistics.integration.test.ts --maxWorkers=1 --no-file-parallelism",
+    "test:integration:admin-management": "node tests/require-registration-integration-env.mjs && vitest run tests/admin-management.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {

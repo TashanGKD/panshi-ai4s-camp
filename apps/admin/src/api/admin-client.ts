@@ -91,10 +91,18 @@ export type AdminClient = {
   createResource: (input: AdminResourceInput, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
   updateResource: (id: string, input: AdminResourceInput, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
   publishResource: (id: string, active: boolean, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
+  listAdministrators: (signal?: AbortSignal) => Promise<{ data: { administrators: Administrator[] } }>
+  createAdministrator: (input: { displayName: string, phone: string, password: string, currentPassword: string }) => Promise<{ data: { administrator: Administrator } }>
+  disableAdministrator: (id: string, input: { currentPassword: string }) => Promise<{ data: { administrator: Administrator } }>
+  resetAdministratorPassword: (id: string, input: { currentPassword: string, newPassword: string }) => Promise<{ data: { administrator: Administrator } }>
+  listAuditLogs: (query: URLSearchParams, signal?: AbortSignal) => Promise<{ data: { items: AuditLogItem[], total: number, page: number, pageSize: number } }>
+  getAuditLog: (id: string, signal?: AbortSignal) => Promise<{ data: { item: AuditLogItem } }>
 }
 
 export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean, revision: number }
 export type AdminResourceInput = Omit<AdminResource, 'id' | 'active' | 'revision'>
+export type Administrator = { id: string, displayName: string, phone: string, disabledAt: string | null, createdAt: string, isCurrent: boolean }
+export type AuditLogItem = { id: string, actor: { id: string, displayName: string | null } | null, action: string, entityType: string, entityId: string | null, metadata: Record<string, unknown>, createdAt: string }
 
 export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
 export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, string | string[]>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null, changedBy: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
@@ -165,6 +173,12 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     createResource: async (input, expectedRevision) => (await send('/api/v1/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, expectedRevision }) })).json(),
     updateResource: async (id, input, expectedRevision) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, expectedRevision }) })).json(),
     publishResource: async (id, active, expectedRevision) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}/${active ? 'publish' : 'unpublish'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }) })).json(),
+    listAdministrators: async (signal) => (await send('/api/v1/admin/users', { signal })).json(),
+    createAdministrator: async (input) => (await send('/api/v1/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    disableAdministrator: async (id, input) => (await send(`/api/v1/admin/users/${encodeURIComponent(id)}/disable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    resetAdministratorPassword: async (id, input) => (await send(`/api/v1/admin/users/${encodeURIComponent(id)}/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    listAuditLogs: async (query, signal) => (await send(`/api/v1/admin/audit-logs?${query.toString()}`, { signal })).json(),
+    getAuditLog: async (id, signal) => (await send(`/api/v1/admin/audit-logs/${encodeURIComponent(id)}`, { signal })).json(),
   }
 }
 

@@ -2,6 +2,7 @@ import type { JsonObject } from '@panshi/contracts'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { auditLogs } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { sanitizeAuditMetadata } from './audit-policy.js'
 
 export type AuditEntry = {
   actorUserId: string | null
@@ -17,6 +18,6 @@ export type AuditRepository = {
 
 export const createAuditRepository = (db: NodePgDatabase<typeof schema>): AuditRepository => ({
   append: async (entry) => {
-    await db.insert(auditLogs).values(entry)
+    await db.insert(auditLogs).values({ ...entry, metadata: sanitizeAuditMetadata(entry.metadata) as JsonObject })
   },
 })

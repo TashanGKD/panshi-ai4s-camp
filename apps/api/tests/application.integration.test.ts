@@ -49,6 +49,32 @@ describe('application PostgreSQL workflow', () => {
     return { service, mine, file: file! }
   }
 
+  const publishFormVersion = async (nextForm: RegistrationForm) => {
+    const [published] = await database.db.insert(registrationFormVersions).values({
+      version: 2, schema: nextForm as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date(),
+    }).returning({ id: registrationFormVersions.id })
+    await database.db.update(registrationFormDrafts).set({
+      baseVersionId: published!.id, schema: nextForm,
+    }).where(eq(registrationFormDrafts.id, '00000000-0000-4000-8000-000000000010'))
+    return published!
+  }
+
+  const prepareDraftWithPdf = async (sizeBytes: number) => {
+    const repository = createApplicationRepository(database.db, { now: () => new Date('2026-08-15T00:00:00Z') })
+    const service = createApplicationService(repository)
+    let mine = await service.getMine(student)
+    const [file] = await database.db.insert(files).values({
+      storageKey: `aa/bb/${crypto.randomUUID()}`, originalName: 'untrusted-name.docx', mimeType: 'application/pdf', sizeBytes,
+      sha256: 'f'.repeat(64), uploadedBy: student.id, ownerUserId: student.id, purpose: 'registration_attachment',
+      visibility: 'owner_admin', attachmentSlot: slotId,
+    }).returning({ id: files.id })
+    mine = await service.saveDraft(student, {
+      expectedRevision: mine.data.application.revision, profile, answers: { [questionId]: '附件规则迁移测试' },
+      attachments: [{ slotId, fileId: file!.id }],
+    })
+    return { repository, service, mine, file: file! }
+  }
+
   const waitForBlockedTransactions = async (minimum: number) => {
     const deadline = Date.now() + 2_000
     while (Date.now() < deadline) {
@@ -174,6 +200,73 @@ describe('application PostgreSQL workflow', () => {
       open: async () => ({ [Symbol.asyncIterator]: async function* () { yield Buffer.from('pdf') } }) as never,
       remove: async () => { throw new Error('unused') },
     }).openForDownload(file!.id, student)).resolves.toMatchObject({ record: { id: file!.id, ownerUserId: student.id } })
+  })
+
+  it('revalidates a migrated attachment by validated MIME when v2 changes the same slot from PDF to DOCX', async () => {
+    const { service, file } = await prepareDraftWithPdf(100)
+    const v2: RegistrationForm = { ...form, attachments: [{ ...form.attachments[0]!, allowedExtensions: ['docx'] }] }
+    await publishFormVersion(v2)
+    const migrated = await service.getMine(student)
+
+    await expect(service.submit(student, { expectedRevision: migrated.data.application.revision })).rejects.toMatchObject({
+      code: 'APPLICATION_ATTACHMENT_INVALID',
+      fields: [{ path: `attachments.${slotId}`, message: expect.stringMatching(/DOCX/u) }],
+    })
+    await expect(database.db.select().from(files).where(eq(files.id, file.id))).resolves.toEqual([
+      expect.objectContaining({ id: file.id, mimeType: 'application/pdf', lifecycleState: 'active', deletedAt: null }),
+    ])
+  })
+
+  it('revalidates a migrated attachment size when v2 tightens the same slot limit', async () => {
+    const { service, file } = await prepareDraftWithPdf(900_000)
+    const v2: RegistrationForm = { ...form, attachments: [{ ...form.attachments[0]!, maxSizeBytes: 100_000 }] }
+    await publishFormVersion(v2)
+    const migrated = await service.getMine(student)
+
+    await expect(service.submit(student, { expectedRevision: migrated.data.application.revision })).rejects.toMatchObject({
+      code: 'APPLICATION_ATTACHMENT_INVALID',
+      fields: [{ path: `attachments.${slotId}`, message: expect.stringMatching(/大小/u) }],
+    })
+    await expect(database.db.select().from(files).where(eq(files.id, file.id))).resolves.toEqual([
+      expect.objectContaining({ id: file.id, sizeBytes: 900_000, lifecycleState: 'active', deletedAt: null }),
+    ])
+  })
+
+  it('returns a recoverable conflict and migrates the draft if v2 is published after submit preflight', async () => {
+    const { repository, mine } = await prepareDraftWithPdf(100)
+    let enterSubmit!: () => void
+    let releaseSubmit!: () => void
+    const enteredSubmit = new Promise<void>((resolve) => { enterSubmit = resolve })
+    const releasedSubmit = new Promise<void>((resolve) => { releaseSubmit = resolve })
+    const service = createApplicationService({
+      ...repository,
+      submit: async (input) => {
+        enterSubmit()
+        await releasedSubmit
+        return repository.submit(input)
+      },
+    })
+    const submission = service.submit(student, { expectedRevision: mine.data.application.revision })
+    await enteredSubmit
+    const v2: RegistrationForm = { ...form, questions: [{ ...form.questions[0]!, label: '新版问题' }] }
+    const published = await publishFormVersion(v2)
+    releaseSubmit()
+
+    await expect(submission).rejects.toMatchObject({ code: 'APPLICATION_FORM_VERSION_CHANGED', status: 409 })
+    await expect(service.getMine(student)).resolves.toMatchObject({
+      data: { application: { formVersionId: published.id, formVersion: 2, status: 'draft' } },
+    })
+  })
+
+  it('submits a compliant migrated attachment under the current published v2 rules', async () => {
+    const { service } = await prepareDraftWithPdf(90_000)
+    const v2: RegistrationForm = { ...form, attachments: [{ ...form.attachments[0]!, allowedExtensions: ['pdf'], maxSizeBytes: 100_000 }] }
+    const published = await publishFormVersion(v2)
+    const migrated = await service.getMine(student)
+
+    await expect(service.submit(student, { expectedRevision: migrated.data.application.revision })).resolves.toMatchObject({ data: { status: 'submitted' } })
+    const [version] = await database.db.select({ snapshot: applicationVersions.snapshot }).from(applicationVersions)
+    expect(version?.snapshot).toMatchObject({ formVersionId: published.id })
   })
 
   it('serializes submit before a concurrent delete so the submitted attachment cannot disappear', async () => {

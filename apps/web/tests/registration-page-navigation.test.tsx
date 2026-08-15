@@ -15,12 +15,12 @@ vi.mock('../src/api/application-client', () => ({
   },
 }))
 
-const application = {
+const application: MyApplicationResponse['data']['application'] = {
   id: '10000000-0000-4000-8000-000000000001', status: 'draft', revision: 0, locked: false,
   formVersionId: '30000000-0000-4000-8000-000000000001', formVersion: 1, form: DEFAULT_REGISTRATION_FORM,
   profile: { name: '张三', phone: '+8613800138000', email: '', organization: '', department: '', identityType: '', educationStage: '', majorResearchDirection: '' },
   answers: {}, attachments: [], unlinkedAttachments: [], retiredAnswerIds: [], submittedAt: null, updatedAt: '2026-08-15T00:00:00.000Z',
-} satisfies MyApplicationResponse['data']['application']
+}
 
 const response = (value = application): MyApplicationResponse => ({
   apiVersion: 'v1', data: { application: value, timeline: [], supplementRequest: null, accessibleResources: [] },
@@ -119,5 +119,27 @@ describe('registration route navigation guard', () => {
     expect(api.getMine).toHaveBeenCalledTimes(1)
     expect(router.state.location.pathname).toBe('/account')
     expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the current slot error after submit and keeps the migrated attachment replaceable', async () => {
+    const slot = DEFAULT_REGISTRATION_FORM.attachments[0]!
+    api.getMine.mockResolvedValue(response({
+      ...application,
+      attachments: [{
+        id: '50000000-0000-4000-8000-000000000001', slotId: slot.id, originalName: 'resume.pdf',
+        mimeType: 'application/pdf', sizeBytes: 900_000, downloadUrl: '/api/v1/files/50000000-0000-4000-8000-000000000001/download',
+      }],
+    }))
+    const { ApplicationApiError } = await import('../src/api/application-client')
+    api.submit.mockRejectedValue(new ApplicationApiError(422, 'APPLICATION_ATTACHMENT_INVALID', '附件不符合当前报名表要求', {
+      fields: [{ path: `attachments.${slot.id}`, message: '文件大小超过当前限制（最大 100000 字节）' }],
+    }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '正式提交' }))
+    expect(await screen.findByText('文件大小超过当前限制（最大 100000 字节）')).toHaveAttribute('role', 'alert')
+    expect(screen.getByRole('button', { name: '删除并替换' })).toBeEnabled()
+    expect(api.removeFile).not.toHaveBeenCalled()
   })
 })

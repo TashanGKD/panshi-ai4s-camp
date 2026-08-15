@@ -28,6 +28,12 @@ export type ApplicationRepository = {
   registrationWindow: () => Promise<{ open: boolean, reason?: 'REGISTRATION_NOT_OPEN' | 'REGISTRATION_CLOSED' }>
 }
 
+export class ApplicationSubmissionError extends Error {
+  constructor(readonly reason: 'form_version_changed' | 'attachment_invalid', readonly fields: Array<{ path: string, message: string }> = []) {
+    super(reason); this.name = 'ApplicationSubmissionError'
+  }
+}
+
 export class ApplicationError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly fields?: Array<{ path: string, message: string }>) {
     super(message); this.name = 'ApplicationError'
@@ -123,7 +129,17 @@ export const createApplicationService = (repository: ApplicationRepository) => (
     for (const slot of activeSlots.values()) if (slot.required && !attached.has(slot.id)) {
       throw new ApplicationError(422, 'APPLICATION_INCOMPLETE', '请上传所有必填附件', [{ path: `attachments.${slot.id}`, message: '此附件为必填项' }])
     }
-    const result = await repository.submit({ user, expectedRevision: parsed.data.expectedRevision })
+    let result
+    try {
+      result = await repository.submit({ user, expectedRevision: parsed.data.expectedRevision })
+    } catch (error) {
+      if (!(error instanceof ApplicationSubmissionError)) throw error
+      if (error.reason === 'form_version_changed') {
+        await repository.getOrCreateDraft(user)
+        throw new ApplicationError(409, 'APPLICATION_FORM_VERSION_CHANGED', '报名表已更新，请核对后重新提交')
+      }
+      throw new ApplicationError(422, 'APPLICATION_ATTACHMENT_INVALID', '附件不符合当前报名表要求', error.fields)
+    }
     if (!result) throw new ApplicationError(409, 'APPLICATION_REVISION_CONFLICT', '草稿已变化或报名已提交，请刷新后重试')
     return { apiVersion: 'v1' as const, data: { applicationId: result.applicationId, versionId: result.versionId, status: 'submitted' as const, submittedAt: result.submittedAt.toISOString() } }
   },

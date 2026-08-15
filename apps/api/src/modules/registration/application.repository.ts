@@ -7,9 +7,14 @@ import {
 } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
 import { shanghaiBusinessDate } from '../../lib/business-date.js'
-import type { ApplicationFile, ApplicationRecord, ApplicationRepository } from './application.service.js'
+import { DOCX_MIME, PDF_MIME, type AllowedFileExtension } from '../files/file-validation.js'
+import { ApplicationSubmissionError, type ApplicationFile, type ApplicationRecord, type ApplicationRepository } from './application.service.js'
 
 const DRAFT_ID = '00000000-0000-4000-8000-000000000010'
+const validatedExtensionByMime: Readonly<Record<string, AllowedFileExtension>> = {
+  [PDF_MIME]: 'pdf',
+  [DOCX_MIME]: 'docx',
+}
 
 const registrationWindowFromPayload = (payload: unknown, today: string) => {
   if (typeof payload !== 'object' || payload === null || !('items' in payload) || !Array.isArray(payload.items)) return { open: false as const, reason: 'REGISTRATION_NOT_OPEN' as const }
@@ -126,8 +131,8 @@ export const createApplicationRepository = (
           eq(files.attachmentSlot, reference.slotId), eq(files.lifecycleState, 'active'), isNull(files.hiddenAt), isNull(files.deletedAt),
         )).limit(1)
         const slot = slots.get(reference.slotId)!
-        const extension = file?.mimeType === 'application/pdf' ? 'pdf' : file?.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? 'docx' : ''
-        if (!file || !slot.allowedExtensions.includes(extension as 'pdf' | 'docx') || file.sizeBytes > slot.maxSizeBytes) throw new Error('APPLICATION_ATTACHMENT_INVALID')
+        const extension = file ? validatedExtensionByMime[file.mimeType] : undefined
+        if (!file || !extension || !slot.allowedExtensions.includes(extension) || file.sizeBytes > slot.maxSizeBytes) throw new Error('APPLICATION_ATTACHMENT_INVALID')
       }
       const core = createCore(input.user, input.profile)
       await transaction.insert(userProfiles).values({ userId: input.user.id, ...input.profile }).onConflictDoUpdate({ target: userProfiles.userId, set: { ...input.profile, updatedAt: now() } })
@@ -143,21 +148,40 @@ export const createApplicationRepository = (
       if (!window.open) return null
       const [locked] = await transaction.select().from(applications).where(eq(applications.userId, input.user.id)).for('update')
       if (!locked || locked.status !== 'draft' || locked.revision !== input.expectedRevision) return null
+      const [published] = await transaction.select({ versionId: registrationFormDrafts.baseVersionId }).from(registrationFormDrafts)
+        .where(eq(registrationFormDrafts.id, DRAFT_ID)).for('share')
+      if (!published?.versionId || published.versionId !== locked.formVersionId) throw new ApplicationSubmissionError('form_version_changed')
       const [account] = await transaction.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, input.user.id)).for('update')
       if (!account || account.disabledAt !== null) return null
       const record = await readRecord(transaction as NodePgDatabase<typeof schema>, input.user.id)
       if (!record) return null
       const lockedFiles = await transaction.select({
         id: files.id, slotId: applicationFiles.attachmentSlot, ownerUserId: files.ownerUserId, purpose: files.purpose,
-        attachmentSlot: files.attachmentSlot, lifecycleState: files.lifecycleState, hiddenAt: files.hiddenAt, deletedAt: files.deletedAt,
+        attachmentSlot: files.attachmentSlot, mimeType: files.mimeType, sizeBytes: files.sizeBytes,
+        lifecycleState: files.lifecycleState, hiddenAt: files.hiddenAt, deletedAt: files.deletedAt,
       }).from(applicationFiles).innerJoin(files, eq(files.id, applicationFiles.fileId))
         .where(eq(applicationFiles.applicationId, record.id)).orderBy(asc(files.id)).for('update', { of: files })
-      const validSlots = new Set(record.form.attachments.filter((slot) => slot.active).map((slot) => slot.id))
-      if (lockedFiles.some((file) => file.ownerUserId !== input.user.id || file.purpose !== 'registration_attachment' || file.attachmentSlot !== file.slotId || !validSlots.has(file.slotId) || file.lifecycleState !== 'active' || file.hiddenAt !== null || file.deletedAt !== null)) {
-        throw new Error('APPLICATION_ATTACHMENT_INVALID')
+      const validSlots = new Map(record.form.attachments.filter((slot) => slot.active).map((slot) => [slot.id, slot]))
+      const attachmentErrors: Array<{ path: string, message: string }> = []
+      for (const file of lockedFiles) {
+        const path = `attachments.${file.slotId}`
+        const slot = validSlots.get(file.slotId)
+        if (file.ownerUserId !== input.user.id || file.purpose !== 'registration_attachment' || file.attachmentSlot !== file.slotId || !slot || file.lifecycleState !== 'active' || file.hiddenAt !== null || file.deletedAt !== null) {
+          attachmentErrors.push({ path, message: '附件不存在或当前不可用，请重新上传' })
+          continue
+        }
+        const extension = validatedExtensionByMime[file.mimeType]
+        if (!extension || !slot.allowedExtensions.includes(extension)) {
+          attachmentErrors.push({ path, message: `文件格式不符合当前要求，仅支持 ${slot.allowedExtensions.map((item) => item.toUpperCase()).join('、')}` })
+        } else if (file.sizeBytes > slot.maxSizeBytes) {
+          attachmentErrors.push({ path, message: `文件大小超过当前限制（最大 ${slot.maxSizeBytes} 字节）` })
+        }
       }
+      if (attachmentErrors.length > 0) throw new ApplicationSubmissionError('attachment_invalid', attachmentErrors)
       const linkedSlots = new Set(lockedFiles.map((file) => file.slotId))
-      if (record.form.attachments.some((slot) => slot.active && slot.required && !linkedSlots.has(slot.id))) throw new Error('APPLICATION_ATTACHMENT_INVALID')
+      const missingRequired = record.form.attachments.filter((slot) => slot.active && slot.required && !linkedSlots.has(slot.id))
+        .map((slot) => ({ path: `attachments.${slot.id}`, message: '此附件为必填项' }))
+      if (missingRequired.length > 0) throw new ApplicationSubmissionError('attachment_invalid', missingRequired)
       const submittedAt = now()
       const snapshot = {
         formVersionId: record.formVersionId, formVersion: record.formVersion, form: record.form,

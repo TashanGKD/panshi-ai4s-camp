@@ -1,8 +1,29 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import request from 'supertest'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
-import { createAdminHealthService } from '../src/modules/health/admin-health.routes.js'
+import { createAdminHealthFileChecks, createAdminHealthService } from '../src/modules/health/admin-health.routes.js'
+
+const temporaryRoots: string[] = []
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
+
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex')
+
+const writeCompleteBackup = async (root: string, name: string, markerTime: Date) => {
+  const directory = join(root, name)
+  await mkdir(directory)
+  const files = { 'database.dump': 'database', 'uploads.tar.gz': 'uploads', 'metadata.env': 'metadata' }
+  for (const [filename, content] of Object.entries(files)) await writeFile(join(directory, filename), content)
+  await writeFile(join(directory, 'SHA256SUMS'), Object.entries(files).map(([filename, content]) => `${sha256(content)}  ${filename}`).join('\n') + '\n')
+  await writeFile(join(directory, 'COMPLETE'), 'complete\n')
+  await utimes(join(directory, 'COMPLETE'), markerTime, markerTime)
+  return directory
+}
 
 const adminToken = 'a'.repeat(64)
 const studentToken = 'b'.repeat(64)
@@ -121,5 +142,42 @@ describe('administrator system health API', () => {
       backup: { available: false, lastSuccessfulAt: null },
     })
     expect(JSON.stringify(result)).not.toMatch(/secret|path|token|password/iu)
+  })
+})
+
+describe('successful backup discovery', () => {
+  it('returns only the latest exact marker, regular files, manifest, and hash-valid backup', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-admin-health-'))
+    temporaryRoots.push(root)
+    const validTime = new Date('2026-08-15T01:02:03.000Z')
+    await writeCompleteBackup(root, 'panshi-backup-20260815T010203Z-valid', validTime)
+
+    const markerOnly = join(root, 'panshi-backup-20260815T020304Z-marker-only')
+    await mkdir(markerOnly)
+    await writeFile(join(markerOnly, 'COMPLETE'), 'complete\n')
+
+    const corrupt = await writeCompleteBackup(root, 'panshi-backup-20260815T030405Z-corrupt', new Date('2026-08-15T03:04:05.000Z'))
+    await writeFile(join(corrupt, 'database.dump'), 'tampered')
+
+    const badMarker = await writeCompleteBackup(root, 'panshi-backup-20260815T040506Z-bad-marker', new Date('2026-08-15T04:05:06.000Z'))
+    await writeFile(join(badMarker, 'COMPLETE'), 'complete but not exact\n')
+
+    const symlinkFile = await writeCompleteBackup(root, 'panshi-backup-20260815T050607Z-symlink-file', new Date('2026-08-15T05:06:07.000Z'))
+    await rm(join(symlinkFile, 'database.dump'))
+    await symlink(join(root, 'outside.dump'), join(symlinkFile, 'database.dump'))
+    await writeFile(join(root, 'outside.dump'), 'database')
+
+    await symlink(join(root, 'panshi-backup-20260815T010203Z-valid'), join(root, 'panshi-backup-20260815T060708Z-symlink-dir'))
+
+    const result = await createAdminHealthFileChecks(root, root).findLatestBackupAt()
+    expect(result?.toISOString()).toBe(validTime.toISOString())
+  })
+
+  it('returns null when every backup is incomplete or corrupt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-admin-health-'))
+    temporaryRoots.push(root)
+    const corrupt = await writeCompleteBackup(root, 'panshi-backup-20260815T030405Z-corrupt', new Date())
+    await writeFile(join(corrupt, 'SHA256SUMS'), `${'0'.repeat(64)}  database.dump\n`)
+    await expect(createAdminHealthFileChecks(root, root).findLatestBackupAt()).resolves.toBeNull()
   })
 })

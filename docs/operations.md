@@ -13,15 +13,17 @@ Store production values in the operator-managed, untracked file `/secure/path/pa
 - `CORS_ORIGINS`: comma-separated public HTTPS origins accepted by the API, for example `https://camp.example.org`.
 - `BACKUP_ROOT`: operations-container backup root; set exactly `/backups`.
 - `BACKUP_RETENTION_DAYS`: non-negative number of days to retain complete, hash-valid backups, for example `14`.
-- `BACKUP_DATABASE_URL`: dedicated PostgreSQL URL used only by `pg_dump`; normally targets the production database through `postgres:5432`.
-- `BACKUP_UPLOAD_DIR`: operations-container upload source; set exactly `/uploads`.
+- `BACKUP_PGHOST`, `BACKUP_PGPORT`, `BACKUP_PGDATABASE`, `BACKUP_PGUSER`: dedicated libpq settings used only by the backup job; normally use `postgres`, `5432`, the production database, and its least-privilege backup role.
+- `BACKUP_PGPASSFILE_HOST`: absolute host path to the backup role's libpq password file. The container exposes it as `BACKUP_PGPASSFILE=/run/secrets/backup.pgpass`.
+- `BACKUP_UPLOAD_DIR`: backup-container upload source; Compose sets it exactly `/data/uploads`.
 - `BACKUP_APP_VERSION`: deployed release identifier using only letters, numbers, dots, underscores, and hyphens; use the same immutable release tag as `IMAGE_TAG`.
-- `RESTORE_DATABASE_URL`: dedicated PostgreSQL URL used only by `pg_restore`; normally targets the production database through `postgres:5432`.
-- `RESTORE_UPLOAD_DIR`: operations-container upload restore target; set exactly `/uploads`.
+- `RESTORE_PGHOST`, `RESTORE_PGPORT`, `RESTORE_PGDATABASE`, `RESTORE_PGUSER`: dedicated libpq settings used only by the restore job.
+- `RESTORE_PGPASSFILE_HOST`: absolute host path to the restore role's libpq password file. The container exposes it as `RESTORE_PGPASSFILE=/run/secrets/restore.pgpass`.
+- `RESTORE_UPLOAD_DIR`: restore-container upload target; Compose sets it exactly `/data/uploads`.
 
 Optional settings are `IMAGE_TAG`, `HTTP_PORT`, and `HTTP_BIND_ADDRESS`. The frontend defaults to `127.0.0.1:8080`. Set `HTTP_BIND_ADDRESS` to a non-loopback address only after an operator explicitly chooses and secures that exposure. Frontend builds keep `VITE_API_BASE_URL` and `VITE_PUBLIC_WEB_BASE_URL` blank so both browser applications use the Nginx origin; the admin bundle uses Vite base `/admin/`.
 
-Do not put `RESTORE_ACKNOWLEDGE` in the persistent environment file. It is a one-command acknowledgement supplied only during an approved restore. The scripts do not print connection URLs, and backup metadata contains only the release version and UTC creation time.
+Create separate password files for backup and restore, make each a single libpq line such as `postgres:5432:DATABASE:ROLE:PASSWORD`, and run `chmod 600` on both files. Do not put database URLs, passwords, or `RESTORE_ACKNOWLEDGE` in the persistent environment file. `RESTORE_ACKNOWLEDGE` is supplied only during an approved restore. The backup service receives no restore settings, the restore service receives no backup database settings, database credentials stay out of process arguments, and backup metadata contains only the release version and UTC creation time.
 
 Do not commit the production environment file. The checked-in `.env.example` is for local development only.
 
@@ -96,7 +98,7 @@ Stop services without deleting named data volumes:
 docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml down
 ```
 
-The named volumes separately hold PostgreSQL data, API-managed uploads, and operator-managed backups. Mounting `backups-data` does not schedule or create backups.
+The named volumes separately hold PostgreSQL data, API-managed uploads, and operator-managed backups. Production mounts the complete upload volume at `/data`; the API storage root and both operations paths are `/data/uploads`. Restore staging and rollback directories are siblings under `/data`, so all renames stay on the upload volume and the target itself is not a mountpoint. Mounting `backups-data` does not schedule or create backups.
 
 ## Backup schedule and verification
 
@@ -105,20 +107,20 @@ The backup script creates a PostgreSQL custom-format dump with `pg_dump --format
 Run one production backup with the exact production Compose boundary:
 
 ```sh
-docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm operations deploy/backup.sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm backup deploy/backup.sh
 ```
 
 The command prints only the new identifier, such as `panshi-backup-20260815T020304Z-release-2026.08.15`. Record that identifier in the operations log. Verify the marker and SHA-256 manifest before copying the backup off-host:
 
 ```sh
-docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm operations -lc 'cd /backups/BACKUP_ID && sha256sum -c SHA256SUMS && test "$(cat COMPLETE)" = complete'
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm backup -lc 'cd /backups/BACKUP_ID && sha256sum -c SHA256SUMS && test "$(cat COMPLETE)" = complete'
 ```
 
 Schedule the same backup command daily using a host `systemd timer` (preferred) or cron under a dedicated operator account. Set `Persistent=true` for a systemd timer so a missed run executes after reboot. Alert when the command exits nonzero or the admin System Status page reports no recent successful backup. Retention is controlled only by `BACKUP_RETENTION_DAYS`; off-host retention must be configured separately. Test a restore on an isolated host/database at least monthly.
 
 ## Restore warning and runbook
 
-> Warning: restore is destructive. It replaces the configured upload directory and runs `pg_restore --clean --if-exists --single-transaction` against `RESTORE_DATABASE_URL`. Confirm the backup identifier, target database, maintenance window, and a separate current backup before continuing. Never point the restore variables at an unreviewed target.
+> Warning: restore is destructive. It replaces the configured upload directory and runs `pg_restore --clean --if-exists --single-transaction` against `RESTORE_PGDATABASE`. Confirm the generated direct-child backup ID, target database settings, maintenance window, and a separate current backup before continuing. Never point the restore variables at an unreviewed target.
 
 1. Announce the maintenance window, stop browser/API traffic, and keep PostgreSQL running:
 
@@ -131,7 +133,7 @@ docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-
 3. Perform the explicitly acknowledged restore. Replace `BACKUP_ID` with one direct child identifier printed by a successful backup:
 
 ```sh
-docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm -e RESTORE_ACKNOWLEDGE=RESTORE operations deploy/restore.sh --yes BACKUP_ID
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm -e RESTORE_ACKNOWLEDGE=RESTORE restore deploy/restore.sh --yes BACKUP_ID
 ```
 
 The upload replacement is staged and can be rolled back if the transactional database restore fails. Any nonzero exit means the restore did not complete; preserve the console output, do not retry blindly, and inspect the target state before another attempt.

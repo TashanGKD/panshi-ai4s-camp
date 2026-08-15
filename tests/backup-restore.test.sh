@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export COPYFILE_DISABLE=1
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BACKUP_SCRIPT="$PROJECT_ROOT/deploy/backup.sh"
@@ -25,13 +26,17 @@ assert_file_contains "$BACKUP_SCRIPT" 'pg_dump'
 assert_file_contains "$BACKUP_SCRIPT" '--format=custom'
 assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_ROOT'
 assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_RETENTION_DAYS'
-assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_DATABASE_URL'
+assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_PGHOST'
+assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_PGDATABASE'
+assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_PGPASSFILE'
 assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_UPLOAD_DIR'
 assert_file_contains "$BACKUP_SCRIPT" 'BACKUP_APP_VERSION'
 assert_file_contains "$RESTORE_SCRIPT" '^set -euo pipefail$'
 assert_file_contains "$RESTORE_SCRIPT" 'pg_restore'
 assert_file_contains "$RESTORE_SCRIPT" '--single-transaction'
-assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_DATABASE_URL'
+assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_PGHOST'
+assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_PGDATABASE'
+assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_PGPASSFILE'
 assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_UPLOAD_DIR'
 assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_ACKNOWLEDGE'
 
@@ -48,6 +53,7 @@ PGSOCKET="/tmp/panshi-task18-sock.$$"
 BACKUP_ROOT="$TEST_ROOT/panshi_task18_backups"
 SOURCE_UPLOADS="$TEST_ROOT/panshi_task18_source_uploads"
 RESTORE_UPLOADS="$TEST_ROOT/panshi_task18_restore_uploads"
+DATA_ROOT="$TEST_ROOT/panshi_task18_data"
 OUTSIDE_ROOT="$TEST_ROOT/panshi_task18_outside"
 PGPORT=$((55000 + ($$ % 1000)))
 PGUSER=panshi_task18_owner
@@ -55,6 +61,10 @@ SOURCE_DB=panshi_task18_source
 RESTORE_DB=panshi_task18_restore
 SOURCE_URL="postgresql://$PGUSER@127.0.0.1:$PGPORT/$SOURCE_DB"
 RESTORE_URL="postgresql://$PGUSER@127.0.0.1:$PGPORT/$RESTORE_DB"
+PGPASSFILE="$TEST_ROOT/panshi_task18.pgpass"
+REAL_PG_DUMP="$(command -v pg_dump)"
+REAL_PG_RESTORE="$(command -v pg_restore)"
+PG_DUMP_WRAPPER_DIR="$TEST_ROOT/panshi_task18_bin"
 SERVER_STARTED=false
 
 cleanup() {
@@ -73,7 +83,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$PGSOCKET" "$BACKUP_ROOT" "$SOURCE_UPLOADS/nested" "$RESTORE_UPLOADS" "$OUTSIDE_ROOT"
+mkdir -p "$PGSOCKET" "$BACKUP_ROOT" "$SOURCE_UPLOADS/nested" "$DATA_ROOT/uploads" "$OUTSIDE_ROOT" "$PG_DUMP_WRAPPER_DIR"
+RESTORE_UPLOADS="$DATA_ROOT/uploads"
+TEST_DATABASE_SECRET='panshi-task18-secret-password'
+printf '127.0.0.1:%s:*:%s:%s\n' "$PGPORT" "$PGUSER" "$TEST_DATABASE_SECRET" > "$PGPASSFILE"
+chmod 600 "$PGPASSFILE"
+ln -s "$PROJECT_ROOT/tests/helpers/pg_dump-delay-wrapper.sh" "$PG_DUMP_WRAPPER_DIR/pg_dump"
+ln -s "$PROJECT_ROOT/tests/helpers/pg_restore-argv-wrapper.sh" "$PG_DUMP_WRAPPER_DIR/pg_restore"
 initdb -D "$PGDATA" -A trust -U "$PGUSER" --no-locale >/dev/null
 pg_ctl -D "$PGDATA" -l "$TEST_ROOT/panshi_task18_postgres.log" -o "-F -h 127.0.0.1 -k $PGSOCKET -p $PGPORT" -w start >/dev/null
 SERVER_STARTED=true
@@ -86,6 +102,28 @@ done
 ATTACHMENT_CONTENT='panshi task 18 attachment payload'
 printf '%s' "$ATTACHMENT_CONTENT" > "$SOURCE_UPLOADS/nested/task18-attachment.txt"
 ATTACHMENT_SHA="$(shasum -a 256 "$SOURCE_UPLOADS/nested/task18-attachment.txt" | awk '{print $1}')"
+
+BACKUP_ENV=(
+  BACKUP_ROOT="$BACKUP_ROOT"
+  BACKUP_RETENTION_DAYS=7
+  BACKUP_PGHOST=127.0.0.1
+  BACKUP_PGPORT="$PGPORT"
+  BACKUP_PGDATABASE="$SOURCE_DB"
+  BACKUP_PGUSER="$PGUSER"
+  BACKUP_PGPASSFILE="$PGPASSFILE"
+  BACKUP_UPLOAD_DIR="$SOURCE_UPLOADS"
+  BACKUP_APP_VERSION=task18-test
+)
+RESTORE_ENV=(
+  BACKUP_ROOT="$BACKUP_ROOT"
+  RESTORE_PGHOST=127.0.0.1
+  RESTORE_PGPORT="$PGPORT"
+  RESTORE_PGDATABASE="$RESTORE_DB"
+  RESTORE_PGUSER="$PGUSER"
+  RESTORE_PGPASSFILE="$PGPASSFILE"
+  RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS"
+  RESTORE_ACKNOWLEDGE=RESTORE
+)
 
 psql "$SOURCE_URL" -v ON_ERROR_STOP=1 -X -q \
   -v attachment_sha="$ATTACHMENT_SHA" \
@@ -112,15 +150,79 @@ VALUES (
 );
 SQL
 
+# Rejection: libpq password files must be private before any database command runs.
+INSECURE_PGPASSFILE="$TEST_ROOT/panshi_task18_insecure.pgpass"
+cp "$PGPASSFILE" "$INSECURE_PGPASSFILE"
+chmod 644 "$INSECURE_PGPASSFILE"
+INSECURE_CALLED="$TEST_ROOT/panshi_task18_insecure_called"
+if env \
+  "${BACKUP_ENV[@]}" \
+  BACKUP_PGPASSFILE="$INSECURE_PGPASSFILE" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_DUMP=/usr/bin/false \
+  PANSHI_PG_DUMP_CALLED_FILE="$INSECURE_CALLED" \
+  "$BACKUP_SCRIPT" >/dev/null 2>&1; then
+  fail 'backup accepted a group/world-readable PGPASSFILE'
+fi
+[[ ! -e "$INSECURE_CALLED" ]] || fail 'backup checked PGPASSFILE permissions after pg_dump'
+
+# Rejection: backup and upload roots must be disjoint before pg_dump runs.
+OVERLAP_BASE="$TEST_ROOT/panshi_task18_overlap"
+mkdir -p "$OVERLAP_BASE/backup/uploads" "$OVERLAP_BASE/upload/backup"
+overlap_case=0
+while IFS='|' read -r overlap_backup overlap_upload; do
+  overlap_case=$((overlap_case + 1))
+  called_file="$TEST_ROOT/panshi_task18_overlap_called_$overlap_case"
+  if env \
+    "${BACKUP_ENV[@]}" \
+    BACKUP_ROOT="$overlap_backup" \
+    BACKUP_UPLOAD_DIR="$overlap_upload" \
+    PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+    PANSHI_REAL_PG_DUMP=/usr/bin/false \
+    PANSHI_PG_DUMP_CALLED_FILE="$called_file" \
+    "$BACKUP_SCRIPT" >/dev/null 2>&1; then
+    fail "backup accepted overlapping roots: $overlap_backup | $overlap_upload"
+  fi
+  [[ ! -e "$called_file" ]] || fail 'overlap validation ran after pg_dump'
+done <<EOF
+$OVERLAP_BASE/backup|$OVERLAP_BASE/backup
+$OVERLAP_BASE/backup|$OVERLAP_BASE/backup/uploads
+$OVERLAP_BASE/upload/backup|$OVERLAP_BASE/upload
+EOF
+
+# Rejection: a symlink inserted while pg_dump is running must prevent COMPLETE publication.
+RACE_READY="$TEST_ROOT/panshi_task18_race_ready"
+RACE_CONTINUE="$TEST_ROOT/panshi_task18_race_continue"
+RACE_OUTPUT="$TEST_ROOT/panshi_task18_race_output"
+env \
+  "${BACKUP_ENV[@]}" \
+  BACKUP_APP_VERSION=race-check \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_DUMP="$REAL_PG_DUMP" \
+  PANSHI_PG_DUMP_READY_FILE="$RACE_READY" \
+  PANSHI_PG_DUMP_CONTINUE_FILE="$RACE_CONTINUE" \
+  "$BACKUP_SCRIPT" >"$RACE_OUTPUT" 2>&1 &
+race_pid=$!
+race_deadline=$((SECONDS + 5))
+while [[ ! -f "$RACE_READY" ]]; do
+  (( SECONDS < race_deadline )) || fail 'pg_dump race wrapper did not become ready'
+  sleep 0.05
+done
+ln -s "$OUTSIDE_ROOT" "$SOURCE_UPLOADS/race-link"
+: > "$RACE_CONTINUE"
+if wait "$race_pid"; then
+  fail 'backup published after a symlink was inserted during pg_dump'
+fi
+if grep -Fq "$TEST_DATABASE_SECRET" "$RACE_OUTPUT"; then
+  fail 'backup failure output leaked the database password'
+fi
+unlink "$SOURCE_UPLOADS/race-link"
+[[ -z "$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -name '*race-check*' -print -quit)" ]] \
+  || fail 'race failure left a published or partial backup'
+
 # Rejection: upload trees containing a symlink must fail without leaving partial backups.
 ln -s "$OUTSIDE_ROOT" "$SOURCE_UPLOADS/escape-link"
-if env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  BACKUP_RETENTION_DAYS=7 \
-  BACKUP_DATABASE_URL="$SOURCE_URL" \
-  BACKUP_UPLOAD_DIR="$SOURCE_UPLOADS" \
-  BACKUP_APP_VERSION=task18-test \
-  "$BACKUP_SCRIPT" >/dev/null 2>&1; then
+if env "${BACKUP_ENV[@]}" "$BACKUP_SCRIPT" >/dev/null 2>&1; then
   fail 'backup accepted an upload symlink escape'
 fi
 [[ -z "$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -name '.incomplete-*' -print -quit)" ]] \
@@ -132,13 +234,16 @@ mkdir "$BACKUP_ROOT/panshi-backup-20000101T000000Z-incomplete"
 touch -t 200001010000 "$BACKUP_ROOT/panshi-backup-20000101T000000Z-incomplete"
 ln -s "$OUTSIDE_ROOT" "$BACKUP_ROOT/panshi-backup-20000101T000000Z-symlink"
 
+PG_DUMP_ARGS="$TEST_ROOT/panshi_task18_pg_dump_args"
 BACKUP_ID="$(env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  BACKUP_RETENTION_DAYS=7 \
-  BACKUP_DATABASE_URL="$SOURCE_URL" \
-  BACKUP_UPLOAD_DIR="$SOURCE_UPLOADS" \
-  BACKUP_APP_VERSION=task18-test \
+  "${BACKUP_ENV[@]}" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_DUMP="$REAL_PG_DUMP" \
+  PANSHI_PG_DUMP_ARGS_FILE="$PG_DUMP_ARGS" \
   "$BACKUP_SCRIPT")"
+if grep -Eq "127\\.0\\.0\\.1|$PGUSER|postgresql://|password" "$PG_DUMP_ARGS"; then
+  fail 'backup database connection details appeared in pg_dump argv'
+fi
 
 [[ "$BACKUP_ID" =~ ^panshi-backup-[0-9]{8}T[0-9]{6}Z-task18-test$ ]] || fail "unsafe backup identifier: $BACKUP_ID"
 BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
@@ -147,6 +252,11 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 [[ -f "$BACKUP_DIR/uploads.tar.gz" ]] || fail 'backup lacks upload archive'
 [[ -f "$BACKUP_DIR/SHA256SUMS" ]] || fail 'backup lacks SHA-256 manifest'
 (cd "$BACKUP_DIR" && shasum -a 256 -c SHA256SUMS >/dev/null)
+mode_of() { if stat -f '%Lp' "$1" >/dev/null 2>&1; then stat -f '%Lp' "$1"; else stat -c '%a' "$1"; fi; }
+[[ "$(mode_of "$BACKUP_DIR")" == 700 ]] || fail 'backup directory is not mode 0700'
+for private_file in database.dump uploads.tar.gz metadata.env SHA256SUMS COMPLETE; do
+  [[ "$(mode_of "$BACKUP_DIR/$private_file")" == 600 ]] || fail "$private_file is not mode 0600"
+done
 [[ -d "$BACKUP_ROOT/panshi-backup-20000101T000000Z-incomplete" ]] || fail 'retention deleted an incomplete backup'
 [[ -L "$BACKUP_ROOT/panshi-backup-20000101T000000Z-symlink" ]] || fail 'retention followed or deleted a symlink'
 [[ -d "$OUTSIDE_ROOT" ]] || fail 'retention escaped the backup root'
@@ -155,58 +265,101 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 VALID_EXPIRED="$BACKUP_ROOT/panshi-backup-20000101T000000Z-valid"
 cp -R "$BACKUP_DIR" "$VALID_EXPIRED"
 touch -t 200001010000 "$VALID_EXPIRED"
+INVALID_MARKER_EXPIRED="$BACKUP_ROOT/panshi-backup-20000101T000000Z-invalid-marker"
+cp -R "$BACKUP_DIR" "$INVALID_MARKER_EXPIRED"
+printf 'not-complete\n' > "$INVALID_MARKER_EXPIRED/COMPLETE"
+touch -t 200001010000 "$INVALID_MARKER_EXPIRED"
 env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  BACKUP_RETENTION_DAYS=7 \
-  BACKUP_DATABASE_URL="$SOURCE_URL" \
-  BACKUP_UPLOAD_DIR="$SOURCE_UPLOADS" \
+  "${BACKUP_ENV[@]}" \
   BACKUP_APP_VERSION=retention-check \
   "$BACKUP_SCRIPT" >/dev/null
 [[ ! -e "$VALID_EXPIRED" ]] || fail 'retention did not delete a validated expired backup'
+[[ -d "$INVALID_MARKER_EXPIRED" ]] || fail 'retention deleted a backup with an invalid COMPLETE marker'
 [[ -d "$BACKUP_ROOT/panshi-backup-20000101T000000Z-incomplete" ]] || fail 'retention deleted an incomplete backup during valid cleanup'
 [[ -L "$BACKUP_ROOT/panshi-backup-20000101T000000Z-symlink" ]] || fail 'retention deleted a symlink during valid cleanup'
 
+# Rejection: finalized archives with unsafe entry metadata must fail before pg_restore.
+ATTACK_SOURCE="$TEST_ROOT/panshi_task18_attack_source"
+mkdir -p "$ATTACK_SOURCE/nested"
+printf 'payload' > "$ATTACK_SOURCE/payload"
+ln -s "$OUTSIDE_ROOT" "$ATTACK_SOURCE/symlink"
+ln "$ATTACK_SOURCE/payload" "$ATTACK_SOURCE/hardlink"
+mkfifo "$ATTACK_SOURCE/fifo"
+for attack_kind in symlink hardlink fifo absolute traversal; do
+  attack_id="panshi-backup-20000101T000000Z-attack-$attack_kind"
+  attack_backup="$BACKUP_ROOT/$attack_id"
+  cp -R "$BACKUP_DIR" "$attack_backup"
+  case "$attack_kind" in
+    symlink) tar -C "$ATTACK_SOURCE" -czf "$attack_backup/uploads.tar.gz" symlink ;;
+    hardlink) tar -C "$ATTACK_SOURCE" -czf "$attack_backup/uploads.tar.gz" payload hardlink ;;
+    fifo) tar -C "$ATTACK_SOURCE" -czf "$attack_backup/uploads.tar.gz" fifo ;;
+    absolute) tar -P -czf "$attack_backup/uploads.tar.gz" "$ATTACK_SOURCE/payload" ;;
+    traversal) tar -C "$ATTACK_SOURCE/nested" -czf "$attack_backup/uploads.tar.gz" ../payload ;;
+  esac
+  (cd "$attack_backup" && shasum -a 256 database.dump uploads.tar.gz metadata.env > SHA256SUMS)
+  restore_called="$TEST_ROOT/panshi_task18_restore_called_$attack_kind"
+  if env \
+    "${RESTORE_ENV[@]}" \
+    PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+    PANSHI_REAL_PG_RESTORE=/usr/bin/false \
+    PANSHI_PG_RESTORE_CALLED_FILE="$restore_called" \
+    "$RESTORE_SCRIPT" --yes "$attack_id" >/dev/null 2>&1; then
+    fail "restore accepted unsafe $attack_kind archive"
+  fi
+  [[ ! -e "$restore_called" ]] || fail "restore validated $attack_kind archive after pg_restore"
+done
+
 # Rejection: traversal and symlink backup selectors must fail before database/upload changes.
 printf 'sentinel' > "$RESTORE_UPLOADS/sentinel.txt"
-for invalid_backup in '../outside' 'panshi-backup-20000101T000000Z-symlink'; do
-  if env \
-    BACKUP_ROOT="$BACKUP_ROOT" \
-    RESTORE_DATABASE_URL="$RESTORE_URL" \
-    RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS" \
-    RESTORE_ACKNOWLEDGE=RESTORE \
-    "$RESTORE_SCRIPT" --yes "$invalid_backup" >/dev/null 2>&1; then
+for invalid_backup in \
+  '../outside' \
+  'sub/../panshi-backup-20260815T020304Z-safe' \
+  '-panshi-backup-20260815T020304Z-safe' \
+  $'panshi-backup-20260815T020304Z-safe\ncontrol' \
+  $'panshi-backup-20260815T020304Z-safe\tcontrol' \
+  "$BACKUP_DIR" \
+  'panshi-backup-20000101T000000Z-symlink'; do
+  if env "${RESTORE_ENV[@]}" "$RESTORE_SCRIPT" --yes "$invalid_backup" >/dev/null 2>&1; then
     fail "restore accepted unsafe backup selector: $invalid_backup"
   fi
   [[ "$(<"$RESTORE_UPLOADS/sentinel.txt")" == sentinel ]] || fail 'unsafe restore modified uploads'
 done
 
 if env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  RESTORE_DATABASE_URL="$RESTORE_URL" \
-  RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS" \
+  "${RESTORE_ENV[@]}" \
   RESTORE_ACKNOWLEDGE= \
   "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
   fail 'restore accepted a missing acknowledgement'
 fi
 if env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  RESTORE_DATABASE_URL="$RESTORE_URL" \
-  RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS" \
-  RESTORE_ACKNOWLEDGE=RESTORE \
+  "${RESTORE_ENV[@]}" \
   "$RESTORE_SCRIPT" "$BACKUP_ID" >/dev/null 2>&1; then
   fail 'restore accepted a destructive run without --yes'
 fi
 [[ "$(<"$RESTORE_UPLOADS/sentinel.txt")" == sentinel ]] || fail 'unacknowledged restore modified uploads'
+if env \
+  "${RESTORE_ENV[@]}" \
+  RESTORE_PGPASSFILE="$INSECURE_PGPASSFILE" \
+  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
+  fail 'restore accepted a group/world-readable PGPASSFILE'
+fi
+[[ "$(<"$RESTORE_UPLOADS/sentinel.txt")" == sentinel ]] || fail 'insecure PGPASSFILE rejection modified uploads'
+
+# Production-layout simulation: target is /data/uploads, with stage and rollback siblings on one filesystem.
+if env \
+  "${RESTORE_ENV[@]}" \
+  RESTORE_PGDATABASE=panshi_task18_missing \
+  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
+  fail 'restore unexpectedly succeeded against a missing database'
+fi
+[[ "$(<"$RESTORE_UPLOADS/sentinel.txt")" == sentinel ]] || fail 'database failure did not roll back /data/uploads'
+[[ -z "$(find "$DATA_ROOT" -mindepth 1 -maxdepth 1 \( -name '.panshi-restore-stage.*' -o -name '.panshi-restore-old.*' \) -print -quit)" ]] \
+  || fail 'rollback left staging directories beside /data/uploads'
 
 # Rejection: a hash mismatch must fail before destructive changes.
 cp "$BACKUP_DIR/SHA256SUMS" "$BACKUP_DIR/SHA256SUMS.valid"
 printf 'tampered' >> "$BACKUP_DIR/uploads.tar.gz"
-if env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  RESTORE_DATABASE_URL="$RESTORE_URL" \
-  RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS" \
-  RESTORE_ACKNOWLEDGE=RESTORE \
-  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
+if env "${RESTORE_ENV[@]}" "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
   fail 'restore accepted a checksum mismatch'
 fi
 [[ "$(<"$RESTORE_UPLOADS/sentinel.txt")" == sentinel ]] || fail 'checksum failure modified uploads'
@@ -223,12 +376,16 @@ find "$SOURCE_UPLOADS" -depth -mindepth 1 -delete
 rmdir "$SOURCE_UPLOADS"
 createdb -h 127.0.0.1 -p "$PGPORT" -U "$PGUSER" "$RESTORE_DB"
 
+PG_RESTORE_ARGS="$TEST_ROOT/panshi_task18_pg_restore_args"
 env \
-  BACKUP_ROOT="$BACKUP_ROOT" \
-  RESTORE_DATABASE_URL="$RESTORE_URL" \
-  RESTORE_UPLOAD_DIR="$RESTORE_UPLOADS" \
-  RESTORE_ACKNOWLEDGE=RESTORE \
+  "${RESTORE_ENV[@]}" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_RESTORE="$REAL_PG_RESTORE" \
+  PANSHI_PG_RESTORE_ARGS_FILE="$PG_RESTORE_ARGS" \
   "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null
+if grep -Eq "127\\.0\\.0\\.1|$PGUSER|postgresql://|password" "$PG_RESTORE_ARGS"; then
+  fail 'restore database connection details appeared in pg_restore argv'
+fi
 
 [[ "$(psql "$RESTORE_URL" -X -Atqc "SELECT count(*) FROM users WHERE id = '18000000-0000-4000-8000-000000000001'")" == 1 ]] \
   || fail 'test user was not restored'
@@ -238,5 +395,8 @@ env \
   || fail 'attachment metadata was not restored'
 RESTORED_SHA="$(shasum -a 256 "$RESTORE_UPLOADS/nested/task18-attachment.txt" | awk '{print $1}')"
 [[ "$RESTORED_SHA" == "$ATTACHMENT_SHA" ]] || fail 'restored attachment SHA-256 differs'
+[[ "$(mode_of "$RESTORE_UPLOADS")" == 700 ]] || fail 'restored upload directory is not mode 0700'
+[[ "$(mode_of "$RESTORE_UPLOADS/nested")" == 700 ]] || fail 'restored nested directory is not mode 0700'
+[[ "$(mode_of "$RESTORE_UPLOADS/nested/task18-attachment.txt")" == 600 ]] || fail 'restored attachment is not mode 0600'
 
 printf 'PASS real PostgreSQL backup/restore: user=1 content_version=1 attachment_sha256=%s\n' "$RESTORED_SHA"

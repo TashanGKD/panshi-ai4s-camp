@@ -1,6 +1,7 @@
-import { constants } from 'node:fs'
-import { access, lstat, readdir, statfs } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { constants, createReadStream } from 'node:fs'
+import { access, lstat, readFile, readdir, realpath, statfs } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { Router } from 'express'
 import { requireAdmin } from '../../middleware/require-admin.js'
 import { createRequireUser } from '../../middleware/require-user.js'
@@ -10,6 +11,8 @@ import type { DatabaseHealthCheck } from './health.routes.js'
 const mebibyte = 1_048_576
 const safeVersion = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u
 const backupDirectoryName = /^panshi-backup-[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u
+const backupPayloadNames = ['database.dump', 'uploads.tar.gz', 'metadata.env'] as const
+const manifestLine = /^([a-f0-9]{64}) [ *](database\.dump|uploads\.tar\.gz|metadata\.env)$/u
 
 export type UploadHealthCheck = () => Promise<{ freeBytes: number }>
 export type LatestBackupCheck = () => Promise<Date | null>
@@ -35,6 +38,42 @@ const withTimeout = async <T>(operation: () => Promise<T>, timeoutMs: number): P
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
+}
+
+const hashFile = (path: string) => new Promise<string>((resolveHash, rejectHash) => {
+  const hash = createHash('sha256')
+  const stream = createReadStream(path)
+  stream.on('error', rejectHash)
+  stream.on('data', (chunk) => hash.update(chunk))
+  stream.on('end', () => resolveHash(hash.digest('hex')))
+})
+
+const validatedBackupTime = async (root: string, name: string): Promise<Date | null> => {
+  const candidate = resolve(root, name)
+  const candidateInfo = await lstat(candidate)
+  if (!candidateInfo.isDirectory() || candidateInfo.isSymbolicLink()) return null
+  const resolvedCandidate = await realpath(candidate)
+  if (dirname(resolvedCandidate) !== root || resolvedCandidate !== candidate) return null
+
+  const requiredNames = ['COMPLETE', 'SHA256SUMS', ...backupPayloadNames]
+  const requiredStats = await Promise.all(requiredNames.map((filename) => lstat(resolve(candidate, filename))))
+  if (requiredStats.some((info) => !info.isFile() || info.isSymbolicLink())) return null
+  if (await readFile(resolve(candidate, 'COMPLETE'), 'utf8') !== 'complete\n') return null
+
+  const manifest = await readFile(resolve(candidate, 'SHA256SUMS'), 'utf8')
+  if (!manifest.endsWith('\n')) return null
+  const lines = manifest.slice(0, -1).split('\n')
+  if (lines.length !== backupPayloadNames.length) return null
+  const expected = new Map<string, string>()
+  for (const line of lines) {
+    const match = manifestLine.exec(line)
+    if (!match || expected.has(match[2]!)) return null
+    expected.set(match[2]!, match[1]!)
+  }
+  if (backupPayloadNames.some((filename) => !expected.has(filename))) return null
+  const hashes = await Promise.all(backupPayloadNames.map((filename) => hashFile(resolve(candidate, filename))))
+  if (hashes.some((hash, index) => hash !== expected.get(backupPayloadNames[index]!))) return null
+  return requiredStats[0]!.mtime
 }
 
 export const createAdminHealthService = ({
@@ -85,13 +124,13 @@ export const createAdminHealthFileChecks = (uploadDirectory: string, backupRoot:
     return { freeBytes: Number(capacity.bavail) * Number(capacity.bsize) }
   },
   findLatestBackupAt: async () => {
-    const entries = await readdir(backupRoot, { withFileTypes: true })
+    const resolvedRoot = await realpath(backupRoot)
+    const entries = await readdir(resolvedRoot, { withFileTypes: true })
     let latest: Date | null = null
     for (const entry of entries) {
       if (!entry.isDirectory() || !backupDirectoryName.test(entry.name)) continue
-      const marker = await lstat(resolve(backupRoot, entry.name, 'COMPLETE')).catch(() => null)
-      if (!marker?.isFile() || marker.isSymbolicLink()) continue
-      if (latest === null || marker.mtime.getTime() > latest.getTime()) latest = marker.mtime
+      const successfulAt = await validatedBackupTime(resolvedRoot, entry.name).catch(() => null)
+      if (successfulAt !== null && (latest === null || successfulAt.getTime() > latest.getTime())) latest = successfulAt
     }
     return latest
   },

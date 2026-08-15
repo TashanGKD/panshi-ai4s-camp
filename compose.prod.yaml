@@ -5,6 +5,23 @@ x-api-image: &api-image
     dockerfile: apps/api/Dockerfile
     target: production
 
+x-operations: &operations
+  image: postgres:16.12-bookworm
+  user: "1000:1000"
+  entrypoint: ["/bin/bash"]
+  working_dir: /workspace
+  depends_on:
+    postgres:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+  restart: "no"
+
 services:
   postgres:
     image: postgres:16.12-alpine3.23
@@ -46,13 +63,13 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
-      FILE_STORAGE_ROOT: /app/var/uploads
-      BACKUP_ROOT: /app/var/backups
+      FILE_STORAGE_ROOT: /data/uploads
+      BACKUP_ROOT: /backups
       APP_VERSION: ${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}
       VERIFICATION_PROVIDER: disabled
     volumes:
-      - uploads-data:/app/var/uploads
-      - backups-data:/app/var/backups:ro
+      - uploads-data:/data
+      - backups-data:/backups:ro
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -69,36 +86,42 @@ services:
     read_only: true
     restart: unless-stopped
 
-  operations:
-    image: postgres:16.12-bookworm
-    profiles: ["operations"]
-    user: "1000:1000"
-    entrypoint: ["/bin/bash"]
-    working_dir: /workspace
+  backup:
+    <<: *operations
+    profiles: ["backup"]
     environment:
       BACKUP_ROOT: ${BACKUP_ROOT:?set BACKUP_ROOT}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:?set BACKUP_RETENTION_DAYS}
-      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:?set BACKUP_DATABASE_URL}
-      BACKUP_UPLOAD_DIR: ${BACKUP_UPLOAD_DIR:?set BACKUP_UPLOAD_DIR}
+      BACKUP_PGHOST: ${BACKUP_PGHOST:?set BACKUP_PGHOST}
+      BACKUP_PGPORT: ${BACKUP_PGPORT:?set BACKUP_PGPORT}
+      BACKUP_PGDATABASE: ${BACKUP_PGDATABASE:?set BACKUP_PGDATABASE}
+      BACKUP_PGUSER: ${BACKUP_PGUSER:?set BACKUP_PGUSER}
+      BACKUP_PGPASSFILE: /run/secrets/backup.pgpass
+      BACKUP_UPLOAD_DIR: /data/uploads
       BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}
-      RESTORE_DATABASE_URL: ${RESTORE_DATABASE_URL:-}
-      RESTORE_UPLOAD_DIR: ${RESTORE_UPLOAD_DIR:?set RESTORE_UPLOAD_DIR}
-      RESTORE_ACKNOWLEDGE: ${RESTORE_ACKNOWLEDGE:-}
     volumes:
-      - uploads-data:/uploads
+      - uploads-data:/data:ro
       - backups-data:/backups
       - ./deploy:/workspace/deploy:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m
-    restart: "no"
+      - ${BACKUP_PGPASSFILE_HOST:?set BACKUP_PGPASSFILE_HOST}:/run/secrets/backup.pgpass:ro
+
+  restore:
+    <<: *operations
+    profiles: ["restore"]
+    environment:
+      BACKUP_ROOT: ${BACKUP_ROOT:?set BACKUP_ROOT}
+      RESTORE_PGHOST: ${RESTORE_PGHOST:?set RESTORE_PGHOST}
+      RESTORE_PGPORT: ${RESTORE_PGPORT:?set RESTORE_PGPORT}
+      RESTORE_PGDATABASE: ${RESTORE_PGDATABASE:?set RESTORE_PGDATABASE}
+      RESTORE_PGUSER: ${RESTORE_PGUSER:?set RESTORE_PGUSER}
+      RESTORE_PGPASSFILE: /run/secrets/restore.pgpass
+      RESTORE_UPLOAD_DIR: /data/uploads
+      RESTORE_ACKNOWLEDGE: ${RESTORE_ACKNOWLEDGE:-}
+    volumes:
+      - uploads-data:/data
+      - backups-data:/backups:ro
+      - ./deploy:/workspace/deploy:ro
+      - ${RESTORE_PGPASSFILE_HOST:?set RESTORE_PGPASSFILE_HOST}:/run/secrets/restore.pgpass:ro
 
   frontend:
     image: panshi-ai4s-camp-frontend:${IMAGE_TAG:-local}

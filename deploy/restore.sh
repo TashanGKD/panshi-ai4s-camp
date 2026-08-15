@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 die() {
   printf 'Restore failed: %s\n' "$*" >&2
@@ -7,7 +8,7 @@ die() {
 }
 
 usage() {
-  printf 'Usage: RESTORE_ACKNOWLEDGE=RESTORE %s --yes BACKUP_ID_OR_PATH\n' "${0##*/}" >&2
+  printf 'Usage: RESTORE_ACKNOWLEDGE=RESTORE %s --yes BACKUP_ID\n' "${0##*/}" >&2
 }
 
 require_descendant() {
@@ -25,6 +26,15 @@ sha256_check() {
   else
     shasum -a 256 -c "$1"
   fi
+}
+
+require_private_file() {
+  local label="$1"
+  local path="$2"
+  [[ -f "$path" && ! -L "$path" ]] || die "$label must be a regular non-symlink file"
+  local mode
+  if stat -f '%Lp' "$path" >/dev/null 2>&1; then mode="$(stat -f '%Lp' "$path")"; else mode="$(stat -c '%a' "$path")"; fi
+  (( (8#$mode & 077) == 0 )) || die "$label must not be accessible by group or other users"
 }
 
 move_exact() {
@@ -56,24 +66,28 @@ if [[ "$#" -ne 2 || "$1" != '--yes' ]]; then
   exit 2
 fi
 backup_selector="$2"
+[[ "$backup_selector" =~ ^panshi-backup-[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] \
+  || die 'backup identifier is invalid; use a generated direct-child backup ID'
 
 : "${BACKUP_ROOT:?BACKUP_ROOT is required}"
-: "${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required}"
+: "${RESTORE_PGHOST:?RESTORE_PGHOST is required}"
+: "${RESTORE_PGPORT:?RESTORE_PGPORT is required}"
+: "${RESTORE_PGDATABASE:?RESTORE_PGDATABASE is required}"
+: "${RESTORE_PGUSER:?RESTORE_PGUSER is required}"
+: "${RESTORE_PGPASSFILE:?RESTORE_PGPASSFILE is required}"
 : "${RESTORE_UPLOAD_DIR:?RESTORE_UPLOAD_DIR is required}"
 : "${RESTORE_ACKNOWLEDGE:?RESTORE_ACKNOWLEDGE is required}"
 [[ "$RESTORE_ACKNOWLEDGE" == RESTORE ]] || die 'RESTORE_ACKNOWLEDGE must equal RESTORE'
+[[ "$RESTORE_PGPORT" =~ ^[0-9]+$ && "$RESTORE_PGPORT" -ge 1 && "$RESTORE_PGPORT" -le 65535 ]] || die 'RESTORE_PGPORT must be a valid port'
 [[ "$RESTORE_UPLOAD_DIR" == /* ]] || die 'RESTORE_UPLOAD_DIR must be an absolute path'
 [[ "$RESTORE_UPLOAD_DIR" != / && "$RESTORE_UPLOAD_DIR" != "${HOME:-/nonexistent}" ]] || die 'RESTORE_UPLOAD_DIR is too broad'
 [[ -d "$BACKUP_ROOT" && ! -L "$BACKUP_ROOT" ]] || die 'BACKUP_ROOT must be an existing non-symlink directory'
 command -v pg_restore >/dev/null 2>&1 || die 'pg_restore is required'
 command -v tar >/dev/null 2>&1 || die 'tar is required'
+require_private_file RESTORE_PGPASSFILE "$RESTORE_PGPASSFILE"
 
 backup_root="$(cd "$BACKUP_ROOT" && pwd -P)"
-if [[ "$backup_selector" == /* ]]; then
-  backup_candidate="$backup_selector"
-else
-  backup_candidate="$backup_root/$backup_selector"
-fi
+backup_candidate="$backup_root/$backup_selector"
 [[ -d "$backup_candidate" && ! -L "$backup_candidate" ]] || die 'backup does not exist or is a symlink'
 backup_dir="$(cd "$backup_candidate" && pwd -P)"
 require_descendant "$backup_root" "$backup_dir"
@@ -82,7 +96,7 @@ for required_file in COMPLETE SHA256SUMS database.dump uploads.tar.gz metadata.e
   [[ -f "$backup_dir/$required_file" && ! -L "$backup_dir/$required_file" ]] \
     || die "backup is incomplete: $required_file"
 done
-[[ "$(<"$backup_dir/COMPLETE")" == complete ]] || die 'invalid COMPLETE marker'
+cmp -s "$backup_dir/COMPLETE" <(printf 'complete\n') || die 'invalid COMPLETE marker'
 
 manifest_valid="$(awk '
   BEGIN { ok=1; seen_dump=0; seen_uploads=0; seen_metadata=0 }
@@ -146,6 +160,8 @@ trap rollback EXIT INT TERM
 
 tar -xzf "$backup_dir/uploads.tar.gz" -C "$stage_dir"
 [[ -z "$(find "$stage_dir" -type l -print -quit)" ]] || die 'extracted upload archive contains a symbolic link'
+find "$stage_dir" -type d -exec chmod 700 {} +
+find "$stage_dir" -type f -exec chmod 600 {} +
 
 if [[ -d "$restore_target" ]]; then
   move_exact "$restore_target" "$old_dir"
@@ -155,9 +171,13 @@ move_exact "$stage_dir" "$restore_target"
 swapped=true
 
 # Validation and upload staging complete before this destructive, transactional database operation.
-if ! pg_restore --dbname="$RESTORE_DATABASE_URL" \
-  --clean --if-exists --single-transaction --exit-on-error --no-owner --no-privileges \
-  "$backup_dir/database.dump"; then
+if ! PGHOST="$RESTORE_PGHOST" \
+  PGPORT="$RESTORE_PGPORT" \
+  PGDATABASE="$RESTORE_PGDATABASE" \
+  PGUSER="$RESTORE_PGUSER" \
+  PGPASSFILE="$RESTORE_PGPASSFILE" \
+  pg_restore --dbname="$RESTORE_PGDATABASE" --clean --if-exists --single-transaction --exit-on-error --no-owner --no-privileges \
+    "$backup_dir/database.dump"; then
   die 'database restore failed; uploads were rolled back'
 fi
 

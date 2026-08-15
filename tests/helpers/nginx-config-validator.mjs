@@ -115,7 +115,15 @@ export const validateCriticalNginxConfig = (nginx) => {
   const server = extractSingleBlock(nginx, 'server')
   assert.deepEqual(
     serializedDirectives(server, 'server', { allowLocationBlocks: true }),
-    ['index index.html', 'listen 8080', 'root /usr/share/nginx/html'].sort(),
+    [
+      'add_header Content-Security-Policy "default-src \'self\'; base-uri \'self\'; object-src \'none\'; frame-ancestors \'none\'; form-action \'self\'; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data: https:; font-src \'self\' data:; connect-src \'self\'" always',
+      'add_header Referrer-Policy "strict-origin-when-cross-origin" always',
+      'add_header X-Content-Type-Options "nosniff" always',
+      'add_header X-Frame-Options "DENY" always',
+      'index index.html',
+      'listen 8080',
+      'root /usr/share/nginx/html',
+    ].sort(),
     'server block contains missing, duplicate, or unexpected direct directives',
   )
   const locations = extractBlocks(nginx, 'location')
@@ -130,8 +138,13 @@ export const validateCriticalNginxConfig = (nginx) => {
     'proxy_http_version 1.1',
     'proxy_set_header Host $host',
     'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for',
-    'proxy_set_header X-Forwarded-Proto $scheme',
+    'proxy_set_header X-Forwarded-Proto $panshi_forwarded_proto',
     'proxy_set_header X-Real-IP $remote_addr',
+  ])
+  assertExactDirectives(locations, '= /healthz', [
+    'access_log off',
+    'default_type text/plain',
+    'return 200 "ok\\n"',
   ])
   assertExactDirectives(locations, '= /admin', ['return 308 /admin/'])
   assertExactDirectives(locations, '^~ /admin/', ['try_files $uri $uri/ /admin/index.html'])

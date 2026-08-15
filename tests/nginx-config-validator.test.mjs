@@ -64,6 +64,7 @@ const serverDirectiveMutations = [
   ['server-level return', 'return 404;'],
   ['server-level rewrite', 'rewrite ^ /maintenance.html last;'],
   ['server-level error_page', 'error_page 404 /index.html;'],
+  ['server-level header override', 'add_header X-Frame-Options SAMEORIGIN always;'],
 ]
 
 for (const [name, directive] of serverDirectiveMutations) {
@@ -74,5 +75,15 @@ for (const [name, directive] of serverDirectiveMutations) {
   )
 }
 
-const mutationCount = mutations.length + selectorMutations.length + serverDirectiveMutations.length
+const changedForwardedProto = nginx.replace(
+  'proxy_set_header X-Forwarded-Proto $panshi_forwarded_proto;',
+  'proxy_set_header X-Forwarded-Proto $scheme;',
+)
+assert.throws(
+  () => validateCriticalNginxConfig(changedForwardedProto),
+  { name: 'AssertionError' },
+  'API location rejects a forwarded-protocol policy bypass',
+)
+
+const mutationCount = mutations.length + selectorMutations.length + serverDirectiveMutations.length + 1
 console.log(`nginx validator mutation checks passed (${mutationCount} rejected mutations)`)

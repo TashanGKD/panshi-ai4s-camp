@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS frontend-deps
+FROM node:24.14.0-alpine3.23 AS frontend-deps
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/package.json
@@ -23,7 +23,7 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_PUBLIC_WEB_BASE_URL=${VITE_PUBLIC_WEB_BASE_URL}
 RUN npm run build -w @panshi/admin -- --base=/admin/
 
-FROM nginx:1.27-alpine AS production
+FROM nginxinc/nginx-unprivileged:1.29.4-alpine3.23 AS production
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY --from=web-build /app/apps/web/dist /usr/share/nginx/html
 COPY --from=admin-build /app/apps/admin/dist /usr/share/nginx/html/admin

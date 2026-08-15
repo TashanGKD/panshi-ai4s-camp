@@ -14,6 +14,7 @@
     "build": "npm run build --workspaces",
     "test": "node tests/workspaces.test.mjs && npm run test:deployment && npm run test:workspaces",
     "test:deployment": "node tests/nginx-config-validator.test.mjs && node tests/deployment.test.mjs",
+    "test:deployment:build": "node tests/deployment-build.test.mjs",
     "test:workspaces": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint . --ignore-pattern '**/dist/**' --global document --global Node --global getComputedStyle",
@@ -36,6 +37,7 @@
     "pngjs": "^7.0.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   }
 }

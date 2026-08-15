@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS admin-deps
+FROM node:24.14.0-alpine3.23 AS admin-deps
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/admin/package.json ./apps/admin/package.json

@@ -1,45 +1,98 @@
 # Production operations
 
-The production stack builds three independent application images from `apps/web/Dockerfile`, `apps/admin/Dockerfile`, and `apps/api/Dockerfile`. The deployed `frontend` image is built from the web Dockerfile: it combines only the web and admin static artifacts, serves the admin SPA at `/admin/`, serves the public SPA everywhere else, and proxies `/api/` to the API. Uploaded files remain private to the API volume and are never served by Nginx.
+The production frontend image combines only the public web and admin build artifacts. Nginx serves the admin SPA at `/admin/`, serves the public SPA elsewhere, proxies `/api/` to the API, and never mounts or serves private uploads. The API image is built independently.
 
 ## Required environment
 
-Set these variables in the shell or in an operator-managed, untracked environment file before rendering or starting the production Compose stack:
+Store production values in the operator-managed, untracked file `/secure/path/panshi-ai4s-camp.prod.env`:
 
 - `POSTGRES_DB`: PostgreSQL database name.
-- `POSTGRES_USER`: PostgreSQL role used by the container.
+- `POSTGRES_USER`: PostgreSQL application role.
 - `POSTGRES_PASSWORD`: strong PostgreSQL password; there is no production default.
-- `DATABASE_URL`: complete PostgreSQL URL used by migration and API services. URL-encode special characters and keep its database, user, and password consistent with the three PostgreSQL variables.
-- `CORS_ORIGINS`: comma-separated public HTTP(S) origins allowed by the API, for example `https://camp.example.org`.
+- `DATABASE_URL`: complete PostgreSQL URL for migrations and the API. URL-encode special characters and keep the database, user, and password consistent with the PostgreSQL variables.
+- `CORS_ORIGINS`: comma-separated public HTTPS origins accepted by the API, for example `https://camp.example.org`.
 
-Optional deployment settings are `IMAGE_TAG`, `HTTP_BIND_ADDRESS`, and `HTTP_PORT`. Production frontend builds deliberately use a blank `VITE_API_BASE_URL` and `VITE_PUBLIC_WEB_BASE_URL`, so both browser applications use the same origin as Nginx. The admin bundle is built with Vite base `/admin/`.
+Optional settings are `IMAGE_TAG`, `HTTP_PORT`, and `HTTP_BIND_ADDRESS`. The frontend defaults to `127.0.0.1:8080`. Set `HTTP_BIND_ADDRESS` to a non-loopback address only after an operator explicitly chooses and secures that exposure. Frontend builds keep `VITE_API_BASE_URL` and `VITE_PUBLIC_WEB_BASE_URL` blank so both browser applications use the Nginx origin; the admin bundle uses Vite base `/admin/`.
 
-Do not commit a production environment file. The checked-in `.env.example` contains local-development values only.
+Do not commit the production environment file. The checked-in `.env.example` is for local development only.
 
-For local development, plain `docker compose up -d` automatically merges `compose.override.yaml` and publishes PostgreSQL only on `127.0.0.1:5433`. Production commands must keep the explicit `-f compose.yaml -f compose.prod.yaml` file list shown below; this deliberately excludes the local port override.
+## Local and production isolation
 
-## Build and start
+Always give local and production stacks distinct Compose project names. This namespaces their resources: for example, local PostgreSQL uses `panshi-ai4s-camp-local_database-data`, while production uses `panshi-ai4s-camp-prod_database-data`. Production also has separately namespaced upload and backup volumes and therefore cannot resolve the local volumes on the same host.
 
-Validate the merged configuration before starting:
-
-```sh
-docker compose -f compose.yaml -f compose.prod.yaml config -q
-```
-
-Build and start the stack:
+Start local Compose, including `compose.override.yaml` and its loopback PostgreSQL port, with:
 
 ```sh
-docker compose -f compose.yaml -f compose.prod.yaml up --build -d
+docker compose -p panshi-ai4s-camp-local up -d
 ```
 
-Compose enforces this startup order: database healthy → one-shot migration succeeds → API healthy → frontend. The migration command exits nonzero on any connection, checksum, or SQL failure. Because the API depends on `service_completed_successfully`, a failed migration prevents API and frontend startup.
+Every production command must use the explicit environment file, production project, and exact file list below. The file list intentionally excludes the local override.
 
-The named volumes are separate: `database-data` stores PostgreSQL data, `uploads-data` stores API-managed private uploads, and `backups-data` is mounted at `/backups` in PostgreSQL for operator-managed backups. Mounting the backup volume does not create backups automatically.
+## TLS and proxy boundary
 
-To run migration explicitly without starting later services:
+Place an external TLS reverse proxy on the same host in front of the loopback-only Nginx listener. The TLS terminator is the public ingress and should proxy to `127.0.0.1:8080`; it must overwrite client-supplied `X-Forwarded-For` and `X-Forwarded-Proto` values. Nginx forwards `Host`, client-address headers, and a controlled forwarded protocol to the API.
+
+The API currently does not enable Express `trust proxy`, so forwarded headers are not used as an authorization or client-identity source. Production authentication cookies are marked `Secure` because `NODE_ENV=production`, independent of Express protocol inference. Keep direct access to the loopback listener unavailable to remote clients.
+
+Nginx adds frame denial (`X-Frame-Options` and CSP `frame-ancestors`), `nosniff`, a strict referrer policy, and a same-origin-oriented CSP. HSTS must be configured only at the external TLS terminator, where HTTPS is actually established; it is intentionally absent from this HTTP Nginx layer.
+
+The API accepts files up to 5 MiB. Allowing 64 KiB of multipart overhead requires more than 5 MiB at the proxy, so Nginx uses a 6 MiB request-body limit. Requests over 6 MiB are rejected by Nginx.
+
+## Build, migrate, and start
+
+Validate the effective model:
 
 ```sh
-docker compose -f compose.yaml -f compose.prod.yaml run --rm migration
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml config -q
 ```
 
-Inspect service health and logs with `docker compose -f compose.yaml -f compose.prod.yaml ps` and `docker compose -f compose.yaml -f compose.prod.yaml logs SERVICE`. The public Nginx health endpoint is `/healthz`; the API container checks its database-aware `/healthz` internally.
+Build exact release images:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml build
+```
+
+Before a release, resolve and record immutable digests for the exact Node, Nginx, and PostgreSQL base-image tags and pin those digests in the release branch. Do not invent a digest when registry verification is unavailable.
+
+Start the stack:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml up -d
+```
+
+Compose enforces database healthy → one-shot migration succeeds → API healthy → frontend. Migration exits nonzero on connection, checksum, or SQL failure; `service_completed_successfully` prevents the API and frontend from starting after a failed migration.
+
+To run only the migration job explicitly:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml run --rm migration
+```
+
+Inspect status and service logs:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml ps
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml logs SERVICE
+```
+
+After the API is healthy, create the initial administrator. The command prompts for the password without echoing it:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml exec api node apps/api/dist/src/cli/create-admin.js --phone 13800138000 --name "Initial Admin"
+```
+
+Stop services without deleting named data volumes:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml down
+```
+
+The named volumes separately hold PostgreSQL data, API-managed uploads, and operator-managed backups. Mounting `backups-data` does not schedule or create backups.
+
+## Verification tiers and current limitation
+
+`npm test` includes `npm run test:deployment`, a fast, hermetic, offline static gate. It uses the repository's Node YAML parser to inspect the effective local and production models and validates the structured Nginx routing contract. It performs no clean install, shell/Ruby invocation, network access, or Docker call.
+
+`npm run test:deployment:build` is the explicit CI/release gate. It reproduces each Docker dependency/build stage in clean temporary contexts, validates artifacts and API runtime imports, runs native Compose and image/live HTTP checks when Docker is available, and explicitly reports skipped container checks otherwise. At this review, the Docker engine and Compose plugin are unavailable; clean-context builds can run, but container builds, executable Nginx validation, and live proxy checks cannot be claimed.
+
+`VERIFICATION_PROVIDER=disabled` is intentional in the current production model. The code currently supports only `disabled` and a development-only `mock`; no production SMS adapter is implemented, so student verification-code delivery remains unavailable until that adapter is added.

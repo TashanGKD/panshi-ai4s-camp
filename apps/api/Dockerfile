@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS api-build
+FROM node:24.14.0-alpine3.23 AS api-build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/package.json
@@ -12,7 +12,7 @@ RUN npm run build -w @panshi/api \
   && cp -R apps/api/drizzle apps/api/dist/drizzle \
   && npm prune --omit=dev --ignore-scripts
 
-FROM node:24-alpine AS production
+FROM node:24.14.0-alpine3.23 AS production
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=api-build /app/node_modules ./node_modules

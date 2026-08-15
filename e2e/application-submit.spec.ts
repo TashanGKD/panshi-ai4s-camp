@@ -32,7 +32,7 @@ test('student replaces an attachment, submits once, and is logged out when disab
   const database = createDatabaseClient(process.env.TEST_DATABASE_URL!)
   try {
     await database.db.update(users).set({ disabledAt: new Date() }).where(eq(users.role, 'user'))
-    await page.reload(); await expect(page.getByText('账号已停用，当前会话已退出。')).toBeVisible()
+    await page.reload(); await expect(page.getByText('请先登录后查看个人中心。')).toBeVisible()
     expect((await context.cookies()).some((cookie) => cookie.name === 'panshi_session')).toBe(false)
     expect((await database.db.select().from(sessions).where(isNotNull(sessions.revokedAt))).length).toBe(1)
   } finally { await database.close() }

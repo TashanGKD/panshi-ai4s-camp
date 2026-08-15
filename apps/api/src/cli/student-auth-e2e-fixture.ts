@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { normalizeMainlandChinaMobile } from '@panshi/contracts'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { rm } from 'node:fs/promises'
 import { createDatabaseClient } from '../db/client.js'
 import { seedInitialContent } from '../db/seeds/initial-content.js'
 import { users } from '../db/schema.js'
@@ -65,6 +66,9 @@ export const runStudentAuthFixture = async (
         displayName: 'E2E 重置学员', phoneNormalized: safe.resetPhone,
         passwordHash: await hashPassword(safe.resetPassword), role: 'user',
       })
+    } else {
+      const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
+      await Promise.all(['var/student-auth-e2e-uploads', 'var/student-auth-e2e-temp'].map((path) => rm(resolve(projectRoot, path), { recursive: true, force: true })))
     }
   } finally {
     await database.close()

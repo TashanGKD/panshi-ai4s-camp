@@ -29,6 +29,7 @@ export default defineConfig({
         VERIFICATION_TTL_SECONDS: '300', VERIFICATION_COOLDOWN_SECONDS: '60', VERIFICATION_MAX_ATTEMPTS: '3',
         VERIFICATION_MOCK_CODE: process.env.E2E_VERIFICATION_CODE!,
         E2E_RESET_PHONE: process.env.E2E_RESET_PHONE!, E2E_RESET_PASSWORD: process.env.E2E_RESET_PASSWORD!,
+        FILE_STORAGE_ROOT: 'var/student-auth-e2e-uploads', FILE_UPLOAD_TEMP_ROOT: 'var/student-auth-e2e-temp',
       },
     },
     {

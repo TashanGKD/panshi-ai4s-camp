@@ -32,6 +32,7 @@ export default defineConfig({
         E2E_ADMIN_PHONE: adminPhone, E2E_ADMIN_PASSWORD: adminPassword,
         HEALTHCHECK_TIMEOUT_MS: '2000', SESSION_TTL_SECONDS: '28800',
         CORS_ORIGINS: 'http://127.0.0.1:4173,http://127.0.0.1:4175',
+        FILE_STORAGE_ROOT: 'var/content-e2e-uploads', FILE_UPLOAD_TEMP_ROOT: 'var/content-e2e-temp',
       },
     },
     {

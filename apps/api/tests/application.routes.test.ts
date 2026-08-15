@@ -6,9 +6,10 @@ import { ApplicationError, type ApplicationService } from '../src/modules/regist
 
 const student = { id: '10000000-0000-4000-8000-000000000001', displayName: '张三', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
 const admin = { ...student, id: '10000000-0000-4000-8000-000000000002', role: 'admin' as const }
+const disabled = { ...student, id: '10000000-0000-4000-8000-000000000003', disabledAt: new Date() }
 const identityRepository = {
   findUserByPhoneNormalized: async () => null,
-  findSessionByTokenHash: async (hash: string) => hash === hashSessionToken('student-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: student } : hash === hashSessionToken('admin-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: admin } : null,
+  findSessionByTokenHash: async (hash: string) => hash === hashSessionToken('student-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: student } : hash === hashSessionToken('admin-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: admin } : hash === hashSessionToken('disabled-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: disabled } : null,
   revokeSessionByTokenHash: async () => undefined,
 }
 const fakeService = (overrides: Partial<ApplicationService> = {}): ApplicationService => ({
@@ -26,6 +27,11 @@ describe('my application routes', () => {
     const administrator = await request(app(fakeService({ getMine: async () => ({ private: true }) as never }))).get('/api/v1/me/application').set('Cookie', 'panshi_session=admin-token')
     expect(administrator.status).toBe(403)
     expect(administrator.body.error.code).toBe('FORBIDDEN')
+  })
+  it('expires the browser cookie when a disabled session is rejected', async () => {
+    const response = await request(app(fakeService())).get('/api/v1/me/application').set('Cookie', 'panshi_session=disabled-token')
+    expect(response.status).toBe(401)
+    expect(response.headers['set-cookie']?.[0]).toMatch(/^panshi_session=;.*Path=\/.*Expires=/u)
   })
   it('marks account, application, forbidden, and missing me responses private without etags', async () => {
     const responses = await Promise.all([

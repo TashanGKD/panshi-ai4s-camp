@@ -23,6 +23,7 @@ export const createRequireUser = (
     next()
   } catch (error) {
     if (error instanceof AuthenticationError && error.kind === 'unauthorized') {
+      if (readSessionCookie(request.cookies)) response.clearCookie(SESSION_COOKIE_NAME, { path: '/' })
       const status = options.unauthenticatedStatus ?? 401
       next(new HttpError(status, status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED', status === 403 ? '需要管理员会话' : '未登录或会话已失效'))
       return

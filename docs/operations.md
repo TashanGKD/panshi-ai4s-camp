@@ -203,6 +203,8 @@ npm run test:deployment:build
 bash tests/backup-restore.test.sh
 ```
 
+Run the browser release gate separately against the exact local test database with all six E2E safety switches and dedicated test credentials: `npm run test:e2e:all`. The script runs launch, visual/source, review workflow, content publishing, student authentication and application submission in that order. Never parallelize these configurations because they intentionally reset the same dedicated database; each configuration uses and cleans only its named test storage root. Generated 48-page launch screenshots remain under `test-results/launch/**/launch-visual/` and are not deployment inputs.
+
 On a Docker-capable release host, the clean-build gate must report its container checks as executed, not skipped. Then validate the exact production model and deploy only the reviewed image tag:
 
 ```sh

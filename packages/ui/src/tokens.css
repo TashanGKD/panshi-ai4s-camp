@@ -26,7 +26,7 @@
 .event-banner__tagline { max-width: 720px; margin: 0 0 18px; color: rgba(255, 255, 255, 0.85); font-size: 14.5px; line-height: 1.8; }
 .event-banner__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; font-size: 13.5px; }
 .event-banner__meta span { display: inline-flex; align-items: center; gap: 6px; }
-.event-navigation { position: sticky; top: 0; z-index: 5; overflow-x: auto; background: var(--panshi-color-light); border-bottom: 1px solid var(--panshi-color-gray-light); box-shadow: var(--panshi-shadow-nav); }
+.event-navigation { position: sticky; top: 0; z-index: 5; background: var(--panshi-color-light); border-bottom: 1px solid var(--panshi-color-gray-light); box-shadow: var(--panshi-shadow-nav); }
 .event-navigation__inner { display: flex; gap: 4px; }
 .event-navigation__link { padding: 13px 16px; color: var(--panshi-color-gray-dark); border-bottom: 2px solid transparent; font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; transition: var(--panshi-transition); }
 .event-navigation__link:hover,
@@ -48,8 +48,8 @@
 
 @media (max-width: 640px) {
   .event-banner__title { font-size: 23px; }
-  /* Structural overflow sizing for the approved single-row scrollable navigation; not a visual token. */
-  .event-navigation__inner { width: max-content; }
+  .event-navigation__inner { flex-wrap: wrap; justify-content: center; gap: 0 4px; padding-inline: 8px; }
+  .event-navigation__link { padding: 9px 8px; font-size: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

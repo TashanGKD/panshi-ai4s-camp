@@ -38,4 +38,6 @@
 
 @media (max-width: 640px) {
   .source-reference .source-title { font-size: 23px; }
+  .source-reference .source-nav-inner { flex-wrap: wrap; justify-content: center; gap: 0 4px; padding-inline: 8px; overflow-x: visible; }
+  .source-reference .source-nav a { padding: 9px 8px; font-size: 13px; }
 }

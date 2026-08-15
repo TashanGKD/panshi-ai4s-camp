@@ -2,6 +2,7 @@ import { normalizeMainlandChinaMobile } from '@panshi/contracts'
 import { eq } from 'drizzle-orm'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { rm } from 'node:fs/promises'
 import { createDatabaseClient } from '../db/client.js'
 import { contentModules, contentVersions, users } from '../db/schema.js'
 import { hashPassword } from '../modules/identity/password.js'
@@ -80,7 +81,11 @@ export const runContentPublishingFixture = async (
   const database = createDatabaseClient(databaseUrl)
   try {
     if (operation === 'seed') await seedFixture(database, phone, password)
-    else await clearFixture(database)
+    else {
+      await clearFixture(database)
+      const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
+      await Promise.all(['var/content-e2e-uploads', 'var/content-e2e-temp'].map((path) => rm(resolve(projectRoot, path), { recursive: true, force: true })))
+    }
   } finally {
     await database.close()
   }

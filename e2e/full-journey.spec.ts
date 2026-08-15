@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page, type TestInfo } from '@playwright/test'
+import { runLaunchFixture } from '../apps/api/src/cli/launch-e2e-fixture'
 
 const apiBase = 'http://127.0.0.1:3030'
 const webBase = 'http://127.0.0.1:4200'
@@ -10,6 +11,11 @@ const adminPhone = '+8613999999999'
 const adminPassword = process.env.E2E_ADMIN_PASSWORD!
 const verificationCode = process.env.E2E_VERIFICATION_CODE!
 const pdf = Buffer.from('JVBERi0xLjcKJcOiw6PDj8OTCjEgMCBvYmoKPDwgL1R5cGUgL0NhdGFsb2cgL1BhZ2VzIDIgMCBSID4+CmVuZG9iagoyIDAgb2JqCjw8IC9UeXBlIC9QYWdlcyAvS2lkcyBbXSAvQ291bnQgMCA+PgplbmRvYmoKeHJlZgowIDMKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE5IDAwMDAwIG4gCjAwMDAwMDAwNjggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSAzIC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxMjAKJSVFT0YK', 'base64')
+
+test.beforeEach(async () => {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL
+  await runLaunchFixture('reset')
+})
 
 const expectPrivate = (response: APIResponse) => {
   expect(response.headers()['cache-control']).toBe('private, no-store')
@@ -58,6 +64,13 @@ test.describe.serial('launch journey and visual acceptance', () => {
     expect(displayPublished.ok()).toBe(true)
     await admin.getByRole('link', { name: '展示设置' }).click()
     await expect(admin.getByText(/已发布版本 2/u)).toBeVisible()
+
+    const countBefore = await adminContext.request.get(`${apiBase}/api/v1/public/statistics/applications`)
+    expect((await countBefore.json()).data).toEqual(expect.objectContaining({ visible: true, submittedCount: 0 }))
+    const publicCount = await adminContext.newPage()
+    await publicCount.goto(webBase)
+    await expect(publicCount.getByLabel('报名人数').locator('strong')).toHaveText('0')
+    await publicCount.close()
 
     const studentContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })
     const student = await studentContext.newPage()
@@ -138,8 +151,10 @@ test.describe.serial('launch journey and visual acceptance', () => {
     for await (const chunk of downloadStream) downloadedChunks.push(Buffer.from(chunk))
     expect(Buffer.concat(downloadedChunks)).toEqual(pdf)
 
+    const countAfter = await studentContext.request.get(`${apiBase}/api/v1/public/statistics/applications`)
+    expect((await countAfter.json()).data).toEqual(expect.objectContaining({ visible: true, submittedCount: 1 }))
     await student.goto(webBase)
-    await expect(student.getByLabel('报名人数')).toContainText('1')
+    await expect(student.getByLabel('报名人数').locator('strong')).toHaveText('1')
 
     const persistedResponse = await adminContext.request.get(`${apiBase}/api/v1/admin/applications/${applicationId}`)
     expectPrivate(persistedResponse)
@@ -157,6 +172,9 @@ test.describe.serial('launch journey and visual acceptance', () => {
     const viewports = [{ name: '1440x900', width: 1440, height: 900 }, { name: '1280x800', width: 1280, height: 800 }, { name: '390x844', width: 390, height: 844 }]
     const publicPages = [['home', '/'], ['schedule', '/schedule'], ['register', '/application'], ['transport', '/travel'], ['contact', '/contact'], ['resources', '/resources'], ['login', '/login'], ['profile', '/account']] as const
     const adminPages = [['dashboard', '', '工作台'], ['content', 'content/basic', '基本信息'], ['applications', 'applications', '报名审核'], ['resources', 'content/resources', '相关资料'], ['users', 'administrators', '管理员账号'], ['audit', 'audit-logs', '操作日志'], ['system', 'system-status', '系统状态']] as const
+    const setup = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })
+    await registerAndLoginStudent(await setup.newPage())
+    await setup.close()
     for (const viewport of viewports) {
       const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, isMobile: viewport.width < 500 })
       const page = await context.newPage()
@@ -183,6 +201,22 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
   if (name.startsWith('public-')) {
     await expect(page.locator('.event-banner')).toBeVisible()
     await expect(page.locator('.event-navigation')).toBeVisible()
+    const shellTokens = await page.evaluate(() => {
+      const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
+      return {
+        banner: style('.event-banner').backgroundImage,
+        title: [style('.event-banner__title').fontWeight, style('.event-banner__title').lineHeight],
+        nav: [style('.event-navigation').position, style('.event-navigation').backgroundColor, style('.event-navigation').boxShadow],
+        cards: [...document.querySelectorAll<HTMLElement>('.info-card')].map((card) => {
+          const computed = getComputedStyle(card)
+          return [computed.border, computed.borderRadius]
+        }),
+      }
+    })
+    expect(shellTokens.banner).toBe('linear-gradient(135deg, rgb(14, 46, 79) 0%, rgb(36, 80, 124) 55%, rgb(62, 118, 172) 100%)')
+    expect(shellTokens.title).toEqual(['800', page.viewportSize()!.width <= 640 ? '32.2px' : '42px'])
+    expect(shellTokens.nav).toEqual(['sticky', 'rgb(255, 255, 255)', 'rgba(14, 46, 79, 0.04) 0px 2px 8px 0px'])
+    expect(shellTokens.cards.every(([border, radius]) => border === '1px solid rgb(233, 236, 239)' && radius === '20px')).toBe(true)
   }
   if (name.startsWith('public-home-')) await expect(page.locator('.info-card').first()).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
@@ -192,6 +226,27 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
       const style = getComputedStyle(element)
       const rect = element.getBoundingClientRect()
       return style.display !== 'none' && style.visibility !== 'hidden' && style.clipPath !== 'inset(50%)' && rect.width > 0 && rect.height > 0
+    })
+    const scrollers = [...document.querySelectorAll<HTMLElement>('.table-scroll')].map((container) => {
+      const rect = container.getBoundingClientRect()
+      const lastCell = container.querySelector<HTMLElement>('tbody tr:first-child td:last-child, thead tr:last-child th:last-child')
+      const before = container.scrollLeft
+      container.scrollLeft = container.scrollWidth
+      lastCell?.scrollIntoView({ block: 'center', inline: 'nearest' })
+      const lastRect = lastCell?.getBoundingClientRect()
+      const currentRect = container.getBoundingClientRect()
+      const x = lastRect ? Math.max(lastRect.left, currentRect.left) + Math.min(lastRect.width, currentRect.right - Math.max(lastRect.left, currentRect.left)) / 2 : -1
+      const y = lastRect ? lastRect.top + lastRect.height / 2 : -1
+      const hit = lastCell ? document.elementFromPoint(x, y) : null
+      const result = {
+        withinViewport: rect.left >= -1 && rect.right <= viewport.width + 1,
+        overflow: getComputedStyle(container).overflowX,
+        scrollable: container.scrollWidth > container.clientWidth,
+        reachedFarEdge: container.scrollLeft > before,
+        lastCellVisible: Boolean(lastRect && lastRect.right <= currentRect.right + 1 && lastRect.left < currentRect.right && hit && (lastCell!.contains(hit) || hit.contains(lastCell!))),
+      }
+      container.scrollLeft = before
+      return result
     })
     return {
       overflow: document.documentElement.scrollWidth - viewport.width,
@@ -204,6 +259,7 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
         return !insideScroller && (rect.left < -1 || rect.right > viewport.width + 1)
       }).map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || element.tagName),
       tinyActions: critical.filter((element) => ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName) && element.getBoundingClientRect().width < 24).map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || element.tagName),
+      scrollers,
     }
     function* generateAncestors(element: HTMLElement) {
       let current = element.parentElement
@@ -213,5 +269,32 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
   expect(audit.overflow, `${name} horizontal overflow`).toBeLessThanOrEqual(1)
   expect(audit.clipped, `${name} clipped critical elements`).toEqual([])
   expect(audit.tinyActions, `${name} unusable actions`).toEqual([])
+  for (const scroller of audit.scrollers) {
+    expect(scroller.withinViewport, `${name} table scroller inside viewport`).toBe(true)
+    expect(scroller.overflow, `${name} table overflow contract`).toBe('auto')
+    if (scroller.scrollable) {
+      expect(scroller.reachedFarEdge, `${name} table reaches far edge`).toBe(true)
+      expect(scroller.lastCellVisible, `${name} far-edge cell hit-test`).toBe(true)
+    }
+  }
+  const actions = page.locator('a:visible,button:visible,input:visible,select:visible,textarea:visible')
+  for (let index = 0; index < Math.min(await actions.count(), 80); index += 1) {
+    const action = actions.nth(index)
+    if (await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return getComputedStyle(element).clipPath === 'inset(50%)' || rect.width < 24 || rect.height < 16
+    })) continue
+    if (await action.evaluate((element) => Boolean(element.closest('.table-scroll')))) continue
+    await action.scrollIntoViewIfNeeded()
+    const box = await action.boundingBox()
+    if (!box) continue
+    const hit = await action.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      return Boolean(target && (element.contains(target) || target.contains(element)))
+    })
+    expect(hit, `${name} action ${index} center hit-test`).toBe(true)
+  }
+  await page.evaluate(() => scrollTo(0, 0))
   await page.screenshot({ path: testInfo.outputPath('launch-visual', `${name}.png`), fullPage: true, animations: 'disabled' })
 }

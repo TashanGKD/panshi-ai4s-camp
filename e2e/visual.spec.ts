@@ -176,7 +176,7 @@ test('source-aligned common values are exact', async ({ page }) => {
   expect(styles.cardBorder).toBe('1px solid rgb(233, 236, 239)')
   expect(styles.cardRadius).toBe('20px')
   expect(styles.cardShadow).toBe('rgba(15, 46, 79, 0.08) 0px 2px 8px 0px')
-  expect(styles.navLinkPadding).toBe('13px 16px')
+  expect(styles.navLinkPadding).toBe(desktop ? '13px 16px' : '9px 8px')
   expect(styles.sectionPaddingTop).toBe('44px')
   expect(styles.paragraphLineHeight).toBe('28.5px')
   expect(styles.sidebarDisplay).toBe('grid')
@@ -232,7 +232,7 @@ test('navigation is keyboard visible and mobile sidebar follows content', async 
   expect(ordering.pageHasHorizontalOverflow).toBe(false)
   if ((await page.viewportSize())!.width <= 640) {
     expect(ordering.asideTop).toBeGreaterThanOrEqual(ordering.mainBottom)
-    expect(ordering.navScrollable).toBe(true)
+    expect(ordering.navScrollable).toBe(false)
   } else {
     expect(ordering.asideLeft).toBeGreaterThanOrEqual(ordering.mainRight)
     expect(ordering.navScrollable).toBe(false)

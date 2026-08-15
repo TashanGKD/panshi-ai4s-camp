@@ -362,11 +362,33 @@ describe('initial PostgreSQL schema', () => {
     `)
 
     expect(triggers.rows.map(({ trigger_name }) => trigger_name)).toEqual([
+      'application_status_history_immutable',
       'application_versions_immutable_delete',
       'application_versions_immutable_update',
       'audit_logs_append_only',
       'content_versions_immutable',
       'registration_form_versions_immutable',
+    ])
+  })
+
+  it('defines application status history immutability as a row-level update and delete guard', async () => {
+    const trigger = await pool.query<{
+      event_manipulation: string
+      action_timing: string
+      action_orientation: string
+      action_statement: string
+    }>(`
+      select event_manipulation, action_timing, action_orientation, action_statement
+      from information_schema.triggers
+      where event_object_schema = 'public'
+        and event_object_table = 'application_status_history'
+        and trigger_name = 'application_status_history_immutable'
+      order by event_manipulation
+    `)
+
+    expect(trigger.rows).toEqual([
+      expect.objectContaining({ event_manipulation: 'DELETE', action_timing: 'BEFORE', action_orientation: 'ROW', action_statement: 'EXECUTE FUNCTION reject_application_status_history_mutation()' }),
+      expect.objectContaining({ event_manipulation: 'UPDATE', action_timing: 'BEFORE', action_orientation: 'ROW', action_statement: 'EXECUTE FUNCTION reject_application_status_history_mutation()' }),
     ])
   })
 
@@ -618,6 +640,7 @@ describe('initial PostgreSQL schema', () => {
       '0012_application_submission.sql',
       '0013_review_workflow.sql',
       '0014_private_review_history.sql',
+      '0015_application_status_history_immutability.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

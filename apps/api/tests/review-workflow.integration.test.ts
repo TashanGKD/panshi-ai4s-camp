@@ -74,6 +74,25 @@ describe('review workflow PostgreSQL', () => {
     expect(audit).not.toContain('请向学员公开补充要求')
   })
 
+  it('rejects history updates and deletes without changing the row while allowing truncate cleanup', async () => {
+    const [original] = await database.db.select().from(applicationStatusHistory)
+    expect(original).toBeDefined()
+
+    await expect(database.pool.query(
+      'UPDATE application_status_history SET internal_note = $1 WHERE id = $2',
+      ['篡改后的说明', original!.id],
+    )).rejects.toThrow(/application status history is immutable/iu)
+    await expect(database.pool.query(
+      'DELETE FROM application_status_history WHERE id = $1',
+      [original!.id],
+    )).rejects.toThrow(/application status history is immutable/iu)
+
+    const [unchanged] = await database.db.select().from(applicationStatusHistory).where(eq(applicationStatusHistory.id, original!.id))
+    expect(unchanged).toEqual(original)
+    await expect(database.pool.query('TRUNCATE application_status_history')).resolves.toMatchObject({ command: 'TRUNCATE' })
+    expect(await database.db.select().from(applicationStatusHistory)).toEqual([])
+  })
+
   it('returns partial bulk results and exports filtered safe CSV with a BOM', async () => {
     const service = createReviewService(createReviewRepository(database.db))
     const bulk = await service.bulkTransition(admin, { applicationIds: ['30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000099'], targetStatus: 'reviewing' })

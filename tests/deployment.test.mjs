@@ -3,7 +3,9 @@ import { spawnSync } from 'node:child_process'
 import { cp, mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { validateCriticalNginxConfig } from './helpers/nginx-config-validator.mjs'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 const readProjectFile = (path) => readFile(join(projectRoot, path), 'utf8')
@@ -33,6 +35,21 @@ const runSuccessfully = (command, args, options = {}) => {
 }
 
 const pathExists = async (path) => stat(path).then(() => true, () => false)
+const fetchEventually = async (url) => {
+  let lastError
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      const response = await globalThis.fetch(url)
+      if (response.ok) return response
+      lastError = new Error(`HTTP ${response.status} from ${url}`)
+    } catch (error) {
+      lastError = error
+    }
+    await delay(200)
+  }
+  throw lastError
+}
+
 const copyClean = async (sourcePath, destinationRoot) => {
   const source = join(projectRoot, sourcePath)
   const destination = join(destinationRoot, sourcePath)
@@ -137,53 +154,8 @@ for (const privateOrGeneratedPath of ['.env', 'node_modules', 'dist', 'var/uploa
   assert.ok(ignoredPaths.has(privateOrGeneratedPath), `.dockerignore must exclude ${privateOrGeneratedPath}`)
 }
 
-const extractBlocks = (source, keyword) => {
-  const blocks = new Map()
-  const pattern = new RegExp(`(?:^|\\n)\\s*${keyword}\\s+([^\\n{]+)\\s*\\{`, 'gu')
-  for (const match of source.matchAll(pattern)) {
-    const openIndex = match.index + match[0].lastIndexOf('{')
-    let depth = 1
-    let quote = ''
-    let closeIndex = openIndex + 1
-    for (; closeIndex < source.length && depth > 0; closeIndex += 1) {
-      const character = source[closeIndex]
-      if (quote) {
-        if (character === quote && source[closeIndex - 1] !== '\\') quote = ''
-      } else if (character === '"' || character === "'") {
-        quote = character
-      } else if (character === '{') {
-        depth += 1
-      } else if (character === '}') {
-        depth -= 1
-      }
-    }
-    assert.equal(depth, 0, `unbalanced ${keyword} block for ${match[1].trim()}`)
-    blocks.set(match[1].trim(), source.slice(openIndex + 1, closeIndex - 1))
-  }
-  return blocks
-}
-
-const directives = (block) => new Map(block
-  .split(/;\s*(?:\r?\n|$)/u)
-  .map((line) => line.trim())
-  .filter((line) => line !== '' && !line.includes('{'))
-  .map((line) => {
-    const separator = line.search(/\s/u)
-    return separator === -1 ? [line, ''] : [line.slice(0, separator), line.slice(separator).trim()]
-  }))
-
 const nginx = await readProjectFile('deploy/nginx.conf')
-const locations = extractBlocks(nginx, 'location')
-for (const selector of ['= /healthz', '= /uploads', '^~ /uploads/', '/api/', '= /admin', '^~ /admin/', '/']) {
-  assert.ok(locations.has(selector), `Nginx must define location ${selector}`)
-}
-assert.equal(directives(locations.get('/api/')).get('proxy_pass'), 'http://api:3001', '/api/ must proxy without stripping its prefix')
-assert.equal(directives(locations.get('= /admin')).get('return'), '308 /admin/', '/admin must redirect to its canonical trailing-slash URL')
-assert.equal(directives(locations.get('^~ /admin/')).get('try_files'), '$uri $uri/ /admin/index.html', 'admin location must use its SPA fallback')
-assert.equal(directives(locations.get('/')).get('try_files'), '$uri $uri/ /index.html', 'public location must use its SPA fallback')
-assert.equal(directives(locations.get('= /uploads')).get('return'), '404', 'exact /uploads path must be denied')
-assert.equal(directives(locations.get('^~ /uploads/')).get('return'), '404', '/uploads descendants must be denied')
-assert.doesNotMatch(nginx, /(?:alias|root)\s+[^;]*uploads/iu, 'Nginx must never map the private uploads directory')
+validateCriticalNginxConfig(nginx)
 
 const parseYaml = (path) => {
   const ruby = "data = YAML.safe_load(File.read(ARGV.fetch(0)), [], [], true); puts JSON.generate(data)"
@@ -250,7 +222,7 @@ assert.ok(!frontend.volumes?.some((volume) => String(volume).startsWith('uploads
 assert.deepEqual(new Set(Object.keys(productionModel.volumes)), new Set(['database-data', 'uploads-data', 'backups-data']))
 
 const packageJson = JSON.parse(await readProjectFile('package.json'))
-assert.equal(packageJson.scripts['test:deployment'], 'node tests/deployment.test.mjs')
+assert.equal(packageJson.scripts['test:deployment'], 'node tests/nginx-config-validator.test.mjs && node tests/deployment.test.mjs')
 assert.match(packageJson.scripts.test, /npm run test:deployment/u, 'normal npm test must include deployment regressions')
 
 const operations = await readProjectFile('docs/operations.md')
@@ -288,6 +260,40 @@ if (dockerEngine.status === 0) {
     }
     runSuccessfully('docker', ['run', '--rm', '--add-host', 'api:127.0.0.1', `${tagPrefix}-web`, 'nginx', '-t'], { label: 'executable Nginx configuration validation' })
     runSuccessfully('docker', ['run', '--rm', '--entrypoint', 'node', `${tagPrefix}-api`, '--input-type=module', '-e', "await import('./apps/api/dist/src/server.js'); await import('./apps/api/dist/src/db/migrate.js'); await import('@panshi/contracts')"], { label: 'API image runtime imports' })
+
+    const network = `${tagPrefix}-network`
+    const apiContainer = `${tagPrefix}-api-stub`
+    const frontendContainer = `${tagPrefix}-frontend`
+    try {
+      runSuccessfully('docker', ['network', 'create', network], { label: 'create deployment test network' })
+      runSuccessfully('docker', [
+        'run', '--detach', '--rm', '--network', network, '--name', apiContainer, '--entrypoint', 'node', `${tagPrefix}-api`,
+        '-e', "require('node:http').createServer((request,response)=>{response.setHeader('content-type','application/json');response.end(JSON.stringify({url:request.url}))}).listen(3001,'0.0.0.0')",
+      ], { label: 'start API routing stub' })
+      runSuccessfully('docker', ['run', '--detach', '--rm', '--network', network, '--name', frontendContainer, '--publish', '127.0.0.1::8080', `${tagPrefix}-web`], { label: 'start frontend routing probe' })
+      const published = runSuccessfully('docker', ['port', frontendContainer, '8080/tcp'], { label: 'resolve frontend test port' }).stdout.trim()
+      assert.match(published, /^127\.0\.0\.1:\d+$/u, 'frontend test port must bind only to loopback')
+      const baseUrl = `http://${published}`
+
+      const health = await fetchEventually(`${baseUrl}/healthz`)
+      assert.equal(health.status, 200)
+      const apiProbe = await fetchEventually(`${baseUrl}/api/probe?value=1`)
+      assert.deepEqual(await apiProbe.json(), { url: '/api/probe?value=1' }, 'Nginx must preserve the API prefix and query')
+      const adminRedirect = await globalThis.fetch(`${baseUrl}/admin`, { redirect: 'manual' })
+      assert.equal(adminRedirect.status, 308)
+      assert.equal(adminRedirect.headers.get('location'), '/admin/')
+      const adminFallback = await globalThis.fetch(`${baseUrl}/admin/deep/link`)
+      assert.equal(adminFallback.status, 200)
+      assert.match(await adminFallback.text(), /\/admin\/assets\//u)
+      const webFallback = await globalThis.fetch(`${baseUrl}/schedule/deep/link`)
+      assert.equal(webFallback.status, 200)
+      assert.doesNotMatch(await webFallback.text(), /\/admin\/assets\//u)
+      assert.equal((await globalThis.fetch(`${baseUrl}/uploads`)).status, 404)
+      assert.equal((await globalThis.fetch(`${baseUrl}/uploads/private.pdf`)).status, 404)
+    } finally {
+      run('docker', ['rm', '--force', frontendContainer, apiContainer])
+      run('docker', ['network', 'rm', network])
+    }
   } finally {
     run('docker', ['image', 'rm', ...builds.map(([, , tag]) => tag)])
   }

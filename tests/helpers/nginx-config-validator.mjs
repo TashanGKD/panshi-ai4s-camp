@@ -1,34 +1,55 @@
 import assert from 'node:assert/strict'
 
+const findClosingBrace = (source, openIndex, label) => {
+  let comment = false
+  let depth = 1
+  let quote = ''
+  for (let index = openIndex + 1; index < source.length; index += 1) {
+    const character = source[index]
+    if (comment) {
+      if (character === '\n') comment = false
+      continue
+    }
+    if (quote) {
+      if (character === quote && source[index - 1] !== '\\') quote = ''
+    } else if (character === '#') {
+      comment = true
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === '{') {
+      depth += 1
+    } else if (character === '}') {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+  assert.fail(`unbalanced block for ${label}`)
+}
+
 export const extractBlocks = (source, keyword) => {
   const blocks = new Map()
   const pattern = new RegExp(`(?:^|\\n)\\s*${keyword}\\s+([^\\n{]+)\\s*\\{`, 'gu')
   for (const match of source.matchAll(pattern)) {
     const openIndex = match.index + match[0].lastIndexOf('{')
-    let depth = 1
-    let quote = ''
-    let closeIndex = openIndex + 1
-    for (; closeIndex < source.length && depth > 0; closeIndex += 1) {
-      const character = source[closeIndex]
-      if (quote) {
-        if (character === quote && source[closeIndex - 1] !== '\\') quote = ''
-      } else if (character === '"' || character === "'") {
-        quote = character
-      } else if (character === '{') {
-        depth += 1
-      } else if (character === '}') {
-        depth -= 1
-      }
-    }
-    assert.equal(depth, 0, `unbalanced ${keyword} block for ${match[1].trim()}`)
     const selector = match[1].trim()
+    const closeIndex = findClosingBrace(source, openIndex, `${keyword} ${selector}`)
     assert.ok(!blocks.has(selector), `duplicate ${keyword} block for ${selector}`)
-    blocks.set(selector, source.slice(openIndex + 1, closeIndex - 1))
+    blocks.set(selector, source.slice(openIndex + 1, closeIndex))
   }
   return blocks
 }
 
-const parseDirectives = (block, selector) => {
+const extractSingleBlock = (source, keyword) => {
+  const pattern = new RegExp(`(?:^|\\n)\\s*${keyword}\\s*\\{`, 'gu')
+  const matches = [...source.matchAll(pattern)]
+  assert.equal(matches.length, 1, `Nginx must define exactly one ${keyword} block`)
+  const match = matches[0]
+  const openIndex = match.index + match[0].lastIndexOf('{')
+  const closeIndex = findClosingBrace(source, openIndex, keyword)
+  return source.slice(openIndex + 1, closeIndex)
+}
+
+const parseDirectives = (block, selector, { allowLocationBlocks = false } = {}) => {
   const parsed = []
   let buffer = ''
   let comment = false
@@ -50,8 +71,14 @@ const parseDirectives = (block, selector) => {
     } else if (character === '"' || character === "'") {
       quote = character
       buffer += character
-    } else if (character === '{' || character === '}') {
-      assert.fail(`nested content handler in critical location ${selector}`)
+    } else if (character === '{') {
+      if (!allowLocationBlocks) assert.fail(`nested content handler in critical location ${selector}`)
+      const nestedHeader = buffer.trim()
+      assert.match(nestedHeader, /^location\s+[^{}]+$/u, `unexpected nested block in ${selector}`)
+      buffer = ''
+      index = findClosingBrace(block, index, nestedHeader)
+    } else if (character === '}') {
+      assert.fail(`unmatched closing brace in ${selector}`)
     } else if (character === ';') {
       const directive = buffer.trim()
       assert.notEqual(directive, '', `empty directive in critical location ${selector}`)
@@ -70,7 +97,7 @@ const parseDirectives = (block, selector) => {
   return parsed
 }
 
-const serializedDirectives = (block, selector) => parseDirectives(block, selector)
+const serializedDirectives = (block, selector, options) => parseDirectives(block, selector, options)
   .map(({ name, value }) => `${name}${value === '' ? '' : ` ${value}`}`)
   .sort()
 
@@ -85,10 +112,19 @@ const assertExactDirectives = (locations, selector, expected) => {
 }
 
 export const validateCriticalNginxConfig = (nginx) => {
+  const server = extractSingleBlock(nginx, 'server')
+  assert.deepEqual(
+    serializedDirectives(server, 'server', { allowLocationBlocks: true }),
+    ['index index.html', 'listen 8080', 'root /usr/share/nginx/html'].sort(),
+    'server block contains missing, duplicate, or unexpected direct directives',
+  )
   const locations = extractBlocks(nginx, 'location')
-  for (const selector of ['= /healthz', '= /uploads', '^~ /uploads/', '/api/', '= /admin', '^~ /admin/', '/']) {
-    assert.ok(locations.has(selector), `Nginx must define location ${selector}`)
-  }
+  const allowedSelectors = ['= /healthz', '= /uploads', '^~ /uploads/', '/api/', '= /admin', '^~ /admin/', '/']
+  assert.deepEqual(
+    [...locations.keys()].sort(),
+    [...allowedSelectors].sort(),
+    'Nginx location selectors must exactly match the production routing contract',
+  )
   assertExactDirectives(locations, '/api/', [
     'proxy_pass http://api:3001',
     'proxy_http_version 1.1',

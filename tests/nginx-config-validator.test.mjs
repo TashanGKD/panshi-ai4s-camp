@@ -10,6 +10,18 @@ const insertDirective = (source, selector, directive) => {
   return source.replace(locationStart, `${locationStart}\n      ${directive}`)
 }
 
+const insertLocation = (source, selector) => {
+  const rootLocation = '    location / {'
+  assert.ok(source.includes(rootLocation), 'fixture requires the public root location')
+  return source.replace(rootLocation, `    location ${selector} {\n      return 418;\n    }\n\n${rootLocation}`)
+}
+
+const insertServerDirective = (source, directive) => {
+  const serverStart = '  server {'
+  assert.ok(source.includes(serverStart), 'fixture requires the production server block')
+  return source.replace(serverStart, `${serverStart}\n    ${directive}`)
+}
+
 validateCriticalNginxConfig(nginx)
 
 const mutations = [
@@ -33,4 +45,34 @@ for (const [name, selector, directive] of mutations) {
   )
 }
 
-console.log(`nginx validator mutation checks passed (${mutations.length} rejected mutations)`)
+const selectorMutations = [
+  ['regex API override', '~ ^/api/'],
+  ['exact admin child override', '= /admin/deep/link'],
+  ['specific public web prefix override', '/schedule/'],
+  ['exact uploads child override', '= /uploads/private.pdf'],
+]
+
+for (const [name, selector] of selectorMutations) {
+  assert.throws(
+    () => validateCriticalNginxConfig(insertLocation(nginx, selector)),
+    { name: 'AssertionError' },
+    name,
+  )
+}
+
+const serverDirectiveMutations = [
+  ['server-level return', 'return 404;'],
+  ['server-level rewrite', 'rewrite ^ /maintenance.html last;'],
+  ['server-level error_page', 'error_page 404 /index.html;'],
+]
+
+for (const [name, directive] of serverDirectiveMutations) {
+  assert.throws(
+    () => validateCriticalNginxConfig(insertServerDirective(nginx, directive)),
+    { name: 'AssertionError' },
+    name,
+  )
+}
+
+const mutationCount = mutations.length + selectorMutations.length + serverDirectiveMutations.length
+console.log(`nginx validator mutation checks passed (${mutationCount} rejected mutations)`)

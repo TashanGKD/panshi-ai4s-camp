@@ -7,7 +7,7 @@ COPY apps/web/package.json ./apps/web/package.json
 COPY apps/admin/package.json ./apps/admin/package.json
 COPY packages/contracts ./packages/contracts
 COPY packages/ui ./packages/ui
-RUN npm ci --workspace @panshi/web --workspace @panshi/admin --workspace @panshi/contracts --workspace @panshi/ui
+RUN npm ci --include-workspace-root --workspace @panshi/web --workspace @panshi/admin --workspace @panshi/contracts --workspace @panshi/ui
 
 FROM frontend-deps AS web-build
 COPY apps/web ./apps/web

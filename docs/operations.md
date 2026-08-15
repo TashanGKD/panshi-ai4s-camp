@@ -16,6 +16,8 @@ Optional deployment settings are `IMAGE_TAG`, `HTTP_BIND_ADDRESS`, and `HTTP_POR
 
 Do not commit a production environment file. The checked-in `.env.example` contains local-development values only.
 
+For local development, plain `docker compose up -d` automatically merges `compose.override.yaml` and publishes PostgreSQL only on `127.0.0.1:5433`. Production commands must keep the explicit `-f compose.yaml -f compose.prod.yaml` file list shown below; this deliberately excludes the local port override.
+
 ## Build and start
 
 Validate the merged configuration before starting:

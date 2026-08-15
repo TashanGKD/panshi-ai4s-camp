@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY packages/contracts ./packages/contracts
-RUN npm ci --workspace @panshi/api --workspace @panshi/contracts
+RUN npm ci --include-workspace-root --workspace @panshi/api --workspace @panshi/contracts
 COPY apps/api ./apps/api
 RUN npm run build -w @panshi/api \
   && npm exec -- tsc --project apps/api/tsconfig.json --noEmit false --outDir apps/api/dist --rootDir apps/api \

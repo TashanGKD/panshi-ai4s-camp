@@ -6,7 +6,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/admin/package.json ./apps/admin/package.json
 COPY packages/contracts ./packages/contracts
 COPY packages/ui ./packages/ui
-RUN npm ci --workspace @panshi/admin --workspace @panshi/contracts --workspace @panshi/ui
+RUN npm ci --include-workspace-root --workspace @panshi/admin --workspace @panshi/contracts --workspace @panshi/ui
 
 FROM admin-deps AS admin-build
 COPY apps/admin ./apps/admin

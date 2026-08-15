@@ -7,8 +7,6 @@ services:
       POSTGRES_DB: panshi_ai4s_camp
       POSTGRES_USER: panshi
       POSTGRES_PASSWORD: panshi_local
-    ports:
-      - "127.0.0.1:5433:5432"
     volumes:
       - database-data:/var/lib/postgresql/data
     healthcheck:

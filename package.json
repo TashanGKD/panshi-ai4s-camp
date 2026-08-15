@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "node tests/workspaces.test.mjs && npm run test:workspaces",
+    "test": "node tests/workspaces.test.mjs && npm run test:deployment && npm run test:workspaces",
+    "test:deployment": "node tests/deployment.test.mjs",
     "test:workspaces": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "lint": "eslint . --ignore-pattern '**/dist/**' --global document --global Node --global getComputedStyle",

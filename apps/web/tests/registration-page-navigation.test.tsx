@@ -142,4 +142,29 @@ describe('registration route navigation guard', () => {
     expect(screen.getByRole('button', { name: '删除并替换' })).toBeEnabled()
     expect(api.removeFile).not.toHaveBeenCalled()
   })
+
+  it('keeps an inactive answer while the applicant fills, saves, and submits the new required question', async () => {
+    const retiredQuestion = { id: '20000000-0000-4000-8000-000000000001', type: 'short_text' as const, label: '旧问题', helpText: '', required: false, order: 0, active: false, validation: { minLength: 2, maxLength: 30 } }
+    const activeQuestion = { id: '20000000-0000-4000-8000-000000000003', type: 'short_text' as const, label: '新版必填问题', helpText: '', required: true, order: 1, active: true, validation: { minLength: 2, maxLength: 30 } }
+    const migrated = {
+      ...application, revision: 2, formVersion: 2,
+      form: { ...DEFAULT_REGISTRATION_FORM, questions: [retiredQuestion, activeQuestion] },
+      answers: { [retiredQuestion.id]: '保留的旧答案' }, retiredAnswerIds: [retiredQuestion.id],
+    }
+    api.getMine.mockResolvedValue(response(migrated))
+    api.saveDraft.mockImplementation(async (body) => response({ ...migrated, revision: 3, answers: body.answers }))
+    api.submit.mockResolvedValue({ apiVersion: 'v1', data: { status: 'submitted' } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+
+    expect(await screen.findByText('报名表已更新，原问题答案已保留；请核对当前表单后提交。')).toBeVisible()
+    expect(screen.queryByLabelText('旧问题')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/新版必填问题/u), { target: { value: '新的研究问题' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith(expect.objectContaining({
+      answers: { [retiredQuestion.id]: '保留的旧答案', [activeQuestion.id]: '新的研究问题' },
+    })))
+    fireEvent.click(await screen.findByRole('button', { name: '正式提交' }))
+    await waitFor(() => expect(api.submit).toHaveBeenCalledWith(3))
+  })
 })

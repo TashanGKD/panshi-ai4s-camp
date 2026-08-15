@@ -102,10 +102,11 @@ export const createApplicationService = (repository: ApplicationRepository) => (
     const current = await repository.getOrCreateDraft(user)
     if (current.status !== 'draft') throw new ApplicationError(409, 'APPLICATION_LOCKED', '报名已提交，不能修改')
     validateProfile(parsed.data.profile, false)
-    const currentQuestionIds = new Set(current.form.questions.map((question) => question.id))
-    const retired = new Set(Object.keys(current.answers).filter((id) => !currentQuestionIds.has(id)))
-    validateAnswers(RegistrationFormSchema.parse(current.form), parsed.data.answers, false, retired)
-    const saved = await repository.saveDraft({ ...parsed.data, user })
+    const retired = new Set(current.retiredAnswerIds)
+    const answers = { ...parsed.data.answers }
+    for (const id of retired) if (current.answers[id] !== undefined) answers[id] = current.answers[id]
+    validateAnswers(RegistrationFormSchema.parse(current.form), answers, false, retired)
+    const saved = await repository.saveDraft({ ...parsed.data, answers, user })
     if (!saved) throw new ApplicationError(409, 'APPLICATION_REVISION_CONFLICT', '草稿已在其他页面更新，请刷新后重试')
     return response(repository, saved)
   },
@@ -123,7 +124,7 @@ export const createApplicationService = (repository: ApplicationRepository) => (
       educationStage: current.profile.educationStage, majorResearchDirection: current.profile.majorResearchDirection,
     }
     validateProfile(currentProfile, true)
-    validateAnswers(current.form, current.answers, true, new Set(Object.keys(current.answers)))
+    validateAnswers(current.form, current.answers, true, new Set(current.retiredAnswerIds))
     const activeSlots = new Map(current.form.attachments.filter((item) => item.active).map((item) => [item.id, item]))
     const attached = new Map(current.attachments.map((file) => [file.slotId, file]))
     for (const slot of activeSlots.values()) if (slot.required && !attached.has(slot.id)) {

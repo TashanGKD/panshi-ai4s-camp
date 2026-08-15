@@ -17,6 +17,7 @@ const other = { ...student, id: '10000000-0000-4000-8000-000000000002', phoneNor
 const admin = { ...student, id: '10000000-0000-4000-8000-000000000003', phoneNormalized: '+8613700137000', role: 'admin' as const }
 const questionId = '20000000-0000-4000-8000-000000000001'
 const slotId = '20000000-0000-4000-8000-000000000002'
+const newQuestionId = '20000000-0000-4000-8000-000000000003'
 const form: RegistrationForm = { ...DEFAULT_REGISTRATION_FORM, questions: [{ id: questionId, type: 'short_text', label: '研究问题', helpText: '', required: true, order: 0, active: true, validation: { minLength: 2, maxLength: 30 } }], attachments: [{ id: slotId, label: '简历', helpText: '', required: true, order: 0, active: true, allowedExtensions: ['pdf'], maxSizeBytes: 1_000_000 }] }
 const profile = { name: '张三', email: 'z@example.com', organization: '物理所', department: '研究生部', identityType: '研究生', educationStage: '博士', majorResearchDirection: '凝聚态' }
 
@@ -131,18 +132,23 @@ describe('application PostgreSQL workflow', () => {
     const submitted = await service.submit(student, { expectedRevision: mine.data.application.revision })
     await expect(service.saveDraft(student, { expectedRevision: mine.data.application.revision + 1, profile, answers: {}, attachments: [] })).rejects.toMatchObject({ code: 'APPLICATION_LOCKED' })
     const [snapshotBefore] = await database.db.select({ snapshot: applicationVersions.snapshot }).from(applicationVersions).where(eq(applicationVersions.id, submitted.data.versionId))
+    expect(snapshotBefore?.snapshot).toMatchObject({ attachments: [{ fileId: file!.id, sha256: 'c'.repeat(64), validatedType: 'pdf' }] })
+    const fileService = createFileService(createFileRepository(database.db), { createStorageKey: () => '', put: async () => { throw new Error('unused') }, open: async () => { throw new Error('unused') }, remove: async () => { throw new Error('submitted files must not reach storage removal') } })
+    await expect(fileService.hide(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
+    await expect(fileService.remove(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
+    await expect(fileService.hide(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
+    await expect(fileService.remove(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
+    await database.db.update(files).set({
+      originalName: 'changed.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: 999, sha256: 'd'.repeat(64), lifecycleState: 'deleted', deletedAt: new Date(),
+    }).where(eq(files.id, file!.id))
     const v2: RegistrationForm = { ...form, questions: [{ ...form.questions[0]!, label: '新版问题' }] }
     await database.db.insert(registrationFormVersions).values({ version: 2, schema: v2 as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date() })
     const [snapshotAfter] = await database.db.select({ snapshot: applicationVersions.snapshot }).from(applicationVersions).where(eq(applicationVersions.id, submitted.data.versionId))
     expect(snapshotAfter).toEqual(snapshotBefore)
     await expect(database.pool.query('UPDATE application_versions SET reason = $1 WHERE id = $2', ['tamper', submitted.data.versionId])).rejects.toThrow(/immutable/iu)
     const logs = JSON.stringify(await database.db.select().from(auditLogs))
-    expect(logs).not.toContain('绝密研究问题'); expect(logs).not.toContain('private-name.pdf')
-    const fileService = createFileService(createFileRepository(database.db), { createStorageKey: () => '', put: async () => { throw new Error('unused') }, open: async () => { throw new Error('unused') }, remove: async () => { throw new Error('submitted files must not reach storage removal') } })
-    await expect(fileService.hide(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
-    await expect(fileService.remove(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
-    await expect(fileService.hide(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
-    await expect(fileService.remove(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
+    expect(logs).not.toContain('绝密研究问题'); expect(logs).not.toContain('private-name.pdf'); expect(logs).not.toContain('c'.repeat(64))
   })
 
   it('rejects closed windows and disabled accounts', async () => {
@@ -165,6 +171,35 @@ describe('application PostgreSQL workflow', () => {
     expect(migrated.data.application.answers[questionId]).toBe('保留的旧答案')
     expect(migrated.data.application.retiredAnswerIds).toEqual([questionId])
     expect(migrated.data.application.revision).toBe(mine.data.application.revision + 1)
+  })
+
+  it('preserves an inactive answer as retired history while saving and submitting a new required answer', async () => {
+    const { service, file } = await prepareDraftWithPdf(100)
+    const v2: RegistrationForm = {
+      ...form,
+      questions: [
+        { ...form.questions[0]!, active: false, required: false },
+        { id: newQuestionId, type: 'short_text', label: '新版必填问题', helpText: '', required: true, order: 1, active: true, validation: { minLength: 2, maxLength: 30 } },
+      ],
+    }
+    await publishFormVersion(v2)
+    const migrated = await service.getMine(student)
+    expect(migrated.data.application.retiredAnswerIds).toEqual([questionId])
+
+    const saved = await service.saveDraft(student, {
+      expectedRevision: migrated.data.application.revision,
+      profile,
+      answers: { [newQuestionId]: '新版研究问题' },
+      attachments: [{ slotId, fileId: file.id }],
+    })
+    expect(saved.data.application.answers).toEqual({ [questionId]: '附件规则迁移测试', [newQuestionId]: '新版研究问题' })
+    const submitted = await service.submit(student, { expectedRevision: saved.data.application.revision })
+    const [version] = await database.db.select({ snapshot: applicationVersions.snapshot }).from(applicationVersions).where(eq(applicationVersions.id, submitted.data.versionId))
+    expect(version?.snapshot).toMatchObject({
+      answers: { [newQuestionId]: '新版研究问题' },
+      retiredAnswers: { [questionId]: '附件规则迁移测试' },
+      retiredAnswerIds: [questionId],
+    })
   })
 
   it('unlinks a draft attachment whose slot is disabled in v2 without deleting the owner file', async () => {

@@ -157,7 +157,8 @@ export const createApplicationRepository = (
       if (!record) return null
       const lockedFiles = await transaction.select({
         id: files.id, slotId: applicationFiles.attachmentSlot, ownerUserId: files.ownerUserId, purpose: files.purpose,
-        attachmentSlot: files.attachmentSlot, mimeType: files.mimeType, sizeBytes: files.sizeBytes,
+        attachmentSlot: files.attachmentSlot, originalName: files.originalName, mimeType: files.mimeType,
+        sizeBytes: files.sizeBytes, sha256: files.sha256,
         lifecycleState: files.lifecycleState, hiddenAt: files.hiddenAt, deletedAt: files.deletedAt,
       }).from(applicationFiles).innerJoin(files, eq(files.id, applicationFiles.fileId))
         .where(eq(applicationFiles.applicationId, record.id)).orderBy(asc(files.id)).for('update', { of: files })
@@ -183,17 +184,23 @@ export const createApplicationRepository = (
         .map((slot) => ({ path: `attachments.${slot.id}`, message: '此附件为必填项' }))
       if (missingRequired.length > 0) throw new ApplicationSubmissionError('attachment_invalid', missingRequired)
       const submittedAt = now()
+      const retiredAnswerIds = record.retiredAnswerIds
+      const retiredIds = new Set(retiredAnswerIds)
+      const activeAnswers = Object.fromEntries(Object.entries(record.answers).filter(([id]) => !retiredIds.has(id)))
+      const retiredAnswers = Object.fromEntries(Object.entries(record.answers).filter(([id]) => retiredIds.has(id)))
       const snapshot = {
         formVersionId: record.formVersionId, formVersion: record.formVersion, form: record.form,
-        profile: record.profile, answers: record.answers,
-        attachments: record.attachments.map(({ id, slotId, originalName, mimeType, sizeBytes }) => ({ fileId: id, slotId, originalName, mimeType, sizeBytes })),
+        profile: record.profile, answers: activeAnswers, retiredAnswers, retiredAnswerIds,
+        attachments: lockedFiles.map(({ id, slotId, originalName, mimeType, sizeBytes, sha256 }) => ({
+          fileId: id, slotId, originalName, mimeType, validatedType: validatedExtensionByMime[mimeType]!, sizeBytes, sha256,
+        })),
         submittedAt: submittedAt.toISOString(),
       }
       const [version] = await transaction.insert(applicationVersions).values({ applicationId: record.id, snapshot: snapshot as unknown as JsonObject, reason: 'initial_submission' }).returning({ id: applicationVersions.id })
       if (!version) throw new Error('Application version creation failed')
       await transaction.update(applications).set({ status: 'submitted', revision: locked.revision + 1, submittedAt, updatedAt: submittedAt }).where(eq(applications.id, record.id))
       await transaction.insert(applicationStatusHistory).values({ applicationId: record.id, fromStatus: 'draft', toStatus: 'submitted', changedBy: input.user.id })
-      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(record.answers).length, attachmentCount: record.attachments.length } })
+      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
       return { applicationId: record.id, versionId: version.id, submittedAt }
     }),
 

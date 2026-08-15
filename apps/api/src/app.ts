@@ -55,6 +55,10 @@ export type AppDependencies = {
 }
 
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const privateNoStore: RequestHandler = (_request, response, next) => {
+  response.setHeader('Cache-Control', 'private, no-store')
+  next()
+}
 
 const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler => {
   const allowlist = new Set(allowedOrigins)
@@ -108,9 +112,12 @@ export const createApp = ({
   config,
 }: AppDependencies) => {
   const app = express()
+  app.disable('etag')
   const sessionTtlSeconds = config.sessionTtlSeconds ?? 28_800
 
   app.use(requestId)
+  app.use('/api/v1/me', privateNoStore)
+  app.use('/api/v1/files', privateNoStore)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
   app.use(createOriginGuard(config.allowedOrigins))

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AdminClient, AdminResource, AdminResourceInput } from '../api/admin-client'
+import { AdminApiError, type AdminClient, type AdminResource, type AdminResourceInput } from '../api/admin-client'
 
 const empty: AdminResourceInput = { key: '', title: '', description: null, fileId: '', accessScope: 'public', sortOrder: 0 }
 
@@ -8,6 +8,7 @@ export function ResourcesPage({ client }: { client: AdminClient }) {
   const [form, setForm] = useState<AdminResourceInput>(empty)
   const [editing, setEditing] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [previewing, setPreviewing] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const load = useCallback(async () => { const response = await client.listResources(); setItems(response.data.resources) }, [client])
   useEffect(() => { void load().catch(() => setMessage('资料列表加载失败')) }, [load])
@@ -26,9 +27,21 @@ export function ResourcesPage({ client }: { client: AdminClient }) {
   }
   const edit = (item: AdminResource) => { setEditing(item.id); setForm({ key: item.key, title: item.title, description: item.description, fileId: item.fileId, accessScope: item.accessScope, sortOrder: item.sortOrder }) }
   const publish = async (item: AdminResource) => { setPending(true); try { await client.publishResource(item.id, !item.active); await load() } catch { setMessage('发布状态更新失败') } finally { setPending(false) } }
+  const preview = async (item: AdminResource) => {
+    setPreviewing(item.id); setMessage('正在准备预览')
+    try {
+      const file = await client.previewResource(item.id)
+      const url = URL.createObjectURL(file.blob)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      setMessage(`已打开预览：${file.filename}`)
+    } catch (error) {
+      setMessage(error instanceof AdminApiError && error.status === 404 ? '资料文件已失效或下线，请刷新列表后重试' : '预览文件失败，请稍后重试')
+    } finally { setPreviewing(null) }
+  }
   return <section><header className="admin-page-header"><div><h1>相关资料</h1><p>上传资料、设置访问范围并发布；隐藏或删除底层文件后下载会立即失效。</p></div></header>
     {message ? <p role="status">{message}</p> : null}
     <div className="content-editor"><label>标识<input value={form.key} maxLength={80} onChange={(event) => setForm({ ...form, key: event.target.value })} /></label><label>标题<input value={form.title} maxLength={200} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label>说明<textarea value={form.description ?? ''} maxLength={1000} onChange={(event) => setForm({ ...form, description: event.target.value || null })} /></label><label>访问范围<select value={form.accessScope} onChange={(event) => setForm({ ...form, accessScope: event.target.value as AdminResourceInput['accessScope'], fileId: '' })}><option value="public">公开</option><option value="authenticated">登录学员</option><option value="admitted">已录取学员</option></select></label><label>排序<input type="number" min={0} max={10000} value={form.sortOrder} onChange={(event) => setForm({ ...form, sortOrder: Number(event.target.value) })} /></label><label>资料文件（PDF/DOCX）<input type="file" accept=".pdf,.docx" disabled={pending} onChange={(event) => void upload(event.target.files?.[0])} /></label><p>文件标识：{form.fileId || '尚未上传'}</p><button type="button" disabled={pending || !form.key || !form.title || !form.fileId} onClick={() => void save()}>{editing ? '保存修改并转为未发布' : '保存资料草稿'}</button></div>
-    {items.length === 0 ? <p>暂无资料。</p> : <table><thead><tr><th>标题</th><th>范围</th><th>排序</th><th>状态</th><th>操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.title}</td><td>{item.accessScope}</td><td>{item.sortOrder}</td><td>{item.active ? '已发布' : '草稿/已下线'}</td><td><button type="button" disabled={pending} onClick={() => edit(item)}>编辑</button><button type="button" disabled={pending} onClick={() => void publish(item)}>{item.active ? '下线' : '发布'}</button></td></tr>)}</tbody></table>}
+    {items.length === 0 ? <p>暂无资料。</p> : <table><thead><tr><th>标题</th><th>范围</th><th>排序</th><th>状态</th><th>操作</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{item.title}</td><td>{item.accessScope}</td><td>{item.sortOrder}</td><td>{item.active ? '已发布' : '草稿/已下线'}</td><td><button type="button" disabled={pending || previewing !== null} onClick={() => void preview(item)}>{previewing === item.id ? '正在预览' : '预览文件'}</button><button type="button" disabled={pending || previewing !== null} onClick={() => edit(item)}>编辑</button><button type="button" disabled={pending || previewing !== null} onClick={() => void publish(item)}>{item.active ? '下线' : '发布'}</button></td></tr>)}</tbody></table>}
   </section>
 }

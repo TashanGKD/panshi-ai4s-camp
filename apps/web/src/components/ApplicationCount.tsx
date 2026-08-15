@@ -7,37 +7,37 @@ type Count = ApplicationCountResponse['data']
 export function ApplicationCount({ load = getApplicationCount }: { load?: (signal: AbortSignal) => Promise<Count> }) {
   const [state, setState] = useState<{ value: Count | null, error: boolean }>({ value: null, error: false })
   const generation = useRef(0)
-  const lastVisible = useRef(false)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     let controller: AbortController | undefined
     let active = true
-    const clear = () => { if (timer) clearTimeout(timer); timer = undefined; controller?.abort() }
+    const clearTimer = () => { if (timer) clearTimeout(timer); timer = undefined }
     const schedule = () => {
       if (!active || document.hidden) return
+      clearTimer()
       timer = setTimeout(() => void refresh(), 60_000)
     }
     const refresh = async () => {
       if (!active || document.hidden) return
+      clearTimer()
       const current = ++generation.current
       controller?.abort(); controller = new AbortController()
-      let shouldPoll = false
       try {
         const value = await load(controller.signal)
-        shouldPoll = value.visible
-        lastVisible.current = value.visible
         if (active && current === generation.current) setState({ value, error: false })
       } catch (error) {
-        shouldPoll = lastVisible.current
         if (active && current === generation.current && !(error instanceof DOMException && error.name === 'AbortError')) setState({ value: null, error: true })
       } finally {
-        if (active && current === generation.current && shouldPoll) schedule()
+        if (active && current === generation.current) schedule()
       }
     }
-    const onVisibility = () => { clear(); if (!document.hidden) void refresh() }
+    const onVisibility = () => {
+      clearTimer()
+      if (document.hidden) { generation.current += 1; controller?.abort() } else void refresh()
+    }
     document.addEventListener('visibilitychange', onVisibility)
     void refresh()
-    return () => { active = false; generation.current += 1; document.removeEventListener('visibilitychange', onVisibility); clear() }
+    return () => { active = false; generation.current += 1; document.removeEventListener('visibilitychange', onVisibility); clearTimer(); controller?.abort() }
   }, [load])
 
   if (state.error) return <p role="status">报名人数暂时无法获取</p>

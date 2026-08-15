@@ -17,7 +17,7 @@ export type ResourceRecord = {
 export type ResourceRepository = {
   listAvailable: () => Promise<readonly ResourceRecord[]>
   findAvailableById: (id: string) => Promise<ResourceRecord | null>
-  findManageableById: (id: string) => Promise<ResourceRecord | null>
+  findManageableById: (id: string) => Promise<(ResourceRecord & { active: boolean }) | null>
   isAdmitted: (userId: string) => Promise<boolean>
   listAdmin: () => Promise<readonly (ResourceRecord & { active: boolean })[]>
   createDraft: (input: Omit<ResourceRecord, 'id'>, actorUserId: string) => Promise<ResourceRecord & { active: boolean }>
@@ -45,7 +45,13 @@ export const createResourceRepository = (db: NodePgDatabase<typeof schema>): Res
       return record ?? null
     },
     findManageableById: async (id) => {
-      const [record] = await base().where(eq(resources.id, id)).limit(1) as ResourceRecord[]
+      const [record] = await db.select({
+        id: resources.id, key: resources.key, title: resources.title, description: resources.description,
+        fileId: resources.fileId, accessScope: resources.accessLevel, sortOrder: resources.sortOrder, active: resources.active,
+      }).from(resources).innerJoin(files, and(
+        eq(files.id, resources.fileId), eq(files.purpose, 'resource'), eq(files.lifecycleState, 'active'),
+        eq(files.visibility, resources.accessLevel), isNull(files.hiddenAt), isNull(files.deletedAt),
+      )).where(eq(resources.id, id)).limit(1) as Array<ResourceRecord & { active: boolean }>
       return record ?? null
     },
     isAdmitted: async (userId) => {

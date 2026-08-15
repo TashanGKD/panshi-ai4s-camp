@@ -5,7 +5,7 @@ import { ApplicationCount } from '../src/components/ApplicationCount'
 
 describe('ApplicationCount', () => {
   beforeEach(() => vi.useFakeTimers())
-  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+  afterEach(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); vi.useRealTimers(); vi.restoreAllMocks() })
 
   it('loads once and refreshes every 60 seconds only while visible', async () => {
     const load = vi.fn().mockResolvedValue({ visible: true as const, submittedCount: 12, updatedAt: '2026-08-15T12:00:00.000Z' })
@@ -38,12 +38,23 @@ describe('ApplicationCount', () => {
     expect(load.mock.calls.at(-1)?.[0].aborted).toBe(true)
   })
 
-  it('does not poll while the published switch is hidden', async () => {
-    const load = vi.fn().mockResolvedValue({ visible: false as const })
+  it('keeps polling while the switch is false and automatically renders after it becomes true', async () => {
+    const load = vi.fn().mockResolvedValueOnce({ visible: false as const }).mockResolvedValueOnce({ visible: true as const, submittedCount: 15, updatedAt: '2026-08-15T12:01:00.000Z' })
     render(<ApplicationCount load={load} />)
     await act(async () => Promise.resolve())
-    await act(async () => { vi.advanceTimersByTime(180_000); await Promise.resolve() })
-    expect(load).toHaveBeenCalledTimes(1)
+    expect(screen.queryByLabelText('报名人数')).not.toBeInTheDocument()
+    await act(async () => { vi.advanceTimersByTime(60_000); await Promise.resolve() })
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('15')).toBeInTheDocument()
+  })
+
+  it('keeps polling after a true response and hides immediately when the switch becomes false', async () => {
+    const load = vi.fn().mockResolvedValueOnce({ visible: true as const, submittedCount: 8, updatedAt: '2026-08-15T12:00:00.000Z' }).mockResolvedValueOnce({ visible: false as const })
+    render(<ApplicationCount load={load} />)
+    await act(async () => Promise.resolve())
+    expect(screen.getByText('8')).toBeInTheDocument()
+    await act(async () => { vi.advanceTimersByTime(60_000); await Promise.resolve() })
+    expect(screen.queryByLabelText('报名人数')).not.toBeInTheDocument()
   })
 
   it('clears a stale count after an error and keeps retrying a previously visible counter', async () => {

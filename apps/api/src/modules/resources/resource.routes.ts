@@ -49,7 +49,7 @@ export const createResourceRouter = (sessions: SessionService, service: Resource
       response.setHeader('Content-Length', String(opened.record.sizeBytes))
       response.setHeader('Content-Disposition', buildContentDisposition(opened.record.originalName))
       response.setHeader('X-Content-Type-Options', 'nosniff')
-      response.setHeader('Cache-Control', opened.record.visibility === 'public' ? 'public, max-age=0, must-revalidate' : 'private, no-store')
+      response.setHeader('Cache-Control', opened.isPublished && !opened.isAdminPreview && opened.anonymousPublic ? 'public, max-age=0, must-revalidate' : 'private, no-store')
       request.once('aborted', abort); response.once('close', abort)
       await pipeline(stream, response)
     } catch (error) {
@@ -70,6 +70,29 @@ const ResourceInput = z.object({
 
 export const createAdminResourceRouter = (sessions: SessionService, service: ResourceService) => {
   const router = Router()
+  router.get('/:id/preview', async (request, response, next) => {
+    let stream: Awaited<ReturnType<ResourceService['preview']>>['stream'] | undefined
+    const abort = () => stream?.destroy(new Error('Preview client disconnected'))
+    try {
+      const id = Id.safeParse(request.params.id)
+      if (!id.success) throw new HttpError(404, 'RESOURCE_NOT_AVAILABLE', '资料不存在或不可访问')
+      privateNoStore(response)
+      const actor = await resolveOptional(sessions, request.cookies)
+      if (!actor || actor.role !== 'admin' || actor.disabledAt !== null) throw new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
+      const opened = await service.preview(id.data, actor)
+      stream = opened.stream
+      response.setHeader('Content-Type', opened.record.mimeType)
+      response.setHeader('Content-Length', String(opened.record.sizeBytes))
+      response.setHeader('Content-Disposition', buildContentDisposition(opened.record.originalName))
+      response.setHeader('X-Content-Type-Options', 'nosniff')
+      request.once('aborted', abort); response.once('close', abort)
+      await pipeline(stream, response)
+    } catch (error) {
+      if (request.aborted || response.destroyed) return
+      if (response.headersSent) { response.destroy(error instanceof Error ? error : undefined); return }
+      next(mapError(error))
+    } finally { request.off('aborted', abort); response.off('close', abort); stream?.destroy() }
+  })
   router.use(createRequireUser(sessions), requireAdmin)
   router.get('/', async (_request, response, next) => { try { response.json({ apiVersion: 'v1', data: { resources: await service.listAdmin() } }) } catch (error) { next(mapError(error)) } })
   router.post('/', async (request, response, next) => {

@@ -86,6 +86,7 @@ export type AdminClient = {
   bulkTransitionApplications: (input: { applicationIds: string[], targetStatus: string, publicMessage?: string, internalNote?: string }) => Promise<{ data: { results: Array<{ applicationId: string, success: boolean, status?: string, code?: string, message?: string }> } }>
   exportApplications: (query: URLSearchParams) => Promise<Blob>
   listResources: () => Promise<{ data: { resources: AdminResource[] } }>
+  previewResource: (id: string) => Promise<{ blob: Blob, filename: string }>
   uploadResourceFile: (file: File, accessScope: AdminResource['accessScope']) => Promise<{ data: { file: { id: string } } }>
   createResource: (input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
   updateResource: (id: string, input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
@@ -151,6 +152,12 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     bulkTransitionApplications: async (input) => (await send('/api/v1/admin/applications/bulk-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     exportApplications: async (query) => (await send(`/api/v1/admin/applications/export.csv?${query.toString()}`)).blob(),
     listResources: async () => (await send('/api/v1/admin/resources')).json(),
+    previewResource: async (id) => {
+      const response = await send(`/api/v1/admin/resources/${encodeURIComponent(id)}/preview`)
+      const disposition = response.headers.get('Content-Disposition') ?? ''
+      const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/iu)?.[1]
+      return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : '资料文件' }
+    },
     uploadResourceFile: async (file, accessScope) => {
       const body = new FormData(); body.append('file', file); body.append('purpose', 'resource'); body.append('visibility', accessScope)
       return (await send('/api/v1/files', { method: 'POST', body })).json()

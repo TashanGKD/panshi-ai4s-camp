@@ -24,11 +24,29 @@ export const createResourceService = (repository: ResourceRepository, files: Pic
         .map((record) => ({ id: record.id, key: record.key, title: record.title, description: record.description, accessScope: record.accessScope, sortOrder: record.sortOrder, downloadUrl: `/api/v1/resources/${record.id}/download` }))
     },
     open: async (id: string, actor: AuthenticatedSessionUser | null) => {
-      const record = actor?.role === 'admin' && actor.disabledAt === null
-        ? await repository.findManageableById(id)
-        : await repository.findAvailableById(id)
+      const record = await repository.findAvailableById(id)
       if (!record || !await canRead(record, actor)) throw available()
-      try { return await files.openPublishedResource(record.fileId) } catch { throw available() }
+      try {
+        return {
+          ...await files.openPublishedResource(record.fileId),
+          isPublished: true as const,
+          isAdminPreview: false as const,
+          anonymousPublic: actor === null && record.accessScope === 'public',
+        }
+      } catch { throw available() }
+    },
+    preview: async (id: string, actor: AuthenticatedSessionUser) => {
+      if (actor.role !== 'admin' || actor.disabledAt !== null) throw available()
+      const record = await repository.findManageableById(id)
+      if (!record) throw available()
+      try {
+        return {
+          ...await files.openPublishedResource(record.fileId),
+          isPublished: record.active,
+          isAdminPreview: true as const,
+          anonymousPublic: false as const,
+        }
+      } catch { throw available() }
     },
     listAdmin: () => repository.listAdmin(),
     createDraft: (input: Omit<ResourceRecord, 'id'>, actorUserId: string) => repository.createDraft(input, actorUserId),

@@ -51,7 +51,7 @@ Task 9 的管理端通过上述摘要与内容接口实现结构化内容工作�
 
 管理员内容路由只有在真实会话依赖和内容发布 service 同时存在时才挂载。保存、发布和回退审计只记录 actor、模块、revision/version 和结构摘要，不记录正文、联系值或其他原始 payload。写请求继续执行精确 Origin allowlist 校验。
 
-`GET /api/v1/resources` 按匿名、登录、录取身份只返回当前账号可见的已发布资料；`GET /api/v1/resources/:id/download` 复用安全文件流。受限资料统一以 404 隐藏存在性，登录列表及受限下载使用 `private, no-store`。`GET /api/v1/public/statistics/applications` 只返回 `{visible:false}`，或在已发布展示设置开启时返回 `{visible:true,submittedCount,updatedAt}`；统计不包含草稿。
+`GET /api/v1/resources` 按匿名、登录、录取身份只返回当前账号可见的已发布资料；`GET /api/v1/resources/:id/download` 复用安全文件流。只有匿名请求已发布的公开资料时允许共享缓存，登录态下载一律使用 `private, no-store`。管理员通过 `GET /api/v1/admin/resources/:id/preview` 预览已发布或未发布资料，响应始终使用 `private, no-store`。受限或未发布资料在公共下载路由统一以 404 隐藏存在性。`GET /api/v1/public/statistics/applications` 只返回 `{visible:false}`，或在已发布展示设置开启时返回 `{visible:true,submittedCount,updatedAt}`；统计不包含草稿，前端在页面可见期间每 60 秒重新读取开关与人数。
 
 模块没有 `published_version_id` 时返回 404 `CONTENT_NOT_FOUND`，不会回退读取 `content_modules.draft`。数据库中的已发布 payload 会在服务边界按对应 Zod schema 再验证；无效 payload 进入统一 500 `INTERNAL_ERROR`，响应不包含原始数据库值或校验细节。
 

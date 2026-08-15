@@ -7,21 +7,27 @@ import { ResourceAccessError, type ResourceService } from '../src/modules/resour
 
 const user = { id: '10000000-0000-4000-8000-000000000001', displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
 const admitted = { ...user, id: '10000000-0000-4000-8000-000000000002', phoneNormalized: '+8613900139000' }
+const admin = { ...user, id: '10000000-0000-4000-8000-000000000003', phoneNormalized: '+8613700137000', role: 'admin' as const }
 const identityRepository = {
   findUserByPhoneNormalized: async () => null,
   findSessionByTokenHash: async (hash: string) => {
-    const actor = hash === hashSessionToken('user-token') ? user : hash === hashSessionToken('admitted-token') ? admitted : null
+    const actor = hash === hashSessionToken('user-token') ? user : hash === hashSessionToken('admitted-token') ? admitted : hash === hashSessionToken('admin-token') ? admin : null
     return actor ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: actor } : null
   },
   revokeSessionByTokenHash: async () => undefined,
 }
 const publicItem = { id: '20000000-0000-4000-8000-000000000001', key: 'public', title: '公开资料', description: null, accessScope: 'public' as const, sortOrder: 0, downloadUrl: '/api/v1/resources/20000000-0000-4000-8000-000000000001/download' }
 const protectedItem = { ...publicItem, id: '20000000-0000-4000-8000-000000000002', key: 'admitted', title: '录取资料', accessScope: 'admitted' as const, downloadUrl: '/api/v1/resources/20000000-0000-4000-8000-000000000002/download' }
+const draftItem = { ...publicItem, id: '20000000-0000-4000-8000-000000000003', key: 'draft', title: '未发布资料', downloadUrl: '/api/v1/resources/20000000-0000-4000-8000-000000000003/download' }
 const service = {
   list: async (actor: typeof user | null) => actor?.id === admitted.id ? [publicItem, protectedItem] : [publicItem],
   open: async (id: string, actor: typeof user | null) => {
-    if (id === protectedItem.id && actor?.id !== admitted.id) throw new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
-    return { record: { mimeType: 'application/pdf', sizeBytes: 3, originalName: 'guide.pdf', visibility: id === publicItem.id ? 'public' : 'admitted' }, stream: Readable.from(Buffer.from('pdf')) }
+    if (id === draftItem.id || (id === protectedItem.id && actor?.id !== admitted.id)) throw new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
+    return { record: { mimeType: 'application/pdf', sizeBytes: 3, originalName: 'guide.pdf', visibility: id === publicItem.id ? 'public' : 'admitted' }, stream: Readable.from(Buffer.from('pdf')), isPublished: true, isAdminPreview: false, anonymousPublic: actor === null && id === publicItem.id }
+  },
+  preview: async (id: string) => {
+    if (id !== draftItem.id) throw new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
+    return { record: { mimeType: 'application/pdf', sizeBytes: 3, originalName: 'draft.pdf', visibility: 'public' }, stream: Readable.from(Buffer.from('pdf')), isPublished: false, isAdminPreview: true, anonymousPublic: false }
   },
   listAdmin: async () => [], createDraft: async () => { throw new Error('unused') }, updateDraft: async () => { throw new Error('unused') }, setPublished: async () => { throw new Error('unused') },
 } as unknown as ResourceService
@@ -44,11 +50,25 @@ describe('resource and statistics routes', () => {
     expect(response.body.error.code).toBe('RESOURCE_NOT_AVAILABLE'); expect(response.headers['cache-control']).toBe('private, no-store'); expect(response.headers.etag).toBeUndefined()
   })
 
-  it('exposes the safe download filename to the decoupled web origin', async () => {
+  it('allows shared caching only for an anonymous published public download', async () => {
     const response = await request(makeApp()).get(`/api/v1/resources/${publicItem.id}/download`).set('Origin', 'https://camp.example').expect(200)
     expect(response.headers['access-control-expose-headers']).toBe('Content-Disposition')
     expect(response.headers['content-disposition']).toContain("filename*=UTF-8''guide.pdf")
     expect(response.headers['cache-control']).toBe('public, max-age=0, must-revalidate')
+    const studentResponse = await request(makeApp()).get(`/api/v1/resources/${publicItem.id}/download`).set('Cookie', 'panshi_session=user-token').expect(200)
+    expect(studentResponse.headers['cache-control']).toBe('private, no-store')
+    expect(studentResponse.headers.etag).toBeUndefined()
+  })
+
+  it('keeps an unpublished admin preview private while public routes hide it from everyone', async () => {
+    await request(makeApp()).get(`/api/v1/resources/${draftItem.id}/download`).expect(404)
+    await request(makeApp()).get(`/api/v1/resources/${draftItem.id}/download`).set('Cookie', 'panshi_session=user-token').expect(404)
+    await request(makeApp()).get(`/api/v1/admin/resources/${draftItem.id}/preview`).expect(404)
+    await request(makeApp()).get(`/api/v1/admin/resources/${draftItem.id}/preview`).set('Cookie', 'panshi_session=user-token').expect(404)
+    const preview = await request(makeApp()).get(`/api/v1/admin/resources/${draftItem.id}/preview`).set('Cookie', 'panshi_session=admin-token').expect(200)
+    expect(preview.headers['cache-control']).toBe('private, no-store')
+    expect(preview.headers.etag).toBeUndefined()
+    expect(preview.headers['content-disposition']).toContain("filename*=UTF-8''draft.pdf")
   })
 
   it('omits count and timestamp when the published switch is off', async () => {

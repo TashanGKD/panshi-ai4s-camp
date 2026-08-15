@@ -28,7 +28,7 @@ describe('resource access', () => {
     await expect(service.open(records[2]!.id, null)).rejects.toMatchObject({ status: 404, code: 'RESOURCE_NOT_AVAILABLE' })
   })
 
-  it('lets an active administrator preview a valid unpublished resource file', async () => {
+  it('separates published downloads from an active administrator preview', async () => {
     const draft = { ...records[2]!, active: false }
     const openPublishedResource = vi.fn().mockResolvedValue({ record: { id: draft.fileId }, stream: 'stream' })
     const repository = {
@@ -36,8 +36,20 @@ describe('resource access', () => {
     }
     const service = createResourceService(repository as unknown as ResourceRepository, { openPublishedResource } as never)
     const admin = { id: '30000000-0000-4000-8000-000000000009', role: 'admin' as const, disabledAt: null, displayName: '管理员', phoneNormalized: '+8613900000000', passwordHash: '', createdAt: new Date() }
-    await expect(service.open(draft.id, admin)).resolves.toMatchObject({ record: { id: draft.fileId } })
+    await expect(service.open(draft.id, admin)).rejects.toMatchObject({ code: 'RESOURCE_NOT_AVAILABLE' })
+    await expect(service.preview(draft.id, admin)).resolves.toMatchObject({
+      record: { id: draft.fileId }, isPublished: false, isAdminPreview: true, anonymousPublic: false,
+    })
     expect(repository.findManageableById).toHaveBeenCalledWith(draft.id)
+  })
+
+  it('marks only an anonymous published public download as shared-cacheable', async () => {
+    const openPublishedResource = vi.fn().mockResolvedValue({ record: { id: records[0]!.fileId }, stream: 'stream' })
+    const repository = { findAvailableById: vi.fn().mockResolvedValue(records[0]), isAdmitted: vi.fn() }
+    const service = createResourceService(repository as unknown as ResourceRepository, { openPublishedResource } as never)
+    const user = { id: '30000000-0000-4000-8000-000000000001', role: 'user' as const, disabledAt: null, displayName: '学员', phoneNormalized: '+8613800000000', passwordHash: '', createdAt: new Date() }
+    await expect(service.open(records[0]!.id, null)).resolves.toMatchObject({ isPublished: true, isAdminPreview: false, anonymousPublic: true })
+    await expect(service.open(records[0]!.id, user)).resolves.toMatchObject({ isPublished: true, isAdminPreview: false, anonymousPublic: false })
   })
 })
 

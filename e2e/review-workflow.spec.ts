@@ -141,6 +141,17 @@ test('review workflow enforces state, privacy, bulk, export and revision contrac
   const resourceDraftResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources`, { headers: { Origin: adminOrigin }, data: { key: 'admitted-guide', title: '录取学员指南', description: '仅向已录取学员开放', fileId: resourceFileId, accessScope: 'admitted', sortOrder: 0 } })
   privateResponse(resourceDraftResponse); expect(resourceDraftResponse.status()).toBe(201)
   const resourceId = (await resourceDraftResponse.json()).data.resource.id
+  const unpublishedStudentDownload = await studentContext.request.get(`${apiBase}/api/v1/resources/${resourceId}/download`)
+  privateResponse(unpublishedStudentDownload); expect(unpublishedStudentDownload.status()).toBe(404)
+  const adminPreviewResponse = await adminContext.request.get(`${apiBase}/api/v1/admin/resources/${resourceId}/preview`)
+  privateResponse(adminPreviewResponse); expect(adminPreviewResponse.status()).toBe(200)
+  expect(adminPreviewResponse.headers()['content-disposition']).toContain("filename*=UTF-8''")
+
+  await admin.getByRole('link', { name: '相关资料' }).click()
+  await expect(admin.getByText('录取学员指南', { exact: true })).toBeVisible()
+  await admin.getByRole('button', { name: '预览文件' }).click()
+  await expect(admin.getByRole('status')).toContainText('已打开预览')
+
   const resourcePublishResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources/${resourceId}/publish`, { headers: { Origin: adminOrigin } })
   privateResponse(resourcePublishResponse); expect(resourcePublishResponse.ok()).toBe(true)
 

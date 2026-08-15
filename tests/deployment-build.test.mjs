@@ -109,6 +109,27 @@ const composeEnvironment = {
   POSTGRES_PASSWORD: 'deployment-test-only',
   DATABASE_URL: 'postgresql://panshi_app:deployment-test-only@postgres:5432/panshi_prod',
   CORS_ORIGINS: 'https://camp.example.org',
+  OPERATIONS_UID: String(process.getuid?.() ?? 1000),
+  OPERATIONS_GID: String(process.getgid?.() ?? 1000),
+  MAINTENANCE_API_HEALTH_URL: 'http://api:3001/healthz',
+  UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES: '10485760',
+  UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES: '20971520',
+  UPLOAD_ARCHIVE_MAX_ENTRIES: '1000',
+  UPLOAD_ARCHIVE_MAX_PATH_DEPTH: '16',
+  RESTORE_MIN_FREE_BYTES: '1048576',
+  BACKUP_ROOT: '/backups',
+  BACKUP_RETENTION_DAYS: '14',
+  BACKUP_PGHOST: 'postgres',
+  BACKUP_PGPORT: '5432',
+  BACKUP_PGDATABASE: 'panshi_prod',
+  BACKUP_PGUSER: 'panshi_backup',
+  BACKUP_PGPASSFILE_HOST: '/tmp/panshi-backup.pgpass',
+  BACKUP_APP_VERSION: 'deployment-test',
+  RESTORE_PGHOST: 'postgres',
+  RESTORE_PGPORT: '5432',
+  RESTORE_PGDATABASE: 'panshi_restore',
+  RESTORE_PGUSER: 'panshi_restore',
+  RESTORE_PGPASSFILE_HOST: '/tmp/panshi-restore.pgpass',
 }
 const composeCli = run('docker', ['compose', 'version'])
 if (composeCli.status === 0) {
@@ -148,13 +169,16 @@ const builds = [
   ['apps/web/Dockerfile', 'production', `${tagPrefix}-web`],
   ['apps/admin/Dockerfile', 'artifact', `${tagPrefix}-admin`],
   ['apps/api/Dockerfile', 'production', `${tagPrefix}-api`],
+  ['deploy/Dockerfile.operations', null, `${tagPrefix}-operations`],
 ]
 try {
   for (const [dockerfile, target, tag] of builds) {
-    runSuccessfully('docker', ['build', '--file', dockerfile, '--target', target, '--tag', tag, '.'], { label: `Docker build ${dockerfile}` })
+    const targetArgs = target === null ? [] : ['--target', target]
+    runSuccessfully('docker', ['build', '--file', dockerfile, ...targetArgs, '--tag', tag, '.'], { label: `Docker build ${dockerfile}` })
   }
   runSuccessfully('docker', ['run', '--rm', '--add-host', 'api:127.0.0.1', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', `${tagPrefix}-web`, 'nginx', '-t'], { label: 'executable hardened Nginx configuration validation' })
   runSuccessfully('docker', ['run', '--rm', '--entrypoint', 'node', `${tagPrefix}-api`, '--input-type=module', '-e', "await import('./apps/api/dist/src/server.js'); await import('./apps/api/dist/src/db/migrate.js'); await import('./apps/api/dist/src/cli/create-admin.js'); await import('@panshi/contracts')"], { label: 'API image runtime imports' })
+  runSuccessfully('docker', ['run', '--rm', '--entrypoint', '/bin/bash', `${tagPrefix}-operations`, '-lc', 'command -v flock && command -v curl && command -v python3 && command -v tar'], { label: 'operations image runtime tooling' })
 
   const network = `${tagPrefix}-network`
   const apiContainer = `${tagPrefix}-api-stub`

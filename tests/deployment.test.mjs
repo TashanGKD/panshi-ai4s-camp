@@ -32,7 +32,7 @@ const localOverride = await parseYaml('compose.override.yaml')
 const productionOverride = await parseYaml('compose.prod.yaml')
 const localModel = mergeCompose(baseCompose, localOverride)
 const productionModel = mergeCompose(baseCompose, productionOverride)
-const { postgres, migration, api, frontend, backup, restore } = productionModel.services
+const { postgres, migration, api, frontend, 'operations-volume-init': operationsVolumeInit, backup, restore } = productionModel.services
 
 assert.ok(!('name' in baseCompose), 'Compose must not fix a shared project name')
 assert.deepEqual(localModel.services.postgres.ports, ['127.0.0.1:5433:5432'])
@@ -62,6 +62,8 @@ assert.equal(api.environment.CORS_ORIGINS, '${CORS_ORIGINS:?set CORS_ORIGINS}')
 assert.equal(api.environment.FILE_STORAGE_ROOT, '/data/uploads')
 assert.equal(api.environment.BACKUP_ROOT, '/backups')
 assert.equal(api.environment.APP_VERSION, '${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}')
+assert.equal(api.user, '${OPERATIONS_UID:?set OPERATIONS_UID}:${OPERATIONS_GID:?set OPERATIONS_GID}')
+assert.equal(api.depends_on['operations-volume-init'].condition, 'service_completed_successfully')
 assert.ok(!('command' in api), 'API must retain its production image entrypoint')
 assert.equal(frontend.image, 'panshi-ai4s-camp-frontend:${IMAGE_TAG:-local}')
 assert.equal(frontend.build.dockerfile, 'apps/web/Dockerfile')
@@ -70,19 +72,35 @@ assert.deepEqual(frontend.ports, ['${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-
 assert.ok(frontend.healthcheck?.test, 'effective production frontend needs a healthcheck')
 assert.ok(!('command' in frontend), 'frontend must retain its unprivileged Nginx entrypoint')
 assert.ok(!frontend.volumes?.some((volume) => String(volume).startsWith('uploads-data:')), 'frontend must not mount private uploads')
-assert.equal(backup.image, 'postgres:16.12-bookworm')
+assert.equal(operationsVolumeInit.image, 'panshi-ai4s-camp-operations:${IMAGE_TAG:-local}')
+assert.equal(operationsVolumeInit.user, '0:0')
+assert.deepEqual(operationsVolumeInit.command, ['deploy/init-operation-volumes.sh'])
+assert.deepEqual(new Set(operationsVolumeInit.volumes), new Set(['uploads-data:/data', 'backups-data:/backups', './deploy:/workspace/deploy:ro']))
+assert.deepEqual(new Set(operationsVolumeInit.cap_add), new Set(['CHOWN', 'DAC_OVERRIDE', 'FOWNER']))
+assert.equal(backup.image, 'panshi-ai4s-camp-operations:${IMAGE_TAG:-local}')
+assert.equal(backup.build.dockerfile, 'deploy/Dockerfile.operations')
 assert.deepEqual(backup.profiles, ['backup'])
-assert.equal(backup.user, '1000:1000')
+assert.equal(backup.user, '${OPERATIONS_UID:?set OPERATIONS_UID}:${OPERATIONS_GID:?set OPERATIONS_GID}')
 assert.deepEqual(new Set(backup.volumes), new Set(['uploads-data:/data:ro', 'backups-data:/backups', './deploy:/workspace/deploy:ro', '${BACKUP_PGPASSFILE_HOST:?set BACKUP_PGPASSFILE_HOST}:/run/secrets/backup.pgpass:ro']))
 assert.equal(backup.environment.BACKUP_UPLOAD_DIR, '/data/uploads')
 assert.equal(backup.environment.BACKUP_PGPASSFILE, '/run/secrets/backup.pgpass')
+assert.equal(backup.depends_on['operations-volume-init'].condition, 'service_completed_successfully')
+assert.equal(backup.environment.MAINTENANCE_API_HEALTH_URL, '${MAINTENANCE_API_HEALTH_URL:?set MAINTENANCE_API_HEALTH_URL}')
+assert.equal(backup.environment.MAINTENANCE_ACK, '${MAINTENANCE_ACK:-}')
+for (const key of ['UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES', 'UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES', 'UPLOAD_ARCHIVE_MAX_ENTRIES', 'UPLOAD_ARCHIVE_MAX_PATH_DEPTH']) {
+  assert.equal(backup.environment[key], `\${${key}:?set ${key}}`)
+}
 assert.ok(!Object.keys(backup.environment).some((key) => key.startsWith('RESTORE_')), 'backup service must not receive restore settings')
-assert.equal(restore.image, 'postgres:16.12-bookworm')
+assert.equal(restore.image, backup.image)
+assert.equal(restore.build.dockerfile, 'deploy/Dockerfile.operations')
 assert.deepEqual(restore.profiles, ['restore'])
-assert.equal(restore.user, '1000:1000')
-assert.deepEqual(new Set(restore.volumes), new Set(['uploads-data:/data', 'backups-data:/backups:ro', './deploy:/workspace/deploy:ro', '${RESTORE_PGPASSFILE_HOST:?set RESTORE_PGPASSFILE_HOST}:/run/secrets/restore.pgpass:ro']))
+assert.equal(restore.user, '${OPERATIONS_UID:?set OPERATIONS_UID}:${OPERATIONS_GID:?set OPERATIONS_GID}')
+assert.deepEqual(new Set(restore.volumes), new Set(['uploads-data:/data', 'backups-data:/backups', './deploy:/workspace/deploy:ro', '${RESTORE_PGPASSFILE_HOST:?set RESTORE_PGPASSFILE_HOST}:/run/secrets/restore.pgpass:ro']))
 assert.equal(restore.environment.RESTORE_UPLOAD_DIR, '/data/uploads')
 assert.equal(restore.environment.RESTORE_PGPASSFILE, '/run/secrets/restore.pgpass')
+assert.equal(restore.environment.RESTORE_MIN_FREE_BYTES, '${RESTORE_MIN_FREE_BYTES:?set RESTORE_MIN_FREE_BYTES}')
+assert.equal(restore.environment.MAINTENANCE_API_HEALTH_URL, '${MAINTENANCE_API_HEALTH_URL:?set MAINTENANCE_API_HEALTH_URL}')
+assert.equal(restore.environment.MAINTENANCE_ACK, '${MAINTENANCE_ACK:-}')
 assert.ok(!Object.keys(restore.environment).some((key) => key.startsWith('BACKUP_PG')), 'restore service must not receive backup database settings')
 assert.deepEqual(new Set(Object.keys(productionModel.volumes)), new Set(['database-data', 'uploads-data', 'backups-data']))
 
@@ -93,18 +111,25 @@ assert.deepEqual([...localVolumes], ['panshi-ai4s-camp-local_database-data'])
 assert.ok([...productionVolumes].every((volume) => volume.startsWith('panshi-ai4s-camp-prod_')))
 assert.ok([...productionVolumes].every((volume) => !localVolumes.has(volume)), 'local and production named volumes must be isolated')
 
-for (const [name, service] of Object.entries({ postgres, migration, api, frontend, backup, restore })) {
+for (const [name, service] of Object.entries({ postgres, migration, api, frontend, operationsVolumeInit, backup, restore })) {
   assert.deepEqual(service.security_opt, ['no-new-privileges:true'], `${name} must prohibit privilege escalation`)
 }
-for (const [name, service] of Object.entries({ migration, api, frontend, backup, restore })) {
+for (const [name, service] of Object.entries({ migration, api, frontend, operationsVolumeInit, backup, restore })) {
   assert.deepEqual(service.cap_drop, ['ALL'], `${name} must drop Linux capabilities`)
   assert.equal(service.read_only, true, `${name} root filesystem must be read-only`)
 }
 assert.deepEqual(frontend.tmpfs, ['/tmp:rw,noexec,nosuid,size=16m'])
 
+const volumeInit = await readProjectFile('deploy/init-operation-volumes.sh')
+assert.match(volumeInit, /OPERATIONS_UID/u)
+assert.match(volumeInit, /OPERATIONS_GID/u)
+assert.match(volumeInit, /chown[^\n]+\/data[^\n]+\/backups/u)
+assert.doesNotMatch(volumeInit, /chown[^\n]+(?:^|\s)\/(?:\s|$)/u, 'volume init must never chown the filesystem root')
+
 const webDockerfile = await readProjectFile('apps/web/Dockerfile')
 const adminDockerfile = await readProjectFile('apps/admin/Dockerfile')
 const apiDockerfile = await readProjectFile('apps/api/Dockerfile')
+const operationsDockerfile = await readProjectFile('deploy/Dockerfile.operations')
 for (const [path, dockerfile] of Object.entries({
   'apps/web/Dockerfile': webDockerfile,
   'apps/admin/Dockerfile': adminDockerfile,
@@ -113,6 +138,8 @@ for (const [path, dockerfile] of Object.entries({
   assert.doesNotMatch(dockerfile, /^FROM node:24-alpine\b/mu, `${path} must pin an exact Node and Alpine version`)
   assert.match(dockerfile, /^FROM node:24\.14\.0-alpine3\.23\b/mu, `${path} must use the release-pinned Node base`)
 }
+assert.match(operationsDockerfile, /^FROM postgres:16\.12-alpine3\.23$/mu)
+for (const tool of ['bash', 'coreutils', 'curl', 'findutils', 'python3', 'tar', 'util-linux']) assert.match(operationsDockerfile, new RegExp(`\\b${tool}\\b`, 'u'))
 assert.match(webDockerfile, /^FROM nginxinc\/nginx-unprivileged:1\.29\.4-alpine3\.23 AS production$/mu)
 assert.match(adminDockerfile, /^FROM scratch AS artifact$/mu)
 assert.match(adminDockerfile, /COPY --from=admin-build \/app\/apps\/admin\/dist \/admin/u)
@@ -143,7 +170,7 @@ assert.match(packageJson.scripts.test, /npm run test:deployment/u)
 assert.doesNotMatch(packageJson.scripts.test, /test:deployment:build/u, 'normal tests must not perform clean installs or Docker checks')
 
 const operations = await readProjectFile('docs/operations.md')
-for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS', 'BACKUP_ROOT', 'BACKUP_RETENTION_DAYS', 'BACKUP_PGHOST', 'BACKUP_PGDATABASE', 'BACKUP_PGUSER', 'BACKUP_PGPASSFILE', 'BACKUP_UPLOAD_DIR', 'BACKUP_APP_VERSION', 'RESTORE_PGHOST', 'RESTORE_PGDATABASE', 'RESTORE_PGUSER', 'RESTORE_PGPASSFILE', 'RESTORE_UPLOAD_DIR']) {
+for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS', 'OPERATIONS_UID', 'OPERATIONS_GID', 'MAINTENANCE_API_HEALTH_URL', 'MAINTENANCE_ACK', 'UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES', 'UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES', 'UPLOAD_ARCHIVE_MAX_ENTRIES', 'UPLOAD_ARCHIVE_MAX_PATH_DEPTH', 'RESTORE_MIN_FREE_BYTES', 'BACKUP_ROOT', 'BACKUP_RETENTION_DAYS', 'BACKUP_PGHOST', 'BACKUP_PGDATABASE', 'BACKUP_PGUSER', 'BACKUP_PGPASSFILE', 'BACKUP_UPLOAD_DIR', 'BACKUP_APP_VERSION', 'RESTORE_PGHOST', 'RESTORE_PGDATABASE', 'RESTORE_PGUSER', 'RESTORE_PGPASSFILE', 'RESTORE_UPLOAD_DIR']) {
   assert.match(operations, new RegExp(variable, 'u'), `operations guide must document ${variable}`)
 }
 const productionPrefix = 'docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml'
@@ -166,7 +193,12 @@ assert.match(operations, /test:deployment:build/u)
 assert.match(operations, /Docker engine[^\n]+unavailable/iu)
 assert.match(operations, /digest/iu)
 assert.match(operations, /deploy\/backup\.sh/u)
-assert.match(operations, /RESTORE_ACKNOWLEDGE=RESTORE/iu)
+assert.match(operations, /MAINTENANCE_ACK="BACKUP:\$\{BACKUP_PGDATABASE\}"/u)
+assert.match(operations, /MAINTENANCE_ACK="RESTORE:\$\{BACKUP_ID\}:\$\{RESTORE_PGDATABASE\}"/u)
+assert.match(operations, /id -u/u)
+assert.match(operations, /id -g/u)
+assert.match(operations, /trusted[\s\S]+0700/iu)
+assert.match(operations, /authenticated checksum|signature/iu)
 assert.match(operations, /deploy\/restore\.sh --yes/u)
 assert.match(operations, /SHA-256/iu)
 assert.match(operations, /cron|systemd timer/iu)

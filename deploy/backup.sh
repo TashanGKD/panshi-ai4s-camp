@@ -2,6 +2,10 @@
 set -euo pipefail
 umask 077
 
+OPERATIONS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=deploy/operations-common.sh
+source "$OPERATIONS_SCRIPT_DIR/operations-common.sh"
+
 die() {
   printf 'Backup failed: %s\n' "$*" >&2
   exit 1
@@ -45,28 +49,6 @@ validate_upload_tree() {
   [[ -z "$(find "$root" -type l -print -quit)" ]] || die 'BACKUP_UPLOAD_DIR must not contain symbolic links'
   [[ -z "$(find "$root" -name $'*\n*' -print -quit)" ]] || die 'BACKUP_UPLOAD_DIR must not contain newline characters in names'
   [[ -z "$(find "$root" ! -type f ! -type d -print -quit)" ]] || die 'BACKUP_UPLOAD_DIR must contain only regular files and directories'
-}
-
-validate_upload_archive() {
-  local archive="$1"
-  local scratch_root="$2"
-  local names="$scratch_root/.archive-names"
-  local verbose="$scratch_root/.archive-verbose"
-  tar -tzf "$archive" > "$names" || die 'upload archive listing failed'
-  while IFS= read -r archive_path; do
-    case "$archive_path" in
-      .|./) ;;
-      /*|../*|*/../*|*/..|..) die 'upload archive contains path traversal' ;;
-      ./*) ;;
-      *) die 'upload archive contains a non-relative entry' ;;
-    esac
-  done < "$names"
-  tar -tvzf "$archive" > "$verbose" || die 'upload archive metadata listing failed'
-  if awk 'substr($1,1,1) !~ /^[-d]$/ { invalid=1 } END { exit invalid ? 0 : 1 }' "$verbose"; then
-    die 'upload archive contains links or special files'
-  fi
-  unlink "$names"
-  unlink "$verbose"
 }
 
 sha256_write() {
@@ -135,18 +117,28 @@ safe_delete_tree() {
 : "${BACKUP_PGPASSFILE:?BACKUP_PGPASSFILE is required}"
 : "${BACKUP_UPLOAD_DIR:?BACKUP_UPLOAD_DIR is required}"
 : "${BACKUP_APP_VERSION:?BACKUP_APP_VERSION is required}"
+: "${MAINTENANCE_ACK:?MAINTENANCE_ACK is required}"
+: "${MAINTENANCE_API_HEALTH_URL:?MAINTENANCE_API_HEALTH_URL is required}"
+: "${UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES:?UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES is required}"
+: "${UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES:?UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES is required}"
+: "${UPLOAD_ARCHIVE_MAX_ENTRIES:?UPLOAD_ARCHIVE_MAX_ENTRIES is required}"
+: "${UPLOAD_ARCHIVE_MAX_PATH_DEPTH:?UPLOAD_ARCHIVE_MAX_PATH_DEPTH is required}"
 
 [[ "$BACKUP_RETENTION_DAYS" =~ ^[0-9]+$ ]] || die 'BACKUP_RETENTION_DAYS must be a non-negative integer'
 [[ "$BACKUP_PGPORT" =~ ^[0-9]+$ && "$BACKUP_PGPORT" -ge 1 && "$BACKUP_PGPORT" -le 65535 ]] || die 'BACKUP_PGPORT must be a valid port'
 [[ "$BACKUP_APP_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || die 'BACKUP_APP_VERSION contains unsafe characters'
+require_bounded_integer UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES "$UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES"
+require_bounded_integer UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES "$UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES"
+require_bounded_integer UPLOAD_ARCHIVE_MAX_ENTRIES "$UPLOAD_ARCHIVE_MAX_ENTRIES"
+require_bounded_integer UPLOAD_ARCHIVE_MAX_PATH_DEPTH "$UPLOAD_ARCHIVE_MAX_PATH_DEPTH"
 command -v pg_dump >/dev/null 2>&1 || die 'pg_dump is required'
 command -v tar >/dev/null 2>&1 || die 'tar is required'
+command -v python3 >/dev/null 2>&1 || die 'python3 is required'
 
 backup_root="$(require_directory BACKUP_ROOT "$BACKUP_ROOT")"
 upload_root="$(require_directory BACKUP_UPLOAD_DIR "$BACKUP_UPLOAD_DIR")"
 require_disjoint_roots "$backup_root" "$upload_root"
 require_private_file BACKUP_PGPASSFILE "$BACKUP_PGPASSFILE"
-validate_upload_tree "$upload_root"
 
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
 backup_id="panshi-backup-${timestamp}-${BACKUP_APP_VERSION}"
@@ -164,9 +156,15 @@ cleanup_partial() {
   if [[ "$partial_created" == true && -d "$partial_dir" && ! -L "$partial_dir" ]]; then
     safe_delete_tree "$backup_root" "$partial_dir" || true
   fi
+  release_operations_lock
   exit "$status"
 }
 trap cleanup_partial EXIT INT TERM
+
+acquire_operations_lock "$backup_root"
+require_maintenance "BACKUP:$BACKUP_PGDATABASE"
+validate_upload_tree "$upload_root"
+validate_extracted_tree "$upload_root"
 
 mkdir -m 700 "$partial_dir"
 partial_created=true
@@ -177,9 +175,11 @@ PGUSER="$BACKUP_PGUSER" \
 PGPASSFILE="$BACKUP_PGPASSFILE" \
   pg_dump --format=custom --file="$partial_dir/database.dump"
 validate_upload_tree "$upload_root"
+validate_extracted_tree "$upload_root"
 tar -C "$upload_root" -czf "$partial_dir/uploads.tar.gz" .
-validate_upload_archive "$partial_dir/uploads.tar.gz" "$partial_dir"
+validate_archive_metadata "$partial_dir/uploads.tar.gz" >/dev/null
 validate_upload_tree "$upload_root"
+validate_extracted_tree "$upload_root"
 printf 'app_version=%s\ncreated_at=%s\n' "$BACKUP_APP_VERSION" "$timestamp" > "$partial_dir/metadata.env"
 (
   cd "$partial_dir"

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
@@ -179,5 +179,77 @@ describe('successful backup discovery', () => {
     const corrupt = await writeCompleteBackup(root, 'panshi-backup-20260815T030405Z-corrupt', new Date())
     await writeFile(join(corrupt, 'SHA256SUMS'), `${'0'.repeat(64)}  database.dump\n`)
     await expect(createAdminHealthFileChecks(root, root).findLatestBackupAt()).resolves.toBeNull()
+  })
+
+  it('caches immutable verified candidates instead of hashing payloads on every refresh', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-admin-health-'))
+    temporaryRoots.push(root)
+    await writeCompleteBackup(root, 'panshi-backup-20260815T030405Z-valid', new Date('2026-08-15T03:04:05.000Z'))
+    let payloadHashes = 0
+    const checks = createAdminHealthFileChecks(root, root, {
+      hashPayload: async (path) => {
+        payloadHashes += 1
+        return createHash('sha256').update(await readFile(path)).digest('hex')
+      },
+    })
+
+    await expect(checks.findLatestBackupAt()).resolves.toEqual(new Date('2026-08-15T03:04:05.000Z'))
+    await expect(checks.findLatestBackupAt()).resolves.toEqual(new Date('2026-08-15T03:04:05.000Z'))
+    expect(payloadHashes).toBe(3)
+  })
+
+  it('checks newest candidates first and bounds corrupt fallback work', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-admin-health-'))
+    temporaryRoots.push(root)
+    await writeCompleteBackup(root, 'panshi-backup-20260815T010101Z-too-old', new Date('2026-08-15T01:01:01.000Z'))
+    await writeCompleteBackup(root, 'panshi-backup-20260815T020202Z-valid', new Date('2026-08-15T02:02:02.000Z'))
+    for (const [name, timestamp] of [
+      ['panshi-backup-20260815T030303Z-corrupt', '2026-08-15T03:03:03.000Z'],
+      ['panshi-backup-20260815T040404Z-corrupt', '2026-08-15T04:04:04.000Z'],
+    ] as const) {
+      const corrupt = await writeCompleteBackup(root, name, new Date(timestamp))
+      await writeFile(join(corrupt, 'database.dump'), 'tampered')
+    }
+    let payloadHashes = 0
+    const checks = createAdminHealthFileChecks(root, root, {
+      maxBackupCandidates: 2,
+      hashPayload: async (path) => {
+        payloadHashes += 1
+        return createHash('sha256').update(await readFile(path)).digest('hex')
+      },
+    })
+
+    await expect(checks.findLatestBackupAt()).resolves.toBeNull()
+    expect(payloadHashes).toBe(6)
+
+    const fallbackChecks = createAdminHealthFileChecks(root, root, {
+      maxBackupCandidates: 3,
+      hashPayload: async (path) => createHash('sha256').update(await readFile(path)).digest('hex'),
+    })
+    await expect(fallbackChecks.findLatestBackupAt()).resolves.toEqual(new Date('2026-08-15T02:02:02.000Z'))
+  })
+
+  it('aborts active backup hashing when the health deadline expires', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'panshi-admin-health-'))
+    temporaryRoots.push(root)
+    await writeCompleteBackup(root, 'panshi-backup-20260815T030405Z-valid', new Date('2026-08-15T03:04:05.000Z'))
+    let aborted = false
+    let markStarted!: () => void
+    const started = new Promise<void>((resolveStarted) => { markStarted = resolveStarted })
+    const checks = createAdminHealthFileChecks(root, root, {
+      hashPayload: (_path, signal) => new Promise<string>((_resolve, reject) => {
+        markStarted()
+        signal.addEventListener('abort', () => {
+          aborted = true
+          reject(new Error('/secret/path must not leak'))
+        }, { once: true })
+      }),
+    })
+
+    const result = createService({ findLatestBackupAt: checks.findLatestBackupAt, timeoutMs: 25 }).getStatus()
+    await started
+    await expect(result).resolves.toMatchObject({ data: { status: 'degraded', backup: { available: false } } })
+    expect(aborted).toBe(true)
+    expect(JSON.stringify(await result)).not.toMatch(/secret|path/iu)
   })
 })

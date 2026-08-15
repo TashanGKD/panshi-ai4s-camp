@@ -6,13 +6,18 @@ x-api-image: &api-image
     target: production
 
 x-operations: &operations
-  image: postgres:16.12-bookworm
-  user: "1000:1000"
+  image: panshi-ai4s-camp-operations:${IMAGE_TAG:-local}
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile.operations
+  user: "${OPERATIONS_UID:?set OPERATIONS_UID}:${OPERATIONS_GID:?set OPERATIONS_GID}"
   entrypoint: ["/bin/bash"]
   working_dir: /workspace
   depends_on:
     postgres:
       condition: service_healthy
+    operations-volume-init:
+      condition: service_completed_successfully
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -21,6 +26,12 @@ x-operations: &operations
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=32m
   restart: "no"
+
+x-archive-limits: &archive-limits
+  UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES: ${UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES:?set UPLOAD_ARCHIVE_MAX_COMPRESSED_BYTES}
+  UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES: ${UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES:?set UPLOAD_ARCHIVE_MAX_EXPANDED_BYTES}
+  UPLOAD_ARCHIVE_MAX_ENTRIES: ${UPLOAD_ARCHIVE_MAX_ENTRIES:?set UPLOAD_ARCHIVE_MAX_ENTRIES}
+  UPLOAD_ARCHIVE_MAX_PATH_DEPTH: ${UPLOAD_ARCHIVE_MAX_PATH_DEPTH:?set UPLOAD_ARCHIVE_MAX_PATH_DEPTH}
 
 services:
   postgres:
@@ -58,6 +69,7 @@ services:
 
   api:
     <<: *api-image
+    user: "${OPERATIONS_UID:?set OPERATIONS_UID}:${OPERATIONS_GID:?set OPERATIONS_GID}"
     environment:
       API_PORT: "3001"
       NODE_ENV: production
@@ -73,6 +85,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+      operations-volume-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -86,10 +100,38 @@ services:
     read_only: true
     restart: unless-stopped
 
+  operations-volume-init:
+    image: panshi-ai4s-camp-operations:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.operations
+    user: "0:0"
+    entrypoint: ["/bin/bash"]
+    command: ["deploy/init-operation-volumes.sh"]
+    working_dir: /workspace
+    environment:
+      OPERATIONS_UID: ${OPERATIONS_UID:?set OPERATIONS_UID}
+      OPERATIONS_GID: ${OPERATIONS_GID:?set OPERATIONS_GID}
+    volumes:
+      - uploads-data:/data
+      - backups-data:/backups
+      - ./deploy:/workspace/deploy:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    read_only: true
+    restart: "no"
+
   backup:
     <<: *operations
     profiles: ["backup"]
     environment:
+      <<: *archive-limits
       BACKUP_ROOT: ${BACKUP_ROOT:?set BACKUP_ROOT}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:?set BACKUP_RETENTION_DAYS}
       BACKUP_PGHOST: ${BACKUP_PGHOST:?set BACKUP_PGHOST}
@@ -99,6 +141,8 @@ services:
       BACKUP_PGPASSFILE: /run/secrets/backup.pgpass
       BACKUP_UPLOAD_DIR: /data/uploads
       BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}
+      MAINTENANCE_API_HEALTH_URL: ${MAINTENANCE_API_HEALTH_URL:?set MAINTENANCE_API_HEALTH_URL}
+      MAINTENANCE_ACK: ${MAINTENANCE_ACK:-}
     volumes:
       - uploads-data:/data:ro
       - backups-data:/backups
@@ -109,6 +153,7 @@ services:
     <<: *operations
     profiles: ["restore"]
     environment:
+      <<: *archive-limits
       BACKUP_ROOT: ${BACKUP_ROOT:?set BACKUP_ROOT}
       RESTORE_PGHOST: ${RESTORE_PGHOST:?set RESTORE_PGHOST}
       RESTORE_PGPORT: ${RESTORE_PGPORT:?set RESTORE_PGPORT}
@@ -116,10 +161,12 @@ services:
       RESTORE_PGUSER: ${RESTORE_PGUSER:?set RESTORE_PGUSER}
       RESTORE_PGPASSFILE: /run/secrets/restore.pgpass
       RESTORE_UPLOAD_DIR: /data/uploads
-      RESTORE_ACKNOWLEDGE: ${RESTORE_ACKNOWLEDGE:-}
+      RESTORE_MIN_FREE_BYTES: ${RESTORE_MIN_FREE_BYTES:?set RESTORE_MIN_FREE_BYTES}
+      MAINTENANCE_API_HEALTH_URL: ${MAINTENANCE_API_HEALTH_URL:?set MAINTENANCE_API_HEALTH_URL}
+      MAINTENANCE_ACK: ${MAINTENANCE_ACK:-}
     volumes:
       - uploads-data:/data
-      - backups-data:/backups:ro
+      - backups-data:/backups
       - ./deploy:/workspace/deploy:ro
       - ${RESTORE_PGPASSFILE_HOST:?set RESTORE_PGPASSFILE_HOST}:/run/secrets/restore.pgpass:ro
 

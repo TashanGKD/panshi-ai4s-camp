@@ -10,7 +10,7 @@ export default defineConfig({
   outputDir: './test-results/launch', globalTeardown: './e2e/launch.teardown.ts', timeout: 60_000,
   use: { browserName: 'chromium', colorScheme: 'light', locale: 'zh-CN', reducedMotion: 'reduce', timezoneId: 'Asia/Shanghai', trace: 'retain-on-failure' },
   webServer: [{
-    command: "npm run db:migrate -w @panshi/api && trap 'npm run e2e:launch-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run e2e:launch-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
+    command: 'node scripts/e2e-api-server.mjs --fixture launch',
     url: 'http://127.0.0.1:3030/healthz', reuseExistingServer: false, timeout: 120_000,
     env: {
       API_PORT: '3030', DATABASE_URL: databaseUrl, LAUNCH_E2E: '1', APPLICATION_E2E: '1', NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb',

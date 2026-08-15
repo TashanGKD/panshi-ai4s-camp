@@ -14,7 +14,7 @@ export default defineConfig({
     { name: 'mobile-390x844', use: { viewport: { width: 390, height: 844 } } },
   ],
   webServer: [{
-    command: "npm run db:migrate -w @panshi/api && trap 'npm run e2e:visual-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run e2e:visual-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
+    command: 'node scripts/e2e-api-server.mjs --fixture visual',
     url: 'http://127.0.0.1:3002/healthz', reuseExistingServer: false,
     env: { API_PORT: '3002', DATABASE_URL: databaseUrl, VISUAL_E2E: '1', NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb', HEALTHCHECK_TIMEOUT_MS: '2000', SESSION_TTL_SECONDS: '28800', CORS_ORIGINS: 'http://127.0.0.1:4173', FILE_STORAGE_ROOT: 'var/visual-e2e-uploads', FILE_UPLOAD_TEMP_ROOT: 'var/visual-e2e-temp' },
   }, { command: 'npm run dev -w @panshi/web -- --host 127.0.0.1 --port 4173', url: 'http://127.0.0.1:4173', reuseExistingServer: false, env: { VITE_API_BASE_URL: 'http://127.0.0.1:3002' } },

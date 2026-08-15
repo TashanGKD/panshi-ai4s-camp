@@ -10,7 +10,7 @@ export default defineConfig({
   globalTeardown: './e2e/application.teardown.ts',
   use: { baseURL: 'http://127.0.0.1:4193', browserName: 'chromium', locale: 'zh-CN', timezoneId: 'Asia/Shanghai', viewport: { width: 1280, height: 800 } },
   webServer: [{
-    command: "trap 'npm run e2e:application-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run db:migrate -w @panshi/api && npm run e2e:application-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
+    command: 'node scripts/e2e-api-server.mjs --fixture application',
     url: 'http://127.0.0.1:3021/healthz', reuseExistingServer: false,
     env: { API_PORT: '3021', DATABASE_URL: databaseUrl, APPLICATION_E2E: '1', NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb', CORS_ORIGINS: 'http://127.0.0.1:4193', HEALTHCHECK_TIMEOUT_MS: '2000', SESSION_TTL_SECONDS: '28800', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: process.env.VERIFICATION_SECRET!, VERIFICATION_MOCK_CODE: process.env.E2E_VERIFICATION_CODE!, VERIFICATION_TTL_SECONDS: '300', VERIFICATION_COOLDOWN_SECONDS: '10', VERIFICATION_MAX_ATTEMPTS: '3', FILE_STORAGE_ROOT: 'var/e2e-uploads', FILE_UPLOAD_TEMP_ROOT: 'var/e2e-temp' },
   }, {

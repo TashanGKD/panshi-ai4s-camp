@@ -1,5 +1,6 @@
-import { expect, test, type APIResponse, type Page, type TestInfo } from '@playwright/test'
-import { writeFile } from 'node:fs/promises'
+import { expect, test, type APIResponse, type Browser, type Page } from '@playwright/test'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { runLaunchFixture } from '../apps/api/src/cli/launch-e2e-fixture'
 
 const apiBase = 'http://127.0.0.1:3030'
@@ -11,6 +12,7 @@ const studentPassword = 'Launch-E2E-Student-19!'
 const adminPhone = '+8613999999999'
 const adminPassword = process.env.E2E_ADMIN_PASSWORD!
 const verificationCode = process.env.E2E_VERIFICATION_CODE!
+const evidenceDirectory = resolve('test-results/launch/evidence/launch-visual')
 const pdf = Buffer.from('JVBERi0xLjcKJcOiw6PDj8OTCjEgMCBvYmoKPDwgL1R5cGUgL0NhdGFsb2cgL1BhZ2VzIDIgMCBSID4+CmVuZG9iagoyIDAgb2JqCjw8IC9UeXBlIC9QYWdlcyAvS2lkcyBbXSAvQ291bnQgMCA+PgplbmRvYmoKeHJlZgowIDMKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE5IDAwMDAwIG4gCjAwMDAwMDAwNjggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSAzIC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxMjAKJSVFT0YK', 'base64')
 
 test.beforeEach(async () => {
@@ -168,14 +170,13 @@ test.describe.serial('launch journey and visual acceptance', () => {
     await adminContext.close()
   })
 
-  test('required public and admin pages are usable at all launch viewports', async ({ browser }, testInfo) => {
+  test('required public and admin pages are usable at all launch viewports', async ({ browser }) => {
     test.setTimeout(180_000)
     const viewports = [{ name: '1440x900', width: 1440, height: 900 }, { name: '1280x800', width: 1280, height: 800 }, { name: '390x844', width: 390, height: 844 }]
     const publicPages = [['home', '/'], ['schedule', '/schedule'], ['register', '/application'], ['transport', '/travel'], ['contact', '/contact'], ['resources', '/resources'], ['login', '/login'], ['profile', '/account']] as const
     const adminPages = [['dashboard', '', '工作台'], ['content', 'content/basic', '基本信息'], ['applications', 'applications', '报名审核'], ['resources', 'content/resources', '相关资料'], ['users', 'administrators', '管理员账号'], ['audit', 'audit-logs', '操作日志'], ['system', 'system-status', '系统状态']] as const
-    const setup = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })
-    await registerAndLoginStudent(await setup.newPage())
-    await setup.close()
+    await seedVisualAcceptanceData(browser)
+    await mkdir(evidenceDirectory, { recursive: true })
     for (const viewport of viewports) {
       const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, isMobile: viewport.width < 500 })
       const page = await context.newPage()
@@ -183,22 +184,61 @@ test.describe.serial('launch journey and visual acceptance', () => {
       await page.getByLabel('手机号').fill(studentPhone)
       await page.getByLabel('密码').fill(studentPassword)
       await page.getByRole('button', { name: '登录' }).click()
-      for (const [name, path] of publicPages) await captureUsablePage(page, `${webBase}${path}`, `public-${name}-${viewport.name}`, testInfo)
-      await captureUsablePage(page, adminBase, `admin-login-${viewport.name}`, testInfo, '磐石管理后台')
+      for (const [name, path] of publicPages) await captureUsablePage(page, `${webBase}${path}`, `public-${name}-${viewport.name}`)
+      await captureUsablePage(page, adminBase, `admin-login-${viewport.name}`, '磐石管理后台')
       await page.getByLabel('手机号').fill(adminPhone)
       await page.getByLabel('密码').fill(adminPassword)
       await page.getByRole('button', { name: '登录' }).click()
       await expect(page.getByRole('heading', { name: '工作台' })).toBeVisible()
-      for (const [name, path, heading] of adminPages) await captureUsablePage(page, `${adminBase}${path}`, `admin-${name}-${viewport.name}`, testInfo, heading)
+      for (const [name, path, heading] of adminPages) await captureUsablePage(page, `${adminBase}${path}`, `admin-${name}-${viewport.name}`, heading)
       await context.close()
     }
     const screenshots = [...publicPages.map(([name]) => `public-${name}`), 'admin-login', ...adminPages.map(([name]) => `admin-${name}`)]
       .flatMap((name) => viewports.map((viewport) => `${name}-${viewport.name}.png`)).sort()
-    await writeFile(testInfo.outputPath('launch-visual', 'current-run.json'), JSON.stringify({ runId: testInfo.testId, screenshots }, null, 2))
+    await writeFile(resolve(evidenceDirectory, 'current-run.json'), JSON.stringify({
+      runToken: process.env.E2E_RUN_TOKEN,
+      startedAt: process.env.E2E_RUN_STARTED_AT,
+      completedAt: new Date().toISOString(),
+      screenshots,
+    }, null, 2))
   })
 })
 
-async function captureUsablePage(page: Page, url: string, name: string, testInfo: TestInfo, expectedHeading?: string) {
+async function seedVisualAcceptanceData(browser: Browser) {
+  const studentContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true })
+  const student = await studentContext.newPage()
+  await registerAndLoginStudent(student)
+  await student.goto(`${webBase}/application`)
+  await student.getByLabel('姓名').fill('视觉验收长列学员')
+  await student.getByLabel('电子邮箱').fill('visual-wide-columns@example.test')
+  await student.getByLabel('所在单位').fill('中国科学院超长名称人工智能与交叉科学联合研究中心')
+  await student.getByLabel('院系/部门').fill('复杂系统与科学智能联合实验室')
+  await student.getByLabel('身份类型').fill('青年科研人员')
+  await student.getByLabel('学历阶段').fill('博士后研究阶段')
+  await student.getByLabel('专业及研究方向').fill('AI for Science 与多尺度材料模拟')
+  await student.getByLabel(/拟解决的科研问题/u).fill('构建可复现的跨尺度科学机器学习工作流，并系统评估误差传播。')
+  await student.getByLabel(/个人简历/u).setInputFiles({ name: 'visual-wide-application.pdf', mimeType: 'application/pdf', buffer: pdf })
+  await expect(student.getByText('草稿已保存', { exact: true })).toBeVisible()
+  student.once('dialog', (dialog) => dialog.accept())
+  await student.getByRole('button', { name: '正式提交' }).click()
+  await expect(student.getByText('报名已提交，当前内容为只读。')).toBeVisible()
+  await studentContext.close()
+
+  const adminContext = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const admin = await adminContext.newPage()
+  await loginAdmin(admin)
+  const upload = await adminContext.request.post(`${apiBase}/api/v1/files`, { headers: { Origin: adminOrigin }, multipart: { purpose: 'resource', visibility: 'admitted', file: { name: 'visual-resource.pdf', mimeType: 'application/pdf', buffer: pdf } } })
+  expect(upload.status()).toBe(201)
+  const fileId = (await upload.json()).data.file.id
+  const draft = await adminContext.request.post(`${apiBase}/api/v1/admin/resources`, { headers: { Origin: adminOrigin }, data: { key: 'visual-populated-resource', title: '视觉验收科学计算资料与长标题示例', description: '用于确认资料页面和审计页面在真实数据下可用。', fileId, accessScope: 'admitted', sortOrder: 19, expectedRevision: 0 } })
+  expect(draft.status()).toBe(201)
+  const resource = (await draft.json()).data.resource
+  const published = await adminContext.request.post(`${apiBase}/api/v1/admin/resources/${resource.id}/publish`, { headers: { Origin: adminOrigin }, data: { expectedRevision: resource.revision } })
+  expect(published.status()).toBe(200)
+  await adminContext.close()
+}
+
+async function captureUsablePage(page: Page, url: string, name: string, expectedHeading?: string) {
   await page.goto(url)
   if (expectedHeading) await expect(page.getByRole('heading', { name: expectedHeading, exact: true })).toBeVisible()
   else await expect(page.locator('h1,h2').first()).toBeVisible()
@@ -233,21 +273,27 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
     })
     const scrollers = [...document.querySelectorAll<HTMLElement>('.table-scroll')].map((container) => {
       const rect = container.getBoundingClientRect()
-      const lastCell = container.querySelector<HTMLElement>('tbody tr:first-child td:last-child, thead tr:last-child th:last-child')
+      const lastCell = container.querySelector<HTMLElement>('tbody tr:first-child td:last-child')
+        ?? container.querySelector<HTMLElement>('thead tr:last-child th:last-child')
       const before = container.scrollLeft
       container.scrollLeft = container.scrollWidth
       lastCell?.scrollIntoView({ block: 'center', inline: 'nearest' })
       const lastRect = lastCell?.getBoundingClientRect()
+      const lastAction = lastCell?.querySelector<HTMLElement>('a,button,input,select,textarea')
+      const actionRect = lastAction?.getBoundingClientRect()
       const currentRect = container.getBoundingClientRect()
       const x = lastRect ? Math.max(lastRect.left, currentRect.left) + Math.min(lastRect.width, currentRect.right - Math.max(lastRect.left, currentRect.left)) / 2 : -1
       const y = lastRect ? lastRect.top + lastRect.height / 2 : -1
       const hit = lastCell ? document.elementFromPoint(x, y) : null
+      const actionHit = actionRect ? document.elementFromPoint(actionRect.left + actionRect.width / 2, actionRect.top + actionRect.height / 2) : null
       const result = {
         withinViewport: rect.left >= -1 && rect.right <= viewport.width + 1,
         overflow: getComputedStyle(container).overflowX,
         scrollable: container.scrollWidth > container.clientWidth,
         reachedFarEdge: container.scrollLeft > before,
         lastCellVisible: Boolean(lastRect && lastRect.right <= currentRect.right + 1 && lastRect.left < currentRect.right && hit && (lastCell!.contains(hit) || hit.contains(lastCell!))),
+        lastActionHit: Boolean(lastAction && actionRect && actionRect.left >= currentRect.left && actionRect.right <= currentRect.right + 1 && actionHit && (lastAction.contains(actionHit) || actionHit.contains(lastAction))),
+        actionGeometry: actionRect ? { left: actionRect.left, right: actionRect.right, top: actionRect.top, bottom: actionRect.bottom, containerLeft: currentRect.left, containerRight: currentRect.right, hit: actionHit?.tagName ?? null } : null,
       }
       container.scrollLeft = before
       return result
@@ -262,7 +308,15 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
         })
         return !insideScroller && (rect.left < -1 || rect.right > viewport.width + 1)
       }).map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || element.tagName),
-      tinyActions: critical.filter((element) => ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName) && element.getBoundingClientRect().width < 24).map((element) => element.textContent?.trim() || element.getAttribute('aria-label') || element.tagName),
+      tinyActions: critical.filter((element) => {
+        if (!['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName)) return false
+        const rect = element.getBoundingClientRect()
+        const compactInput = element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type)
+        return rect.width < (compactInput ? 20 : 24) || rect.height < (compactInput ? 20 : 16)
+      }).map((element) => {
+        const rect = element.getBoundingClientRect()
+        return `${element.textContent?.trim() || element.getAttribute('aria-label') || element.tagName}:${rect.width}x${rect.height}`
+      }),
       scrollers,
     }
     function* generateAncestors(element: HTMLElement) {
@@ -273,6 +327,13 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
   expect(audit.overflow, `${name} horizontal overflow`).toBeLessThanOrEqual(1)
   expect(audit.clipped, `${name} clipped critical elements`).toEqual([])
   expect(audit.tinyActions, `${name} unusable actions`).toEqual([])
+  if (['admin-applications-390x844', 'admin-audit-390x844'].includes(name)) {
+    expect(audit.scrollers.length, `${name} populated table scroller exists`).toBeGreaterThan(0)
+    for (const scroller of audit.scrollers) {
+      expect(scroller.scrollable, `${name} populated table is horizontally scrollable`).toBe(true)
+      expect(scroller.lastActionHit, `${name} far-edge action hit-test ${JSON.stringify(scroller.actionGeometry)}`).toBe(true)
+    }
+  }
   for (const scroller of audit.scrollers) {
     expect(scroller.withinViewport, `${name} table scroller inside viewport`).toBe(true)
     expect(scroller.overflow, `${name} table overflow contract`).toBe('auto')
@@ -284,14 +345,13 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
   const actions = page.locator('a:visible,button:visible,input:visible,select:visible,textarea:visible')
   for (let index = 0; index < Math.min(await actions.count(), 80); index += 1) {
     const action = actions.nth(index)
-    if (await action.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      return getComputedStyle(element).clipPath === 'inset(50%)' || rect.width < 24 || rect.height < 16
-    })) continue
-    if (await action.evaluate((element) => Boolean(element.closest('.table-scroll')))) continue
+    if (await action.evaluate((element) => getComputedStyle(element).clipPath === 'inset(50%)')) continue
     await action.scrollIntoViewIfNeeded()
     const box = await action.boundingBox()
     if (!box) continue
+    const compactInput = await action.evaluate((element) => element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type))
+    expect(box.width, `${name} action ${index} width`).toBeGreaterThanOrEqual(compactInput ? 20 : 24)
+    expect(box.height, `${name} action ${index} height`).toBeGreaterThanOrEqual(compactInput ? 20 : 16)
     const hit = await action.evaluate((element) => {
       const rect = element.getBoundingClientRect()
       const target = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
@@ -299,6 +359,9 @@ async function captureUsablePage(page: Page, url: string, name: string, testInfo
     })
     expect(hit, `${name} action ${index} center hit-test`).toBe(true)
   }
-  await page.evaluate(() => scrollTo(0, 0))
-  await page.screenshot({ path: testInfo.outputPath('launch-visual', `${name}.png`), fullPage: true, animations: 'disabled' })
+  await page.evaluate(() => {
+    for (const scroller of document.querySelectorAll<HTMLElement>('.table-scroll')) scroller.scrollLeft = 0
+    scrollTo(0, 0)
+  })
+  await page.screenshot({ path: resolve(evidenceDirectory, `${name}.png`), fullPage: false, animations: 'disabled' })
 }

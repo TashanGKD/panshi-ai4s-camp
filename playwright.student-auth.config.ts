@@ -20,7 +20,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "trap 'npm run e2e:student-auth-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run db:migrate -w @panshi/api && npm run e2e:student-auth-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
+      command: 'node scripts/e2e-api-server.mjs --fixture student-auth',
       url: 'http://127.0.0.1:3011/healthz', reuseExistingServer: false,
       env: {
         API_PORT: '3011', DATABASE_URL: databaseUrl, STUDENT_AUTH_E2E: '1', NODE_ENV: 'test', JSON_BODY_LIMIT: '1mb',

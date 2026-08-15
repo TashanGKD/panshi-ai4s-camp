@@ -243,12 +243,12 @@ TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
 E2E_VERIFICATION_CODE='<six-digit-test-code>' \
 E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
 VERIFICATION_SECRET='<64-hex-characters-from-32-random-bytes>' \
-  npx playwright test
+  npm run e2e:launch
 ```
 
-这两项 Playwright 用例覆盖完整发布／报名／附件／补充／录取／资料／公开计数旅程和匿名、普通学员、录取学员、管理员访问矩阵；同时在 `1440x900`、`1280x800`、`390x844` 检查 16 个公开与管理关键页面并把 48 张截图写入被 Git 忽略的 `test-results/launch`。不要指向开发或生产库。Chromium 缺失时只安装项目 Playwright 对应浏览器：`npx playwright install chromium`。
+这两项 Playwright 用例覆盖完整发布／报名／附件／补充／录取／资料／公开计数旅程和匿名、普通学员、录取学员、管理员访问矩阵；同时在 `1440x900`、`1280x800`、`390x844` 检查 16 个公开与管理关键页面并把 48 张视口截图写入被 Git 忽略的固定目录 `test-results/launch/evidence/launch-visual`。`e2e:launch` 的 Node 入口为本次调用生成随机 run token 和开始时间，并在截图后校验固定目录、文件清单、普通文件类型、PNG/IHDR、精确尺寸和 marker 身份。不要指向开发或生产库。Chromium 缺失时只安装项目 Playwright 对应浏览器：`npx playwright install chromium`。
 
-发布前的单入口浏览器门禁是 `npm run test:e2e:all`。它依次执行 launch、visual/source、review、content publishing、student auth 和 application submission 六个配置；调用前必须同时提供各配置上文列出的显式开关、精确 `TEST_DATABASE_URL`、64 位十六进制 `VERIFICATION_SECRET` 以及专用测试手机号/密码。各配置串行清理同一专用测试库并使用各自固定的 `var/*-e2e-*` 存储目录，不得并行执行，也不得复用生产凭据。六个配置分别写入 `test-results/launch`、`visual`、`review`、`content`、`student-auth` 和 `application`，后运行的配置不会清除 launch 证据；门禁最后校验 launch 目录中恰有当前清单的 48 个 PNG 文件及本次运行标记，缺失、陈旧或额外文件都会失败。
+发布前的单入口浏览器门禁是 `npm run test:e2e:all`。Node 编排器为整次调用生成同一个随机 run token 和开始时间，再串行执行 launch、visual/source、review、content publishing、student auth 和 application submission 六个配置，最后以相同身份复验 launch 证据。调用前必须同时提供各配置上文列出的显式开关、精确 `TEST_DATABASE_URL`、64 位十六进制 `VERIFICATION_SECRET` 以及专用测试手机号/密码，不得并行执行或复用生产凭据。每个 API 都由同一个 fail-fast Node 生命周期启动：清理保证在迁移前安装，迁移成功后才 seed，seed 成功后才启动服务，退出或失败时执行 cleanup；全局 teardown 再做兜底清理。launch、review 和 application submission 依次复用 `var/e2e-uploads` 与 `var/e2e-temp`，visual/source、content publishing、student auth 分别使用 `var/visual-e2e-*`、`var/content-e2e-*`、`var/student-auth-e2e-*`，所以必须串行。六个配置分别写入 `test-results/launch`、`visual`、`review`、`content`、`student-auth` 和 `application`，后运行的配置不会清除固定 launch 证据。
 
 API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -- health.test.ts dev-command.test.ts`。内容仓库、发布指针和种子幂等性属于必须的 PostgreSQL 集成边界，使用 `npm run test:integration:content -w @panshi/api`；该命令缺少 `TEST_DATABASE_URL` 时立即失败，且只接受数据库名精确为 `panshi_ai4s_camp_test` 的 PostgreSQL URL。API schema 集成测试同样必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 身份 SQL/session 生命周期的必须集成边界使用 `npm run test:integration:auth -w @panshi/api`；它同样要求显式 `TEST_DATABASE_URL` 且数据库名必须精确为 `panshi_ai4s_camp_test`，缺少时在加载测试前失败。
@@ -264,7 +264,7 @@ E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
   npm run e2e:content
 ```
 
-该命令在 API 启动前显式执行 migration，再建立发布测试 fixture；API 进程退出 trap 与 Playwright 全局 teardown 都会尝试清理。因而它可以从已创建但尚无 schema 的精确测试库启动，并在测试失败时仍执行兜底清理。公开资料的文件完整性在资料发布边界校验，不与基本信息、日程等内容模块的发布和回退耦合。
+该命令由共用 Node 生命周期在 API 启动前显式执行 migration，再建立发布测试 fixture；迁移失败不会执行 seed 或服务，生命周期 cleanup 与 Playwright 全局 teardown 都会尝试清理。因而它可以从已创建但尚无 schema 的精确测试库启动，并在测试失败时仍执行兜底清理。公开资料的文件完整性在资料发布边界校验，不与基本信息、日程等内容模块的发布和回退耦合。
 
 ## Task 7 验证记录（2026-08-14）
 

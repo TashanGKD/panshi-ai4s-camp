@@ -25,7 +25,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "trap 'npm run e2e:publishing-fixture -w @panshi/api -- cleanup >/dev/null 2>&1 || true' EXIT; npm run db:migrate -w @panshi/api && npm run e2e:publishing-fixture -w @panshi/api -- seed && node --import tsx apps/api/src/server.ts",
+      command: 'node scripts/e2e-api-server.mjs --fixture content',
       url: 'http://127.0.0.1:3001/healthz',
       reuseExistingServer: false,
       env: {

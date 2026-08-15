@@ -1,4 +1,5 @@
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { Buffer } from 'node:buffer'
+import { lstat, readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const viewports = ['1440x900', '1280x800', '390x844']
@@ -8,29 +9,49 @@ const pages = [
   'admin-login', 'admin-dashboard', 'admin-content', 'admin-applications',
   'admin-resources', 'admin-users', 'admin-audit', 'admin-system',
 ]
-const expected = pages.flatMap((page) => viewports.map((viewport) => `${page}-${viewport}.png`)).sort()
-const root = resolve('test-results/launch')
+const expectedScreenshots = pages.flatMap((page) => viewports.map((viewport) => `${page}-${viewport}.png`)).sort()
+const expectedEntries = [...expectedScreenshots, 'current-run.json'].sort()
+const evidenceDirectory = resolve('test-results/launch/evidence/launch-visual')
+const runToken = process.env.E2E_RUN_TOKEN
+const startedAt = process.env.E2E_RUN_STARTED_AT
+if (!/^[a-f0-9]{64}$/u.test(runToken ?? '')) throw new Error('E2E_RUN_TOKEN must be a cryptographically random 64-character hex token')
+const startedAtMs = Date.parse(startedAt ?? '')
+if (!Number.isFinite(startedAtMs)) throw new Error('E2E_RUN_STARTED_AT must be a valid timestamp')
 
-const walk = async (directory) => {
-  const entries = await readdir(directory, { withFileTypes: true })
-  return (await Promise.all(entries.map(async (entry) => {
-    const path = resolve(directory, entry.name)
-    return entry.isDirectory() ? walk(path) : [path]
-  }))).flat()
+const entries = (await readdir(evidenceDirectory)).sort()
+if (JSON.stringify(entries) !== JSON.stringify(expectedEntries)) {
+  throw new Error(`Expected exact launch evidence entries (${expectedEntries.length}); found ${entries.length}: ${entries.join(', ')}`)
 }
 
-const files = await walk(root).catch(() => [])
-const screenshots = files.filter((path) => path.endsWith('.png')).sort()
-const names = screenshots.map((path) => path.split('/').at(-1)).sort()
-if (JSON.stringify(names) !== JSON.stringify(expected)) {
-  throw new Error(`Expected exact launch screenshot manifest (${expected.length}); found ${names.length}: ${names.join(', ')}`)
+const assertRegularFile = async (path) => {
+  const metadata = await lstat(path)
+  if (metadata.isSymbolicLink() || !metadata.isFile()) throw new Error(`Launch evidence must be a regular non-symlink file: ${path}`)
+  return metadata
+}
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+let newestScreenshot = 0
+for (const filename of expectedScreenshots) {
+  const path = resolve(evidenceDirectory, filename)
+  const metadata = await assertRegularFile(path)
+  const bytes = await readFile(path)
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(pngSignature) || bytes.readUInt32BE(8) !== 13 || bytes.toString('ascii', 12, 16) !== 'IHDR') {
+    throw new Error(`Invalid PNG signature or IHDR: ${filename}`)
+  }
+  const match = filename.match(/-(\d+)x(\d+)\.png$/u)
+  if (!match) throw new Error(`Screenshot filename lacks viewport dimensions: ${filename}`)
+  const expectedWidth = Number(match[1]); const expectedHeight = Number(match[2])
+  if (bytes.readUInt32BE(16) !== expectedWidth || bytes.readUInt32BE(20) !== expectedHeight) {
+    throw new Error(`Screenshot dimensions do not match ${expectedWidth}x${expectedHeight}: ${filename}`)
+  }
+  if (metadata.mtimeMs + 1_000 < startedAtMs) throw new Error(`Screenshot predates current E2E run: ${filename}`)
+  newestScreenshot = Math.max(newestScreenshot, metadata.mtimeMs)
 }
 
-const markers = files.filter((path) => path.endsWith('/launch-visual/current-run.json'))
-if (markers.length !== 1) throw new Error(`Expected one current launch visual marker; found ${markers.length}`)
-const marker = JSON.parse(await readFile(markers[0], 'utf8'))
-if (JSON.stringify(marker.screenshots) !== JSON.stringify(expected)) throw new Error('Current launch marker manifest does not match expected screenshots')
-const markerTime = (await stat(markers[0])).mtimeMs
-const newestScreenshot = Math.max(...await Promise.all(screenshots.map(async (path) => (await stat(path)).mtimeMs)))
-if (markerTime < newestScreenshot) throw new Error('Current launch marker predates a screenshot')
-console.log(`launch visual evidence retained: ${screenshots.length} exact PNGs, marker=${marker.runId}`)
+const markerPath = resolve(evidenceDirectory, 'current-run.json')
+const markerMetadata = await assertRegularFile(markerPath)
+const marker = JSON.parse(await readFile(markerPath, 'utf8'))
+if (marker.runToken !== runToken || marker.startedAt !== startedAt) throw new Error('Launch marker token/time does not match the current E2E invocation')
+if (!Number.isFinite(Date.parse(marker.completedAt ?? '')) || Date.parse(marker.completedAt) < startedAtMs) throw new Error('Launch marker completion time is invalid')
+if (JSON.stringify(marker.screenshots) !== JSON.stringify(expectedScreenshots)) throw new Error('Launch marker manifest does not match expected screenshots')
+if (markerMetadata.mtimeMs < newestScreenshot) throw new Error('Launch marker predates a screenshot')
+console.log(`launch visual evidence retained: ${expectedScreenshots.length} exact PNGs at test-results/launch/evidence/launch-visual`)

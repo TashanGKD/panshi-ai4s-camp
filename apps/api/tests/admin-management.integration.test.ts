@@ -8,6 +8,8 @@ import { createAdminManagementService, sanitizeAuditMetadata } from '../src/modu
 import { hashPassword } from '../src/modules/identity/password.js'
 import { createSessionService, hashSessionToken } from '../src/modules/identity/session.service.js'
 import { createIdentityRepository } from '../src/modules/identity/identity.repository.js'
+import { createAuditRepository } from '../src/modules/audit/audit.repository.js'
+import { createAuditService } from '../src/modules/audit/audit.service.js'
 
 const url = process.env.TEST_DATABASE_URL
 if (!url || new URL(url).pathname !== '/panshi_ai4s_camp_test') throw new Error('TEST_DATABASE_URL must target exactly panshi_ai4s_camp_test')
@@ -98,9 +100,55 @@ describe('administrator management PostgreSQL truth', () => {
     expect(JSON.stringify(actions.map((entry) => entry.metadata))).not.toMatch(/password|hash|token|phone|CurrentAdmin|Replacement/iu)
   })
 
+  it('does not persist body text or path-like values through the real audit service and repository', async () => {
+    const service = createAuditService(createAuditRepository(database.db))
+    const shape = { fieldCount: 1, valueTypes: { array: 0, object: 0, string: 1, number: 0, boolean: 0, null: 0 } }
+    const unsafeEntries = [
+      { action: 'registration_form.draft_saved', entityType: 'registration_form_draft', entityId: '00000000-0000-4000-8000-000000000010', metadata: { revision: 1, summary: { questionCount: 1, activeQuestionCount: 1, attachmentCount: 0, activeAttachmentCount: 0, internalNote: '内部意见：该申请人的研究方案需要进一步讨论' } } },
+      { action: 'application.status_changed', entityType: 'application', entityId: ids[1], metadata: { fromStatus: 'submitted', toStatus: 'reviewing', revision: 2, editableFieldCount: 0, editableAttachmentCount: 0, answers: { researchPlan: '申请答案：尚未公开的实验设计' } } },
+      { action: 'content.draft_saved', entityType: 'content_module', entityId: 'basic', metadata: { moduleKey: 'basic', before: { revision: 1, path: '../../private/resume.docx' }, after: { revision: 2, shape } } },
+      { action: 'content.draft_saved', entityType: 'content_module', entityId: 'basic', metadata: { moduleKey: 'basic', before: { revision: 1 }, after: { revision: 2, shape: { ...shape, path: '/srv/panshi/uploads/resume.docx' } } } },
+      { action: 'file.storage_rejected', entityType: 'file_storage_recovery', entityId: ids[1], metadata: { failureCode: String.raw`C:\panshi\uploads\resume.docx` } },
+      { action: 'file.storage_rejected', entityType: 'file_storage_recovery', entityId: ids[1], metadata: { failureCode: '%2e%2e%2fprivate%2fresume.docx' } },
+    ]
+    for (const entry of unsafeEntries) {
+      await expect(service.record({
+        actorUserId: ids[0], ...entry,
+      } as never)).rejects.toMatchObject({ name: 'AuditPolicyError' })
+    }
+    const rejectedRows = await database.db.select({ metadata: auditLogs.metadata }).from(auditLogs)
+    expect(rejectedRows).toHaveLength(0)
+    const persisted = JSON.stringify(rejectedRows)
+    for (const marker of ['内部意见', '申请答案', '../../private', '/srv/panshi', String.raw`C:\panshi`, '%2e%2e%2f']) {
+      expect(persisted).not.toContain(marker)
+    }
+
+    await service.record({
+      actorUserId: ids[0], action: 'application.status_changed', entityType: 'application', entityId: ids[1],
+      metadata: { fromStatus: 'submitted', toStatus: 'reviewing', revision: 2, editableFieldCount: 1, editableAttachmentCount: 0 },
+    })
+    const legitimate = await database.db.select({ metadata: auditLogs.metadata }).from(auditLogs)
+    expect(legitimate.at(-1)?.metadata).toEqual({ fromStatus: 'submitted', toStatus: 'reviewing', revision: 2, editableFieldCount: 1, editableAttachmentCount: 0 })
+  })
+
+  it('uses an exclusive next-day boundary for the selected Shanghai end date', async () => {
+    await database.db.insert(auditLogs).values([
+      { id: '20000000-0000-4000-8000-000000000001', actorUserId: ids[0], action: 'admin.created', entityType: 'user', entityId: ids[1], metadata: { result: 'success' }, createdAt: new Date('2026-08-15T04:00:00.000Z') },
+      { id: '20000000-0000-4000-8000-000000000002', actorUserId: ids[0], action: 'admin.created', entityType: 'user', entityId: ids[1], metadata: { result: 'success' }, createdAt: new Date('2026-08-15T15:59:59.999Z') },
+      { id: '20000000-0000-4000-8000-000000000003', actorUserId: ids[0], action: 'admin.created', entityType: 'user', entityId: ids[1], metadata: { result: 'success' }, createdAt: new Date('2026-08-15T16:00:00.000Z') },
+    ])
+    const result = await createAdminManagementRepository(database.db).listAuditLogs({
+      toExclusive: new Date('2026-08-15T16:00:00.000Z'), page: 1, pageSize: 20,
+    } as never)
+    expect(result.rows.map((row) => row.id)).toEqual([
+      '20000000-0000-4000-8000-000000000002',
+      '20000000-0000-4000-8000-000000000001',
+    ])
+  })
+
   it('deeply removes unapproved audit metadata and keeps audit rows immutable', async () => {
-    expect(sanitizeAuditMetadata({ result: 'success', before: { revision: 1, password: 'secret', nested: { token: 'x' } }, filters: { status: 'submitted', phone: '13800138000' }, answers: ['secret'], internalNote: 'secret' })).toEqual({ result: 'success', before: { revision: 1 }, filters: { status: 'submitted' } })
-    expect(sanitizeAuditMetadata({ result: 'password=secret', status: '+8613800138000', columns: ['安全列', 'token=hidden'] })).toEqual({ columns: ['安全列'] })
+    expect(sanitizeAuditMetadata('application.status_changed', { fromStatus: 'submitted', toStatus: 'reviewing', revision: 1, editableFieldCount: 0, editableAttachmentCount: 0, internalNote: 'secret' })).toEqual({})
+    expect(sanitizeAuditMetadata('unknown.action', { result: 'success' })).toEqual({})
     await database.db.insert(auditLogs).values({ actorUserId: ids[0], action: 'password=must-not-render', entityType: 'token=must-not-render', entityId: ids[0], metadata: { result: 'success' } })
     const [record] = await database.db.select({ id: auditLogs.id }).from(auditLogs).limit(1)
     const presented = await createAdminManagementService(createAdminManagementRepository(database.db)).auditLog(record!.id)

@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { auditLogs, sessions, users } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 
 export type AdminRecord = { id: string, displayName: string, phone: string, disabledAt: Date | null, createdAt: Date }
-export type AuditQuery = { actorId?: string, action?: string, entityType?: string, entityId?: string, from?: Date, to?: Date, page: number, pageSize: number }
+export type AuditQuery = { actorId?: string, action?: string, entityType?: string, entityId?: string, from?: Date, toExclusive?: Date, page: number, pageSize: number }
 export type AuditRecord = { id: string, actorId: string | null, actorDisplayName: string | null, action: string, entityType: string, entityId: string | null, metadata: unknown, createdAt: Date }
 
 const adminSelection = { id: users.id, displayName: users.displayName, phone: users.phoneNormalized, disabledAt: users.disabledAt, createdAt: users.createdAt }
@@ -31,7 +32,7 @@ export const createAdminManagementRepository = (db: NodePgDatabase<typeof schema
           if (!await actorIsActive(transaction as NodePgDatabase<typeof schema>, input.actorId)) return 'actor_invalid' as const
           const [record] = await transaction.insert(users).values({ displayName: input.displayName, phoneNormalized: input.phone, passwordHash: input.passwordHash, role: 'admin' }).returning(adminSelection)
           if (!record) throw new Error('Administrator insert returned no row')
-          await transaction.insert(auditLogs).values({ actorUserId: input.actorId, action: 'admin.created', entityType: 'user', entityId: record.id, metadata: { result: 'success' } })
+          await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.created', entityType: 'user', entityId: record.id, metadata: { result: 'success' } })
           return record
         })
       } catch (error) {
@@ -52,7 +53,7 @@ export const createAdminManagementRepository = (db: NodePgDatabase<typeof schema
       const [updated] = await transaction.update(users).set({ disabledAt: input.disabledAt }).where(and(eq(users.id, target.id), isNull(users.disabledAt))).returning(adminSelection)
       if (!updated) return 'not_found' as const
       const revoked = await transaction.update(sessions).set({ revokedAt: input.disabledAt }).where(and(eq(sessions.userId, target.id), isNull(sessions.revokedAt))).returning({ id: sessions.id })
-      await transaction.insert(auditLogs).values({ actorUserId: input.actorId, action: 'admin.disabled', entityType: 'user', entityId: target.id, metadata: { revokedSessionCount: revoked.length, result: 'success' } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.disabled', entityType: 'user', entityId: target.id, metadata: { revokedSessionCount: revoked.length, result: 'success' } })
       return updated
     }),
     resetAdminPassword: async (input: { targetId: string, actorId: string, passwordHash: string, changedAt: Date }) => db.transaction(async (transaction) => {
@@ -62,11 +63,11 @@ export const createAdminManagementRepository = (db: NodePgDatabase<typeof schema
       if (!target) return 'not_found' as const
       await transaction.update(users).set({ passwordHash: input.passwordHash }).where(eq(users.id, target.id))
       const revoked = await transaction.update(sessions).set({ revokedAt: input.changedAt }).where(and(eq(sessions.userId, target.id), isNull(sessions.revokedAt))).returning({ id: sessions.id })
-      await transaction.insert(auditLogs).values({ actorUserId: input.actorId, action: 'admin.password_reset', entityType: 'user', entityId: target.id, metadata: { revokedSessionCount: revoked.length, result: 'success' } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.password_reset', entityType: 'user', entityId: target.id, metadata: { revokedSessionCount: revoked.length, result: 'success' } })
       return target
     }),
     listAuditLogs: async (query: AuditQuery) => {
-      const filters = [query.actorId ? eq(auditLogs.actorUserId, query.actorId) : undefined, query.action ? eq(auditLogs.action, query.action) : undefined, query.entityType ? eq(auditLogs.entityType, query.entityType) : undefined, query.entityId ? eq(auditLogs.entityId, query.entityId) : undefined, query.from ? gte(auditLogs.createdAt, query.from) : undefined, query.to ? lte(auditLogs.createdAt, query.to) : undefined].filter((value): value is NonNullable<typeof value> => value !== undefined)
+      const filters = [query.actorId ? eq(auditLogs.actorUserId, query.actorId) : undefined, query.action ? eq(auditLogs.action, query.action) : undefined, query.entityType ? eq(auditLogs.entityType, query.entityType) : undefined, query.entityId ? eq(auditLogs.entityId, query.entityId) : undefined, query.from ? gte(auditLogs.createdAt, query.from) : undefined, query.toExclusive ? lt(auditLogs.createdAt, query.toExclusive) : undefined].filter((value): value is NonNullable<typeof value> => value !== undefined)
       const where = filters.length ? and(...filters) : undefined
       const [rows, totalRows] = await Promise.all([
         db.select(auditSelection).from(auditLogs).leftJoin(users, eq(users.id, auditLogs.actorUserId)).where(where).orderBy(desc(auditLogs.createdAt), desc(auditLogs.id)).limit(query.pageSize).offset((query.page - 1) * query.pageSize),

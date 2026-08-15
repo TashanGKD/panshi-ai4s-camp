@@ -37,10 +37,10 @@ const makeApp = () => createApp({
 } as never)
 
 describe('administrator management and audit routes', () => {
-  it('sanitizes arbitrary metadata before the audit repository write', async () => {
+  it('rejects arbitrary metadata before the audit repository write', async () => {
     const append = vi.fn(async () => undefined)
-    await createAuditService({ append }).record({ actorUserId: admin.id, action: 'test', entityType: 'test', metadata: { result: 'success', password: 'secret', before: { revision: 1, token: 'secret' } } })
-    expect(append).toHaveBeenCalledWith(expect.objectContaining({ metadata: { result: 'success', before: { revision: 1 } } }))
+    await expect(createAuditService({ append }).record({ actorUserId: admin.id, action: 'application.status_changed', entityType: 'application', entityId: admin.id, metadata: { fromStatus: 'submitted', toStatus: 'reviewing', revision: 1, editableFieldCount: 0, editableAttachmentCount: 0, summary: '内部意见' } as never })).rejects.toMatchObject({ name: 'AuditPolicyError' })
+    expect(append).not.toHaveBeenCalled()
   })
   it('requires an administrator and never exposes password hashes', async () => {
     await request(makeApp()).get('/api/v1/admin/users').expect(403)
@@ -65,6 +65,12 @@ describe('administrator management and audit routes', () => {
     const response = await request(app).get('/api/v1/admin/audit-logs?action=admin.created&actorId=10000000-0000-4000-8000-000000000001&entityId=10000000-0000-4000-8000-000000000001&from=2026-08-01&to=2026-08-31')
       .set('Cookie', `panshi_session=${token}`).expect(200)
     expect(response.body.data.total).toBe(1)
+    expect(auditQueryService.auditLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      from: new Date('2026-07-31T16:00:00.000Z'),
+      toExclusive: new Date('2026-08-31T16:00:00.000Z'),
+    }))
+    const lastAuditQuery = auditQueryService.auditLogs.mock.calls.at(-1) as unknown as [Record<string, unknown>] | undefined
+    expect(lastAuditQuery?.[0]).not.toHaveProperty('to')
     expect(JSON.stringify(response.body)).not.toMatch(/password|verification|attachmentContent|secret/iu)
     const detail = await request(app).get('/api/v1/admin/audit-logs/20000000-0000-4000-8000-000000000001').set('Cookie', `panshi_session=${token}`).expect(200)
     expect(detail.body.data.item.action).toBe('admin.created')

@@ -1,7 +1,8 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { applications, auditLogs, files, resources } from '../../db/schema.js'
+import { applications, files, resources } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 
 export type ResourceAccessScope = 'public' | 'authenticated' | 'admitted'
 export type ResourceRecord = {
@@ -71,7 +72,7 @@ export const createResourceRepository = (db: NodePgDatabase<typeof schema>): Res
       if (!file) throw new Error('RESOURCE_FILE_INVALID')
       const [record] = await transaction.insert(resources).values({ key: input.key, title: input.title, description: input.description, fileId: input.fileId, accessLevel: input.accessScope, sortOrder: input.sortOrder, active: false }).returning()
       if (!record) throw new Error('Resource insert failed')
-      await transaction.insert(auditLogs).values({ actorUserId, action: 'resource.draft_created', entityType: 'resource', entityId: record.id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId, action: 'resource.draft_created', entityType: 'resource', entityId: record.id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
       return { id: record.id, key: record.key, title: record.title, description: record.description, fileId: record.fileId!, accessScope: record.accessLevel, sortOrder: record.sortOrder, revision: record.revision, active: record.active }
     }),
     updateDraft: (id, input, expectedRevision, actorUserId) => db.transaction(async (transaction) => {
@@ -82,7 +83,7 @@ export const createResourceRepository = (db: NodePgDatabase<typeof schema>): Res
         const [existing] = await transaction.select({ id: resources.id }).from(resources).where(eq(resources.id, id)).limit(1)
         return existing ? { kind: 'conflict' } : { kind: 'not_found' }
       }
-      await transaction.insert(auditLogs).values({ actorUserId, action: 'resource.draft_saved', entityType: 'resource', entityId: id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId, action: 'resource.draft_saved', entityType: 'resource', entityId: id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
       return { kind: 'updated', resource: { id: record.id, key: record.key, title: record.title, description: record.description, fileId: record.fileId!, accessScope: record.accessLevel, sortOrder: record.sortOrder, revision: record.revision, active: record.active } }
     }),
     setPublished: (id, active, expectedRevision, actorUserId) => db.transaction(async (transaction) => {
@@ -97,7 +98,7 @@ export const createResourceRepository = (db: NodePgDatabase<typeof schema>): Res
         const [current] = await transaction.select({ id: resources.id }).from(resources).where(eq(resources.id, id)).limit(1)
         return current ? { kind: 'conflict' } : { kind: 'not_found' }
       }
-      await transaction.insert(auditLogs).values({ actorUserId, action: active ? 'resource.published' : 'resource.unpublished', entityType: 'resource', entityId: id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId, action: active ? 'resource.published' : 'resource.unpublished', entityType: 'resource', entityId: id, metadata: { accessScope: record.accessLevel, sortOrder: record.sortOrder } })
       return { kind: 'updated', resource: { id: record.id, key: record.key, title: record.title, description: record.description, fileId: record.fileId, accessScope: record.accessLevel, sortOrder: record.sortOrder, revision: record.revision, active: record.active } }
     }),
   }

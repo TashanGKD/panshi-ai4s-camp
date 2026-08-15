@@ -1,9 +1,10 @@
 import type { JsonObject, ContentModuleKey } from '@panshi/contracts'
 import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { auditLogs, contentModules, contentVersions } from '../../db/schema.js'
+import { contentModules, contentVersions } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
 import { lockApplicationCountVisibility } from '../../db/application-count-lock.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 import { validateContentForPublication, type ContentValidationRepository } from './content.validators.js'
 
 export type PublishedContentRecord = {
@@ -131,7 +132,7 @@ export const createContentPublishingRepository = (
         eq(contentModules.draftRevision, expectedRevision),
       )).returning({ revision: contentModules.draftRevision })
       if (!updated) return null
-      await transaction.insert(auditLogs).values({
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
         actorUserId,
         action: 'content.draft_saved',
         entityType: 'content_module',
@@ -161,7 +162,7 @@ export const createContentPublishingRepository = (
       }).returning({ id: contentVersions.id })
       if (!created) throw new Error('Content version insert failed')
       await transaction.update(contentModules).set({ publishedVersionId: created.id }).where(eq(contentModules.key, key))
-      await transaction.insert(auditLogs).values({
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
         actorUserId,
         action: 'content.published',
         entityType: 'content_module',
@@ -208,7 +209,7 @@ export const createContentPublishingRepository = (
       }).returning({ id: contentVersions.id })
       if (!created) throw new Error('Rollback version insert failed')
       await transaction.update(contentModules).set({ publishedVersionId: created.id }).where(eq(contentModules.key, key))
-      await transaction.insert(auditLogs).values({
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
         actorUserId,
         action: 'content.rolled_back',
         entityType: 'content_module',

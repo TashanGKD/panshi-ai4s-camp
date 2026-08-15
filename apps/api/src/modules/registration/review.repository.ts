@@ -1,8 +1,9 @@
 import { and, asc, count, desc, eq, gte, ilike, lte, or, sql, type SQL } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { RegistrationFormSchema, type ApplicationStatus, type JsonObject } from '@panshi/contracts'
-import { applicationFiles, applications, applicationStatusHistory, applicationVersions, auditLogs, files, registrationFormVersions, users } from '../../db/schema.js'
+import { RegistrationFormSchema, type ApplicationStatus } from '@panshi/contracts'
+import { applicationFiles, applications, applicationStatusHistory, applicationVersions, files, registrationFormVersions, users } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 import { ReviewError, type ReviewListQuery, type ReviewRepository, type ReviewTransitionInput } from './review.service.js'
 
 const allowedTransitions: Readonly<Record<ApplicationStatus, readonly ApplicationStatus[]>> = {
@@ -75,7 +76,7 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
       reason: input.targetStatus === 'needs_supplement' ? input.publicMessage : null,
       internalNote: input.internalNote ?? null,
     })
-    await transaction.insert(auditLogs).values({ actorUserId: input.adminId, action: 'application.status_changed', entityType: 'application', entityId: locked.id, metadata: { fromStatus: locked.status, toStatus: input.targetStatus, revision: nextRevision, editableFieldCount: input.editableFieldIds.length, editableAttachmentCount: input.editableAttachmentIds.length } })
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.adminId, action: 'application.status_changed', entityType: 'application', entityId: locked.id, metadata: { fromStatus: locked.status, toStatus: input.targetStatus, revision: nextRevision, editableFieldCount: input.editableFieldIds.length, editableAttachmentCount: input.editableAttachmentIds.length } })
     return { id: locked.id, revision: nextRevision, status: input.targetStatus }
   }
 
@@ -110,7 +111,7 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
           results.push(changed ? { applicationId, success: true, status: changed.status } : { applicationId, success: false, code: 'APPLICATION_REVISION_CONFLICT', message: '报名状态已变化' })
         } catch (error) { results.push({ applicationId, success: false, code: error instanceof ReviewError ? error.code : 'REVIEW_FAILED', message: error instanceof Error ? error.message : '审核失败' }) }
       }
-      await db.insert(auditLogs).values({ actorUserId: input.adminId, action: 'application.bulk_status_changed', entityType: 'application_batch', entityId: null, metadata: { targetStatus: input.targetStatus, requestedCount: new Set(input.applicationIds).size, successCount: results.filter((item) => item.success).length, failureCount: results.filter((item) => !item.success).length } })
+      await appendAuditLog(db, { actorUserId: input.adminId, action: 'application.bulk_status_changed', entityType: 'application_batch', entityId: null, metadata: { targetStatus: input.targetStatus, requestedCount: new Set(input.applicationIds).size, successCount: results.filter((item) => item.success).length, failureCount: results.filter((item) => !item.success).length } })
       return results
     },
     exportCsv: async (query) => {
@@ -118,7 +119,17 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
       if (items.length > exportLimit) throw new ReviewError(413, 'EXPORT_TOO_LARGE', `筛选结果超过 ${exportLimit} 条，请缩小范围`)
       const columns = ['报名编号', '状态', '姓名', '单位', '身份类型', '学历阶段', '提交时间']
       const lines = [columns.map(csvCell).join(','), ...items.map((item) => [item.id, item.status, item.name, item.organization, item.identityType, item.educationStage, item.submittedAt].map(csvCell).join(','))]
-      await db.insert(auditLogs).values({ actorUserId: query.adminId, action: 'application.exported', entityType: 'application_export', entityId: null, metadata: { filters: { status: query.status ?? null, organization: query.organization ?? null, identityType: query.identityType ?? null, educationStage: query.educationStage ?? null, submittedFrom: query.submittedFrom ?? null, submittedTo: query.submittedTo ?? null, searchProvided: Boolean(query.search) }, columns, count: items.length } as unknown as JsonObject })
+      await appendAuditLog(db, { actorUserId: query.adminId, action: 'application.exported', entityType: 'application_export', entityId: null, metadata: {
+        status: query.status ?? null,
+        organizationFilterApplied: Boolean(query.organization),
+        identityTypeFilterApplied: Boolean(query.identityType),
+        educationStageFilterApplied: Boolean(query.educationStage),
+        submittedFromFilterApplied: Boolean(query.submittedFrom),
+        submittedToFilterApplied: Boolean(query.submittedTo),
+        searchProvided: Boolean(query.search),
+        columnCount: columns.length,
+        count: items.length,
+      } })
       return { csv: `\uFEFF${lines.join('\r\n')}\r\n`, count: items.length, columns }
     },
   }

@@ -10,8 +10,9 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { z } from 'zod'
 import { createConfiguredDatabaseClient } from '../client.js'
-import { auditLogs, contentModules, contentVersions, users } from '../schema.js'
+import { contentModules, contentVersions, users } from '../schema.js'
 import type * as schema from '../schema.js'
+import { appendAuditLog } from '../../modules/audit/audit.repository.js'
 
 export const initialPublishedContent = {
   basic: {
@@ -112,7 +113,7 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
       }
 
       if (inserted) {
-        await transaction.insert(auditLogs).values({
+        await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
           actorUserId: creator.id,
           action: 'content.version_created',
           entityType: 'content_version',
@@ -129,7 +130,7 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
         )).returning({ key: contentModules.key })
 
       if (publication.length > 0) {
-        await transaction.insert(auditLogs).values({
+        await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
           actorUserId: creator.id,
           action: 'content.version_published',
           entityType: 'content_module',

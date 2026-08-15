@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { UserRole } from '@panshi/contracts'
-import { auditLogs, sessions, users, verificationCodes } from '../../db/schema.js'
+import { sessions, users, verificationCodes } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
-import type { AuditEntry } from '../audit/audit.repository.js'
+import { appendAuditLog, type AuditEntry } from '../audit/audit.repository.js'
 
 export type IdentityUser = {
   id: string
@@ -113,7 +113,7 @@ export const createIdentityRepository = (
       await transaction.update(sessions).set({ revokedAt })
         .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
       await transaction.insert(sessions).values({ tokenHash, userId, expiresAt })
-      await transaction.insert(auditLogs).values(audit)
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, audit)
     })
   },
 
@@ -223,7 +223,7 @@ export const createIdentityRepository = (
         if (!user) throw new Error('Student account creation did not return a user')
         await transaction.update(verificationCodes).set({ consumedAt: input.consumedAt })
           .where(eq(verificationCodes.id, record.id))
-        await transaction.insert(auditLogs).values({
+        await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
           actorUserId: user.id,
           action: 'auth.student_registered',
           entityType: 'user',
@@ -271,7 +271,7 @@ export const createIdentityRepository = (
     await transaction.update(users).set({ passwordHash }).where(eq(users.id, user.id))
     await transaction.update(sessions).set({ revokedAt: input.consumedAt })
       .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)))
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId: user.id,
       action: 'auth.password_reset',
       entityType: 'user',

@@ -2,12 +2,13 @@ import { and, asc, eq, isNull, notInArray } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { RegistrationFormSchema, type ApplicationCoreFields, type JsonObject } from '@panshi/contracts'
 import {
-  applications, applicationFiles, applicationStatusHistory, applicationVersions, auditLogs, contentModules, contentVersions,
+  applications, applicationFiles, applicationStatusHistory, applicationVersions, contentModules, contentVersions,
   files, registrationFormDrafts, registrationFormVersions, userProfiles, users,
 } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
 import { shanghaiBusinessDate } from '../../lib/business-date.js'
 import { DOCX_MIME, PDF_MIME, type AllowedFileExtension } from '../files/file-validation.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 import { ApplicationSubmissionError, type ApplicationFile, type ApplicationRecord, type ApplicationRepository } from './application.service.js'
 
 const DRAFT_ID = '00000000-0000-4000-8000-000000000010'
@@ -142,7 +143,7 @@ export const createApplicationRepository = (
       await transaction.update(applications).set({ coreFields: core, answers: input.answers as JsonObject, revision: locked.revision + 1, updatedAt: now() }).where(eq(applications.id, locked.id))
       await transaction.delete(applicationFiles).where(eq(applicationFiles.applicationId, locked.id))
       if (input.attachments.length > 0) await transaction.insert(applicationFiles).values(input.attachments.map((reference) => ({ applicationId: locked.id, fileId: reference.fileId, purpose: 'registration_attachment', attachmentSlot: reference.slotId })))
-      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: 'application.draft_saved', entityType: 'application', entityId: locked.id, metadata: { revision: locked.revision + 1, answerCount: Object.keys(input.answers).length, attachmentCount: input.attachments.length } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.user.id, action: 'application.draft_saved', entityType: 'application', entityId: locked.id, metadata: { revision: locked.revision + 1, answerCount: Object.keys(input.answers).length, attachmentCount: input.attachments.length } })
       return readRecord(transaction as NodePgDatabase<typeof schema>, input.user.id)
     }),
 
@@ -204,7 +205,7 @@ export const createApplicationRepository = (
       const nextStatus = isSupplement ? 'reviewing' : 'submitted'
       await transaction.update(applications).set({ status: nextStatus, revision: locked.revision + 1, submittedAt, updatedAt: submittedAt, supplementPublicMessage: null, supplementDeadline: null, supplementEditableFieldIds: [], supplementEditableAttachmentIds: [] }).where(eq(applications.id, record.id))
       await transaction.insert(applicationStatusHistory).values({ applicationId: record.id, fromStatus: locked.status, toStatus: nextStatus, changedBy: input.user.id })
-      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: isSupplement ? 'application.supplement_resubmitted' : 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.user.id, action: isSupplement ? 'application.supplement_resubmitted' : 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
       return { applicationId: record.id, versionId: version.id, submittedAt }
     }),
 

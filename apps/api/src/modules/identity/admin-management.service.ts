@@ -18,7 +18,7 @@ const presentAudit = (row: AuditRecord) => ({
   action: safeAuditText(row.action, 100),
   entityType: safeAuditText(row.entityType, 100),
   entityId: row.entityId ? safeAuditText(row.entityId) : null,
-  metadata: sanitizeAuditMetadata(row.metadata),
+  metadata: sanitizeAuditMetadata(row.action, row.metadata),
   createdAt: row.createdAt.toISOString(),
 })
 const validateAdminPassword = (password: string) => {

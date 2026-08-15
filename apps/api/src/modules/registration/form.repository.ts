@@ -1,8 +1,9 @@
 import { and, desc, eq, max } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { RegistrationFormSchema, type JsonObject, type RegistrationForm } from '@panshi/contracts'
-import { auditLogs, registrationFormDrafts, registrationFormVersions } from '../../db/schema.js'
+import { registrationFormDrafts, registrationFormVersions } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 import type { RegistrationFormRepository, RegistrationFormVersionRecord } from './form.service.js'
 
 const DRAFT_ID = '00000000-0000-4000-8000-000000000010'
@@ -58,7 +59,7 @@ export const createRegistrationFormRepository = (
     }).where(and(eq(registrationFormDrafts.id, DRAFT_ID), eq(registrationFormDrafts.revision, expectedRevision)))
       .returning({ revision: registrationFormDrafts.revision })
     if (!updated) return null
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId, action: 'registration_form.draft_saved', entityType: 'registration_form_draft', entityId: DRAFT_ID,
       metadata: { revision: updated.revision, summary: summary(form) },
     })
@@ -86,7 +87,7 @@ export const createRegistrationFormRepository = (
       baseVersionId: created.id, publishedRevision: draft.revision, updatedBy: actorUserId, updatedAt: new Date(),
     })
       .where(eq(registrationFormDrafts.id, DRAFT_ID))
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId, action: 'registration_form.published', entityType: 'registration_form_version', entityId: created.id,
       metadata: { version, revision: draft.revision, summary: summary(form) },
     })

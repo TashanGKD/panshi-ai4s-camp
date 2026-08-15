@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type * as schema from '../../db/schema.js'
-import { applications, applicationFiles, auditLogs, files, fileStorageRecoveries } from '../../db/schema.js'
+import { applications, applicationFiles, files, fileStorageRecoveries } from '../../db/schema.js'
+import { appendAuditLog } from '../audit/audit.repository.js'
 
 export type FileLifecycleState = 'active' | 'deleting' | 'delete_failed' | 'deleted'
 
@@ -50,7 +51,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
   finalizeUploadWithAudit: (recoveryId, record, actorUserId) => db.transaction(async (transaction) => {
     const [created] = await transaction.insert(files).values(record).returning()
     if (!created) throw new Error('File metadata insert did not return a row')
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId,
       action: 'file.uploaded',
       entityType: 'file',
@@ -80,7 +81,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     const [recovery] = await transaction.update(fileStorageRecoveries).set({ updatedAt: new Date() })
       .where(eq(fileStorageRecoveries.id, recoveryId)).returning({ id: fileStorageRecoveries.id })
     if (!recovery) throw new Error('File upload recovery row is missing')
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId,
       action: 'file.storage_rejected',
       entityType: 'file_storage_recovery',
@@ -95,7 +96,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     }).where(and(eq(fileStorageRecoveries.id, recoveryId), eq(fileStorageRecoveries.state, 'pending')))
       .returning({ id: fileStorageRecoveries.id })
     if (!recovery) throw new Error('File upload recovery row is missing')
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId,
       action: 'file.upload_cleanup_failed',
       entityType: 'file_storage_recovery',
@@ -120,7 +121,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     const [record] = await transaction.update(files).set({ hiddenAt: new Date() })
       .where(and(eq(files.id, id), eq(files.lifecycleState, 'active'), isNull(files.hiddenAt), isNull(files.deletedAt))).returning()
     if (!record) return { kind: 'unavailable' }
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId: actor.id,
       action: 'file.hidden',
       entityType: 'file',
@@ -141,7 +142,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     const [record] = await transaction.update(files).set({ lifecycleState: 'deleting', deleteFailureCode: null })
       .where(and(eq(files.id, id), isNull(files.deletedAt), inArray(files.lifecycleState, ['active', 'deleting', 'delete_failed']))).returning()
     if (!record) return { kind: 'unavailable' }
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId: actor.id,
       action: 'file.delete_started',
       entityType: 'file',
@@ -155,7 +156,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     const [record] = await transaction.update(files).set({ lifecycleState: 'delete_failed', deleteFailureCode: failureCode })
       .where(and(eq(files.id, id), eq(files.lifecycleState, 'deleting'), isNull(files.deletedAt))).returning()
     if (!record) return null
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId,
       action: 'file.delete_failed',
       entityType: 'file',
@@ -170,7 +171,7 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
       lifecycleState: 'deleted', deleteFailureCode: null, deletedAt: new Date(),
     }).where(and(eq(files.id, id), eq(files.lifecycleState, 'deleting'), isNull(files.deletedAt))).returning()
     if (!record) return null
-    await transaction.insert(auditLogs).values({
+    await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
       actorUserId,
       action: 'file.deleted',
       entityType: 'file',

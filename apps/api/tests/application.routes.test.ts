@@ -29,8 +29,10 @@ describe('my application routes', () => {
       request(app(fakeService({ getMine: async () => ({ private: true }) as never }))).get('/api/v1/me/application').set('Cookie', 'panshi_session=student-token'),
       request(app(fakeService({ getMine: async () => { throw new ApplicationError(403, 'ACCOUNT_DISABLED', '账号已停用') } }))).get('/api/v1/me/application').set('Cookie', 'panshi_session=student-token'),
       request(app(fakeService())).get('/api/v1/me/not-found').set('Cookie', 'panshi_session=student-token'),
+      request(app(fakeService())).get('/api/v1/auth/not-found'),
+      request(app(fakeService())).get('/api/v1/admin/not-found').set('Cookie', 'panshi_session=student-token'),
     ])
-    expect(responses.map((response) => response.status)).toEqual([200, 200, 403, 404])
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 403, 404, 404, 404])
     for (const response of responses) {
       expect(response.headers['cache-control']).toBe('private, no-store')
       expect(response.headers.etag).toBeUndefined()

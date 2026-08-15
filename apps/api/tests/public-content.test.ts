@@ -78,6 +78,20 @@ describe('public published content', () => {
     expect(JSON.stringify(response.body)).not.toContain('草稿标题')
   })
 
+  it('keeps weak etag validation for public GET responses', async () => {
+    const app = createPublicApp(publishedSiteRows)
+    const initial = await request(app).get('/api/v1/public/site')
+
+    expect(initial.status).toBe(200)
+    expect(initial.headers.etag).toMatch(/^W\//u)
+    expect(initial.headers['cache-control']).toBeUndefined()
+    const conditional = await request(app).get('/api/v1/public/site').set('If-None-Match', initial.headers.etag as string)
+    expect(conditional.status).toBe(304)
+    expect(conditional.text).toBe('')
+    expect(conditional.headers.etag).toBe(initial.headers.etag)
+    expect(conditional.headers['cache-control']).toBeUndefined()
+  })
+
   it('omits unpublished modules instead of falling back to draft JSON', async () => {
     const response = await request(createPublicApp(publishedSiteRows)).get('/api/v1/public/schedule')
 

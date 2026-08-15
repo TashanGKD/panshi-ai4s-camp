@@ -57,6 +57,12 @@ export type AppDependencies = {
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
 const privateNoStore: RequestHandler = (_request, response, next) => {
   response.setHeader('Cache-Control', 'private, no-store')
+  const setHeader = response.setHeader.bind(response)
+  response.setHeader = ((name: string, value: unknown) => {
+    if (name.toLowerCase() === 'etag') return response
+    return setHeader(name, value as string)
+  }) as typeof response.setHeader
+  response.removeHeader('ETag')
   next()
 }
 
@@ -112,12 +118,10 @@ export const createApp = ({
   config,
 }: AppDependencies) => {
   const app = express()
-  app.disable('etag')
   const sessionTtlSeconds = config.sessionTtlSeconds ?? 28_800
 
   app.use(requestId)
-  app.use('/api/v1/me', privateNoStore)
-  app.use('/api/v1/files', privateNoStore)
+  app.use(['/api/v1/me', '/api/v1/files', '/api/v1/auth', '/api/v1/admin'], privateNoStore)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
   app.use(createOriginGuard(config.allowedOrigins))

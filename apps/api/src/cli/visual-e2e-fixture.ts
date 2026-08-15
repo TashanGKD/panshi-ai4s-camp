@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDatabaseClient } from '../db/client.js'
@@ -7,6 +8,7 @@ import { users } from '../db/schema.js'
 import { hashPassword } from '../modules/identity/password.js'
 
 const exactDatabaseUrl = 'postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test'
+const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
 
 const requireVisualControls = (databaseUrl: string | undefined, enabled: string | undefined) => {
   if (enabled !== '1' || databaseUrl !== exactDatabaseUrl) {
@@ -27,6 +29,9 @@ export const runVisualFixture = async (
   const database = createDatabaseClient(databaseUrl)
   try {
     await clearFixture(database)
+    if (operation === 'cleanup') {
+      await Promise.all(['var/visual-e2e-uploads', 'var/visual-e2e-temp'].map((path) => rm(resolve(projectRoot, path), { recursive: true, force: true })))
+    }
     if (operation === 'seed') {
       const [creator] = await database.db.insert(users).values({
         displayName: '视觉回归测试管理员',

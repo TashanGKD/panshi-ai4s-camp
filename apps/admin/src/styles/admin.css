@@ -56,6 +56,8 @@ button:disabled { opacity: .65; cursor: wait; }
 .panel li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .panel li div { display: grid; }
 .panel time, .panel small, .empty-state { color: #687783; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-scroll table { min-width: 60rem; }
 .dashboard-grid .panel:last-child { grid-column: 1 / -1; }
 .system-status-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: .65rem; background: #e7f4ea; color: #245b31; }
 .system-status-banner.degraded { background: #fff0df; color: #7a4910; }

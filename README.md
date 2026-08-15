@@ -1,11 +1,13 @@
 # 磐石 AI4S 实训营站点
 
-这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目，采用模块化单体结构。共享 contracts、PostgreSQL 数据库与迁移基础、公开内容 API、管理员与学员 Cookie 会话、手机号注册和密码重置、草稿／同源预览／版本化发布能力、结构化内容工作台、报名表配置、安全附件存储、学员报名提交、个人中心和真实数据摘要已经实现。公开资料管理属于后续任务。
+这是一个面向单次 AI4S 实训营的独立 npm workspaces 项目。公开站、学员报名、管理后台、内容发布、审核补充／录取、分级资料、公开报名计数、审计和系统状态均由真实 API 与 PostgreSQL 驱动。系统采用前后端分离的模块化单体，生产部署与运维边界见 [架构](docs/architecture.md)、[内容模型](docs/content-model.md) 和 [生产运维](docs/operations.md)。
 
 ## 运行环境
 
 - Node.js 24.x
 - npm 11.x
+- PostgreSQL 16（本地服务或 Compose）
+- Chromium（只在运行 Playwright 门禁时需要；缺失时执行 `npx playwright install chromium`）
 
 ## 工作区职责
 
@@ -15,18 +17,47 @@
 - `packages/contracts`：跨应用共享的 Zod 数据契约与类型。
 - `packages/ui`：`web` 与 `admin` 共用的 React UI 组件。
 
-## 启动命令
+## 快速开始
 
-安装依赖后，先在本项目根目录创建本地环境文件，再分别启动三个应用：
+在本项目根目录安装依赖并建立未跟踪的本地环境。Compose 的本地项目名固定为 `panshi-ai4s-camp-local`，不要与生产项目共用名字或卷：
 
 ```bash
+npm ci
 cp .env.example .env
+docker compose -p panshi-ai4s-camp-local up -d postgres
+DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp' npm run db:migrate -w @panshi/api
+DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp' npm run admin:create -w @panshi/api -- --phone 13800138000 --name 本地管理员
+```
+
+管理员命令会在 TTY 中隐藏读取密码。创建管理员后，用其数据库 UUID 初始化首次公开内容；脚本不会创建账号或密码：
+
+```bash
+DATABASE_URL='postgresql://panshi:panshi_local@127.0.0.1:5433/panshi_ai4s_camp' \
+CONTENT_SEED_CREATOR_USER_ID='<existing-admin-uuid>' \
+  npm run db:seed:content -w @panshi/api
+```
+
+分别启动三个开发进程：
+
+```bash
 npm run dev:web
 npm run dev:admin
 npm run dev:api
 ```
 
 API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQL 迁移。迁移不会随服务启动自动执行。
+
+`.env.example` 只提供本地占位值。至少核对 `DATABASE_URL`、`CORS_ORIGINS`、两个 Vite 基址、私有文件目录和上传限制。验证码安全默认关闭；开发联调可在未跟踪的 `.env` 中使用 `VERIFICATION_PROVIDER=mock` 及本地随机 `VERIFICATION_SECRET`，生产禁止 mock，且当前尚未实现真实短信适配器。
+
+## 应用、模块与主要路由
+
+- 公开 Web：`/`、`/schedule`、`/application`、`/travel`、`/contact`、`/resources`、`/login`、`/register`、`/account`。
+- 管理后台：`/admin/` 下的工作台、八个内容模块、报名审核、表单配置、资料、管理员、审计日志和系统状态。
+- 公开 API：`/api/v1/public/site`、`/schedule`、`/content/:key`、`/registration-form`、`/statistics/applications` 以及 `/api/v1/resources`。
+- 学员 API：`/api/v1/auth/*`、`/api/v1/me/profile`、`/api/v1/me/application`、`/api/v1/files/:id/download`。
+- 管理 API：`/api/v1/admin/content`、`registration-form`、`applications`、`resources`、`users`、`audit-logs`、`system-health` 和 `summary`。
+
+浏览器不得直连数据库或上传目录。内容发布的唯一真源是管理后台的结构化草稿和版本化发布指针：保存草稿、同源预览、发布后，公开 API 才会消费新版本；不要在前端复制内容或直接修改历史版本。
 
 `npm run dev:api` 会在 `apps/api` workspace 中执行 Node 24 原生命令 `node --watch --env-file=../../.env --import tsx src/server.ts`，因此与 Web 一样加载上述项目根目录 `.env`，并保留文件变更重启。`--env-file` 只加入 API 开发命令，不改变生产构建或运行时从 `process.env` 读取并校验配置的语义。
 
@@ -200,8 +231,22 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
-npm audit --omit=dev
+npm run test:deployment:build
+bash tests/backup-restore.test.sh
 ```
+
+`npm test` 包含 workspace 单元测试和快速静态部署契约；`npm run test:deployment:build` 是显式干净构建门禁，并在 Docker 可用时扩展到容器／代理检查。发布级真实旅程使用专用 PostgreSQL、独立临时上传目录和首版 mock 验证适配器，固定单 worker；fixture 在迁移后建立确定性数据，进程退出与全局 teardown 都会清理，且拒绝任何非精确测试库：
+
+```bash
+LAUNCH_E2E=1 \
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
+E2E_VERIFICATION_CODE='<six-digit-test-code>' \
+E2E_ADMIN_PASSWORD='<dedicated-test-password>' \
+VERIFICATION_SECRET='<64-hex-characters-from-32-random-bytes>' \
+  npx playwright test
+```
+
+这两项 Playwright 用例覆盖完整发布／报名／附件／补充／录取／资料／公开计数旅程和匿名、普通学员、录取学员、管理员访问矩阵；同时在 `1440x900`、`1280x800`、`390x844` 检查公开与管理关键页面并把截图写入被 Git 忽略的 `test-results`。不要指向开发或生产库。Chromium 缺失时只安装项目 Playwright 对应浏览器：`npx playwright install chromium`。
 
 API 无数据库单元/运行壳测试可显式运行 `npm test -w @panshi/api -- health.test.ts dev-command.test.ts`。内容仓库、发布指针和种子幂等性属于必须的 PostgreSQL 集成边界，使用 `npm run test:integration:content -w @panshi/api`；该命令缺少 `TEST_DATABASE_URL` 时立即失败，且只接受数据库名精确为 `panshi_ai4s_camp_test` 的 PostgreSQL URL。API schema 集成测试同样必须按上文显式提供专用测试数据库；`typecheck` 和 `build` 会逐一检查各 workspace。
 身份 SQL/session 生命周期的必须集成边界使用 `npm run test:integration:auth -w @panshi/api`；它同样要求显式 `TEST_DATABASE_URL` 且数据库名必须精确为 `panshi_ai4s_camp_test`，缺少时在加载测试前失败。
@@ -253,5 +298,9 @@ TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' \
 ```
 
 `visual:test` 只比较当前平台已有的基线，不会改写图片；`visual:update` 才生成或更新当前平台基线。两个命令都会拒绝缺少显式开关或不精确的测试数据库，并在结束时清空 fixture 数据，不得指向开发或生产数据库。快照文件名包含 Playwright 的 `{platform}` 值（例如 `darwin` 或 `linux`），因此 macOS 与 Linux CI 各自维护对应基线。首次在新平台运行时，应在固定 Node、Playwright/Chromium、字体和视口环境中执行 `visual:update`，人工检查生成图片后再提交。测试中的 source-vs-migrated 直接 PNG 对比始终要求零个 RGBA 通道差异，但该比较只在同一次运行、同一渲染环境内成立，不跨操作系统复用像素结果。
+
+## 当前运行验证限制
+
+静态部署契约和干净临时上下文构建可在无 Docker 主机上完成；原生 Compose 配置、容器镜像、可执行 Nginx 配置和容器内 HTTP 仍必须在装有 Docker Engine 与 Compose 插件的发布主机／CI 上复验。本次 Task 19 验收主机没有 Docker，因此不声称这些层已运行。生产短信适配器也尚未实现，`disabled` 是生产安全默认，`mock` 仅用于 development/test；上线开放学员注册前必须完成真实 provider 与风控实现和验证。
 
 环境变量从 `.env.example` 复制后按本机环境填写；示例文件不保存真实凭据。

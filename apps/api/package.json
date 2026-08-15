@@ -12,6 +12,7 @@
     "e2e:visual-fixture": "tsx src/cli/visual-e2e-fixture.ts",
     "e2e:student-auth-fixture": "tsx src/cli/student-auth-e2e-fixture.ts",
     "e2e:application-fixture": "tsx src/cli/application-e2e-fixture.ts",
+    "e2e:launch-fixture": "tsx src/cli/launch-e2e-fixture.ts",
     "dev": "node --watch --env-file=../../.env --import tsx src/server.ts",
     "test": "vitest run --exclude 'tests/*.integration.test.ts' --exclude 'tests/schema.test.ts'",
     "test:integration:content": "node tests/require-content-integration-env.mjs && vitest run tests/public-content.test.ts",

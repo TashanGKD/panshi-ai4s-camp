@@ -39,10 +39,10 @@ export const createResourceRouter = (sessions: SessionService, service: Resource
     let stream: Awaited<ReturnType<ResourceService['open']>>['stream'] | undefined
     const abort = () => stream?.destroy(new Error('Download client disconnected'))
     try {
+      privateNoStore(response)
       const parsed = Id.safeParse(request.params.id)
       if (!parsed.success) throw new HttpError(400, 'RESOURCE_ID_INVALID', '资料标识无效')
       const actor = await resolveOptional(sessions, request.cookies)
-      privateNoStore(response)
       const opened = await service.open(parsed.data, actor)
       stream = opened.stream
       response.setHeader('Content-Type', opened.record.mimeType)

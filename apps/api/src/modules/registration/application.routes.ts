@@ -12,7 +12,13 @@ const toHttpError = (error: unknown) => {
 
 export const createApplicationRouter = (sessions: SessionService, service: ApplicationService) => {
   const router = Router()
-  router.use(createRequireUser(sessions))
+  router.use(createRequireUser(sessions), (_request, response: Response<unknown, AuthenticatedLocals>, next) => {
+    if (response.locals.authenticatedUser.role !== 'user') {
+      next(new HttpError(403, 'FORBIDDEN', '仅学员账号可访问报名'))
+      return
+    }
+    next()
+  })
   router.get('/', async (_request, response: Response<unknown, AuthenticatedLocals>, next) => {
     try { response.json(await service.getMine(response.locals.authenticatedUser)) } catch (error) { next(toHttpError(error)) }
   })

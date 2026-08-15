@@ -56,6 +56,8 @@ describe('resource and statistics routes', () => {
   it('uses indistinguishable 404 for restricted downloads and private no-store errors', async () => {
     const response = await request(makeApp()).get(`/api/v1/resources/${protectedItem.id}/download`).expect(404)
     expect(response.body.error.code).toBe('RESOURCE_NOT_AVAILABLE'); expect(response.headers['cache-control']).toBe('private, no-store'); expect(response.headers.etag).toBeUndefined()
+    const malformed = await request(makeApp()).get('/api/v1/resources/not-a-uuid/download').expect(400)
+    expect(malformed.body.error.code).toBe('RESOURCE_ID_INVALID'); expect(malformed.headers['cache-control']).toBe('private, no-store'); expect(malformed.headers.etag).toBeUndefined()
   })
 
   it('allows shared caching only for an anonymous published public download', async () => {

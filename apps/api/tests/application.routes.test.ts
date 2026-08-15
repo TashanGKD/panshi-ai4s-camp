@@ -5,9 +5,10 @@ import { hashSessionToken } from '../src/modules/identity/session.service.js'
 import { ApplicationError, type ApplicationService } from '../src/modules/registration/application.service.js'
 
 const student = { id: '10000000-0000-4000-8000-000000000001', displayName: '张三', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
+const admin = { ...student, id: '10000000-0000-4000-8000-000000000002', role: 'admin' as const }
 const identityRepository = {
   findUserByPhoneNormalized: async () => null,
-  findSessionByTokenHash: async (hash: string) => hash === hashSessionToken('student-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: student } : null,
+  findSessionByTokenHash: async (hash: string) => hash === hashSessionToken('student-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: student } : hash === hashSessionToken('admin-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: admin } : null,
   revokeSessionByTokenHash: async () => undefined,
 }
 const fakeService = (overrides: Partial<ApplicationService> = {}): ApplicationService => ({
@@ -22,6 +23,9 @@ describe('my application routes', () => {
     expect(unauthorized.headers['cache-control']).toBe('private, no-store')
     expect(unauthorized.headers.etag).toBeUndefined()
     expect((await request(app(fakeService())).get('/api/v1/users/another/application').set('Cookie', 'panshi_session=student-token')).status).toBe(404)
+    const administrator = await request(app(fakeService({ getMine: async () => ({ private: true }) as never }))).get('/api/v1/me/application').set('Cookie', 'panshi_session=admin-token')
+    expect(administrator.status).toBe(403)
+    expect(administrator.body.error.code).toBe('FORBIDDEN')
   })
   it('marks account, application, forbidden, and missing me responses private without etags', async () => {
     const responses = await Promise.all([

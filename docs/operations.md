@@ -182,3 +182,49 @@ docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-
 `npm run test:deployment:build` is the explicit CI/release gate. It reproduces each Docker dependency/build stage in clean temporary contexts, validates artifacts and API runtime imports, runs native Compose and image/live HTTP checks when Docker is available, and explicitly reports skipped container checks otherwise. At this review, the Docker engine and Compose plugin are unavailable; clean-context builds can run, but container builds, executable Nginx validation, and live proxy checks cannot be claimed.
 
 `VERIFICATION_PROVIDER=disabled` is intentional in the current production model. The code currently supports only `disabled` and a development-only `mock`; no production SMS adapter is implemented, so student verification-code delivery remains unavailable until that adapter is added.
+
+## SMS adapter switch
+
+Do not set production to `mock`: configuration validation rejects that combination. Until a real adapter exists, keep `VERIFICATION_PROVIDER=disabled`, keep registration closed in published content, and verify that verification-send returns the documented unavailable response without disclosing account existence.
+
+A future production switch is allowed only after a named adapter implements the existing `VerificationProvider` contract and has delivery receipts, timeout/retry behavior, IP and per-phone rate limits, a global cost circuit breaker, secret rotation, redacted logging, and integration tests. Add that adapter name to configuration validation; never alias it to `mock`. In a maintenance window, deploy with the new provider name and its operator-managed secret variables, then test one dedicated non-user phone through send, register, login, reset, audit redaction, and rate-limit boundaries. Roll back the switch by restoring `VERIFICATION_PROVIDER=disabled` and redeploying the previous release; do not retain test codes or provider credentials in the repository or operations log. No live SMS vendor is selected by this document.
+
+## Deployment verification
+
+Before touching production, run the repository gates from a clean checkout:
+
+```sh
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:deployment:build
+bash tests/backup-restore.test.sh
+```
+
+On a Docker-capable release host, the clean-build gate must report its container checks as executed, not skipped. Then validate the exact production model and deploy only the reviewed image tag:
+
+```sh
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml config -q
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml build
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml up -d
+docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml ps
+```
+
+Verify through the external HTTPS origin, not only loopback: public home, schedule, application, travel, contact, resources, login and profile; admin login, dashboard, content, applications, resources, administrators, audit and system status; `/healthz`; one public API payload; one authorized private response with `Cache-Control: private, no-store`; and one authorized attachment/resource download whose SHA-256 matches its source. Confirm the same published banner/navigation/content is shown at desktop and mobile widths. Check that anonymous and ordinary-user probes cannot enumerate another application, attachment, admitted resource, admin endpoint, or audit log.
+
+## Go-live and rollback checklist
+
+Before go-live:
+
+1. Record the release commit, immutable image digests, database target, operator, previous release tag, and rollback decision owner.
+2. Confirm the exact production environment file, TLS certificate/renewal, loopback-only Nginx binding, CORS origins, storage marker/permissions, backup password-file ownership, free space, and off-host backup copy.
+3. Run a coherent maintenance backup and verify its `COMPLETE` marker and SHA-256 manifest. Record its generated backup ID.
+4. Run migration, create the first administrator only if none exists, and verify at least two active administrators before normal operations. Never seed a password.
+5. Preview and publish each approved content/form/resource revision through the admin UI. Confirm registration dates and keep registration closed while verification delivery is disabled.
+6. Complete the external HTTPS verification above, inspect audit entries for the release operations, and obtain the go-live decision.
+
+Rollback application code when health, authorization, rendering, or download checks fail but the new migration remains backward-compatible: restore the previous reviewed image tag in the production environment, rerun the exact `config -q` and `up -d` commands, and repeat external verification. Never edit or delete an applied migration and never point `content_modules.published_version_id` by hand; use the admin content rollback action for a bad content release.
+
+If data or migration state must be reverted, stop frontend and API and follow the destructive restore runbook above using the recorded pre-release backup. A database restore and upload restore are one operation. Do not attempt a partial SQL rollback or copy individual storage paths. If the restore fails or its post-restore hash checks disagree, keep the service stopped, preserve evidence and staging/rollback directories, and escalate rather than retrying blindly. Record the final release/backup IDs, verification results, downtime, and decision in the operations log.

@@ -291,6 +291,8 @@ const ApplicationFileSchema = z.object({
   downloadUrl: z.string().startsWith('/api/v1/files/'),
 }).strict()
 
+const UnlinkedApplicationFileSchema = ApplicationFileSchema.omit({ slotId: true })
+
 export const ApplicationTimelineEntrySchema = z.object({
   status: ApplicationStatusSchema,
   createdAt: z.iso.datetime(),
@@ -311,6 +313,7 @@ export const MyApplicationResponseSchema = z.object({
       profile: ApplicationCoreFieldsSchema,
       answers: ApplicationAnswersSchema,
       attachments: z.array(ApplicationFileSchema),
+      unlinkedAttachments: z.array(UnlinkedApplicationFileSchema),
       retiredAnswerIds: z.array(UuidSchema),
       submittedAt: z.iso.datetime().nullable(),
       updatedAt: z.iso.datetime(),

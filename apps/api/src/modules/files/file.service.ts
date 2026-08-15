@@ -118,18 +118,18 @@ export const createFileService = (repository: FileRepository, storage: FileStora
   },
 
   hide: async (id: string, actor: AuthenticatedSessionUser) => {
-    const record = await repository.findById(id)
-    if (!record || record.lifecycleState !== 'active' || record.hiddenAt !== null || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
-    if (await repository.isLockedApplicationFile?.(id)) throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
-    if (!await repository.hideWithAudit(id, actor.id)) throw unavailable()
+    if (actor.disabledAt !== null) throw new FileServiceError(403, 'ACCOUNT_DISABLED', '账号已停用')
+    const result = await repository.hideWithAudit(id, actor)
+    if (result.kind === 'locked') throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
+    if (result.kind === 'unavailable') throw unavailable()
   },
 
   remove: async (id: string, actor: AuthenticatedSessionUser) => {
-    const record = await repository.findById(id)
-    if (!record || record.lifecycleState === 'deleted' || record.deletedAt !== null || !canManage(record, actor)) throw unavailable()
-    if (await repository.isLockedApplicationFile?.(id)) throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
-    const deleting = await repository.beginDeleteWithAudit(id, actor.id)
-    if (!deleting) throw unavailable()
+    if (actor.disabledAt !== null) throw new FileServiceError(403, 'ACCOUNT_DISABLED', '账号已停用')
+    const result = await repository.beginDeleteWithAudit(id, actor)
+    if (result.kind === 'locked') throw new FileServiceError(409, 'FILE_LOCKED_BY_APPLICATION', '已提交报名的附件不能修改')
+    if (result.kind === 'unavailable') throw unavailable()
+    const deleting = result.record
     try {
       await storage.remove(deleting.storageKey)
     } catch {

@@ -22,7 +22,7 @@ describe('recoverable file lifecycle', () => {
       findById: async () => record,
       beginDeleteWithAudit: async () => {
         record = { ...record, lifecycleState: 'deleting' as const }
-        return record
+        return { kind: 'updated' as const, record }
       },
       markDeleteFailedWithAudit: async (_id: string, _actorId: string, code: string) => {
         record = { ...record, lifecycleState: 'delete_failed' as const, deleteFailureCode: code }

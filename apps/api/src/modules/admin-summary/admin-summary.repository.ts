@@ -3,14 +3,13 @@ import { and, asc, count, desc, eq } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { ContentModuleKeySchema, ImportantDatesContentSchema, type ContentModuleKey } from '@panshi/contracts'
 import { applications, auditLogs, contentModules, contentVersions, users } from '../../db/schema.js'
+import { shanghaiBusinessDate } from '../../lib/business-date.js'
 import type * as schema from '../../db/schema.js'
 import type { AdminSummaryRepository } from './admin-summary.service.js'
 
-const machineKeys = new Set(['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'])
+export { shanghaiBusinessDate } from '../../lib/business-date.js'
 
-export const shanghaiBusinessDate = (instant: Date): string => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(instant)
+const machineKeys = new Set(['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'])
 
 export const createAdminSummaryRepository = (
   db: NodePgDatabase<typeof schema>,

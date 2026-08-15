@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { DEFAULT_REGISTRATION_FORM, type JsonObject, type RegistrationForm } from '@panshi/contracts'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { applications, applicationVersions, auditLogs, contentModules, contentVersions, files, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
+import { applications, applicationFiles, applicationVersions, auditLogs, contentModules, contentVersions, files, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
 import { createApplicationRepository } from '../src/modules/registration/application.repository.js'
 import { createApplicationService } from '../src/modules/registration/application.service.js'
 import { createFileRepository } from '../src/modules/files/file.repository.js'
@@ -33,6 +33,32 @@ describe('application PostgreSQL workflow', () => {
   })
   afterAll(async () => { await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await database.close() })
 
+  const prepareSubmittableDraft = async () => {
+    const repository = createApplicationRepository(database.db, { now: () => new Date('2026-08-15T00:00:00Z') })
+    const service = createApplicationService(repository)
+    let mine = await service.getMine(student)
+    const [file] = await database.db.insert(files).values({
+      storageKey: `aa/bb/${crypto.randomUUID()}`, originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 100,
+      sha256: 'e'.repeat(64), uploadedBy: student.id, ownerUserId: student.id, purpose: 'registration_attachment',
+      visibility: 'owner_admin', attachmentSlot: slotId,
+    }).returning({ id: files.id })
+    mine = await service.saveDraft(student, {
+      expectedRevision: mine.data.application.revision, profile, answers: { [questionId]: '并发研究问题' },
+      attachments: [{ slotId, fileId: file!.id }],
+    })
+    return { service, mine, file: file! }
+  }
+
+  const waitForBlockedTransactions = async (minimum: number) => {
+    const deadline = Date.now() + 2_000
+    while (Date.now() < deadline) {
+      const result = await database.pool.query<{ count: string }>("select count(*) from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'")
+      if (Number(result.rows[0]?.count) >= minimum) return
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error(`Expected at least ${minimum} blocked PostgreSQL transactions`)
+  }
+
   it('persists one optimistic draft and does not count it as submitted', async () => {
     const service = createApplicationService(createApplicationRepository(database.db, { now: () => new Date('2026-08-15T00:00:00Z') }))
     const initial = await service.getMine(student)
@@ -41,6 +67,21 @@ describe('application PostgreSQL workflow', () => {
     const counts = await database.db.select({ count: sql<number>`count(*)` }).from(applications).where(eq(applications.status, 'submitted'))
     expect(Number(counts[0]?.count)).toBe(0)
     await expect(database.db.insert(applications).values({ userId: student.id, formVersionId: initial.data.application.formVersionId })).rejects.toThrow()
+  })
+
+  it.each([
+    ['开放日前一秒', '2026-07-31T15:59:59.999Z', false, 'REGISTRATION_NOT_OPEN'],
+    ['开放日北京时间 00:00', '2026-07-31T16:00:00.000Z', true, undefined],
+    ['开放日北京时间 07:59', '2026-07-31T23:59:00.000Z', true, undefined],
+    ['开放日北京时间 08:00', '2026-08-01T00:00:00.000Z', true, undefined],
+    ['截止日北京时间 00:00', '2026-08-30T16:00:00.000Z', true, undefined],
+    ['截止日北京时间 07:59', '2026-08-30T23:59:00.000Z', true, undefined],
+    ['截止日北京时间 08:00', '2026-08-31T00:00:00.000Z', true, undefined],
+    ['截止日北京时间 23:59', '2026-08-31T15:59:59.999Z', true, undefined],
+    ['截止日后北京时间 00:00', '2026-08-31T16:00:00.000Z', false, 'REGISTRATION_CLOSED'],
+  ] as const)('uses the inclusive Asia/Shanghai business date at %s', async (_label, instant, open, reason) => {
+    const repository = createApplicationRepository(database.db, { now: () => new Date(instant) })
+    await expect(repository.registrationWindow()).resolves.toEqual(reason === undefined ? { open } : { open, reason })
   })
 
   it('rejects missing required data and inactive or foreign attachments at submit time', async () => {
@@ -72,6 +113,9 @@ describe('application PostgreSQL workflow', () => {
     const logs = JSON.stringify(await database.db.select().from(auditLogs))
     expect(logs).not.toContain('绝密研究问题'); expect(logs).not.toContain('private-name.pdf')
     const fileService = createFileService(createFileRepository(database.db), { createStorageKey: () => '', put: async () => { throw new Error('unused') }, open: async () => { throw new Error('unused') }, remove: async () => { throw new Error('submitted files must not reach storage removal') } })
+    await expect(fileService.hide(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
+    await expect(fileService.remove(file!.id, other)).rejects.toMatchObject({ code: 'FILE_NOT_AVAILABLE', status: 404 })
+    await expect(fileService.hide(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
     await expect(fileService.remove(file!.id, student)).rejects.toMatchObject({ code: 'FILE_LOCKED_BY_APPLICATION', status: 409 })
   })
 
@@ -95,5 +139,105 @@ describe('application PostgreSQL workflow', () => {
     expect(migrated.data.application.answers[questionId]).toBe('保留的旧答案')
     expect(migrated.data.application.retiredAnswerIds).toEqual([questionId])
     expect(migrated.data.application.revision).toBe(mine.data.application.revision + 1)
+  })
+
+  it('unlinks a draft attachment whose slot is disabled in v2 without deleting the owner file', async () => {
+    const repository = createApplicationRepository(database.db, { now: () => new Date('2026-08-15T00:00:00Z') })
+    const service = createApplicationService(repository)
+    const mine = await service.getMine(student)
+    const [file] = await database.db.insert(files).values({
+      storageKey: 'aa/bb/retired', originalName: 'old-resume.pdf', mimeType: 'application/pdf', sizeBytes: 100,
+      sha256: 'd'.repeat(64), uploadedBy: student.id, ownerUserId: student.id, purpose: 'registration_attachment',
+      visibility: 'owner_admin', attachmentSlot: slotId,
+    }).returning({ id: files.id })
+    await service.saveDraft(student, {
+      expectedRevision: mine.data.application.revision, profile, answers: {}, attachments: [{ slotId, fileId: file!.id }],
+    })
+    const v2: RegistrationForm = { ...form, attachments: [{ ...form.attachments[0]!, active: false, required: false }] }
+    const [published] = await database.db.insert(registrationFormVersions).values({ version: 2, schema: v2 as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date() }).returning({ id: registrationFormVersions.id })
+    await database.db.update(registrationFormDrafts).set({ baseVersionId: published!.id, schema: v2 }).where(eq(registrationFormDrafts.id, '00000000-0000-4000-8000-000000000010'))
+
+    const migrated = await service.getMine(student)
+    expect(migrated.data.application.formVersion).toBe(2)
+    expect(migrated.data.application.attachments).toEqual([])
+    expect((migrated.data.application as typeof migrated.data.application & { unlinkedAttachments?: Array<{ id: string }> }).unlinkedAttachments).toEqual([
+      expect.objectContaining({ id: file!.id }),
+    ])
+    expect(await database.db.select().from(applicationFiles)).toEqual([])
+    expect(await database.db.select().from(files).where(eq(files.id, file!.id))).toEqual([
+      expect.objectContaining({ id: file!.id, ownerUserId: student.id, lifecycleState: 'active', hiddenAt: null, deletedAt: null }),
+    ])
+    const updated = await service.saveDraft(student, { expectedRevision: migrated.data.application.revision, profile, answers: { [questionId]: '新版答案' }, attachments: [] })
+    await expect(service.submit(student, { expectedRevision: updated.data.application.revision })).resolves.toMatchObject({ data: { status: 'submitted' } })
+    await expect(createFileService(createFileRepository(database.db), {
+      createStorageKey: () => '', put: async () => { throw new Error('unused') },
+      open: async () => ({ [Symbol.asyncIterator]: async function* () { yield Buffer.from('pdf') } }) as never,
+      remove: async () => { throw new Error('unused') },
+    }).openForDownload(file!.id, student)).resolves.toMatchObject({ record: { id: file!.id, ownerUserId: student.id } })
+  })
+
+  it('serializes submit before a concurrent delete so the submitted attachment cannot disappear', async () => {
+    const { service, mine, file } = await prepareSubmittableDraft()
+    const lock = await database.pool.connect()
+    await lock.query('begin')
+    await lock.query('select id from applications where user_id = $1 for update', [student.id])
+    await lock.query('select id from files where id = $1 for update', [file.id])
+    try {
+      const submit = service.submit(student, { expectedRevision: mine.data.application.revision })
+      await waitForBlockedTransactions(1)
+      const remove = createFileService(createFileRepository(database.db), {
+        createStorageKey: () => '', put: async () => { throw new Error('unused') }, open: async () => { throw new Error('unused') }, remove: async () => undefined,
+      }).remove(file.id, student)
+      await waitForBlockedTransactions(2)
+      await lock.query('commit')
+      const [submitted, removed] = await Promise.allSettled([submit, remove])
+      const application = (await database.db.select().from(applications).where(eq(applications.userId, student.id)))[0]!
+      const storedFile = (await database.db.select().from(files).where(eq(files.id, file.id)))[0]!
+      if (submitted.status === 'fulfilled') {
+        expect(removed).toMatchObject({ status: 'rejected', reason: { code: 'FILE_LOCKED_BY_APPLICATION', status: 409 } })
+        expect(application).toMatchObject({ status: 'submitted' })
+        expect(storedFile).toMatchObject({ lifecycleState: 'active', hiddenAt: null, deletedAt: null })
+      } else {
+        expect(removed.status).toBe('fulfilled')
+        expect(application).toMatchObject({ status: 'draft' })
+        expect(storedFile).toMatchObject({ lifecycleState: 'deleted', deletedAt: expect.any(Date) })
+      }
+    } finally {
+      await lock.query('rollback').catch(() => undefined)
+      lock.release()
+    }
+  })
+
+  it('serializes hide before a concurrent submit and rejects submission with an unavailable attachment', async () => {
+    const { service, mine, file } = await prepareSubmittableDraft()
+    const lock = await database.pool.connect()
+    await lock.query('begin')
+    await lock.query('select id from applications where user_id = $1 for update', [student.id])
+    await lock.query('select id from files where id = $1 for update', [file.id])
+    try {
+      const hide = createFileService(createFileRepository(database.db), {
+        createStorageKey: () => '', put: async () => { throw new Error('unused') }, open: async () => { throw new Error('unused') }, remove: async () => { throw new Error('unused') },
+      }).hide(file.id, student)
+      await waitForBlockedTransactions(1)
+      const submit = service.submit(student, { expectedRevision: mine.data.application.revision })
+      await waitForBlockedTransactions(2)
+      await lock.query('commit')
+      const [hidden, submitted] = await Promise.allSettled([hide, submit])
+      const application = (await database.db.select().from(applications).where(eq(applications.userId, student.id)))[0]!
+      const storedFile = (await database.db.select().from(files).where(eq(files.id, file.id)))[0]!
+      if (hidden.status === 'fulfilled') {
+        expect(submitted.status).toBe('rejected')
+        expect(application).toMatchObject({ status: 'draft' })
+        expect(storedFile).toMatchObject({ lifecycleState: 'active', hiddenAt: expect.any(Date), deletedAt: null })
+      } else {
+        expect(hidden).toMatchObject({ status: 'rejected', reason: { code: 'FILE_LOCKED_BY_APPLICATION', status: 409 } })
+        expect(submitted.status).toBe('fulfilled')
+        expect(application).toMatchObject({ status: 'submitted' })
+        expect(storedFile).toMatchObject({ lifecycleState: 'active', hiddenAt: null, deletedAt: null })
+      }
+    } finally {
+      await lock.query('rollback').catch(() => undefined)
+      lock.release()
+    }
   })
 })

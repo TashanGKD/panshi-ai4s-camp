@@ -12,7 +12,7 @@ const profile = { name: '张三', email: 'a@example.com', organization: '物理�
 const memoryRepository = (): ApplicationRepository => {
   let revision = 0
   let status: 'draft' | 'submitted' = 'draft'
-  const record = () => ({ id: '20000000-0000-4000-8000-000000000001', revision, status, formVersionId: '30000000-0000-4000-8000-000000000001', formVersion: 1, form, profile: { ...profile, phone: user.phoneNormalized }, answers: {}, attachments: [], submittedAt: status === 'submitted' ? new Date() : null, updatedAt: new Date(), retiredAnswerIds: [] })
+  const record = () => ({ id: '20000000-0000-4000-8000-000000000001', revision, status, formVersionId: '30000000-0000-4000-8000-000000000001', formVersion: 1, form, profile: { ...profile, phone: user.phoneNormalized }, answers: {}, attachments: [], unlinkedAttachments: [], submittedAt: status === 'submitted' ? new Date() : null, updatedAt: new Date(), retiredAnswerIds: [] })
   return {
     getOrCreateDraft: async () => record(),
     saveDraft: async (input) => input.expectedRevision === revision ? ({ ...record(), revision: ++revision, answers: input.answers, profile: { ...input.profile, phone: user.phoneNormalized } }) : null,

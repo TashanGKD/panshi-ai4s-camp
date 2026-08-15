@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNull, notInArray } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { RegistrationFormSchema, type ApplicationCoreFields, type JsonObject } from '@panshi/contracts'
 import {
@@ -6,6 +6,7 @@ import {
   files, registrationFormDrafts, registrationFormVersions, userProfiles, users,
 } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { shanghaiBusinessDate } from '../../lib/business-date.js'
 import type { ApplicationFile, ApplicationRecord, ApplicationRepository } from './application.service.js'
 
 const DRAFT_ID = '00000000-0000-4000-8000-000000000010'
@@ -54,6 +55,12 @@ export const createApplicationRepository = (
       id: files.id, slotId: applicationFiles.attachmentSlot, originalName: files.originalName, mimeType: files.mimeType, sizeBytes: files.sizeBytes,
     }).from(applicationFiles).innerJoin(files, eq(files.id, applicationFiles.fileId))
       .where(and(eq(applicationFiles.applicationId, record.id), eq(files.lifecycleState, 'active'), isNull(files.hiddenAt), isNull(files.deletedAt))).orderBy(asc(applicationFiles.createdAt))
+    const unlinkedRows = await database.select({
+      id: files.id, originalName: files.originalName, mimeType: files.mimeType, sizeBytes: files.sizeBytes,
+    }).from(files).leftJoin(applicationFiles, eq(applicationFiles.fileId, files.id)).where(and(
+      eq(files.ownerUserId, userId), eq(files.purpose, 'registration_attachment'), eq(files.lifecycleState, 'active'),
+      isNull(files.hiddenAt), isNull(files.deletedAt), isNull(applicationFiles.fileId),
+    )).orderBy(asc(files.createdAt))
     const activeIds = new Set(form.questions.filter((question) => question.active).map((question) => question.id))
     return {
       id: record.id, revision: record.revision, status: record.status, formVersionId: record.formVersionId,
@@ -62,6 +69,7 @@ export const createApplicationRepository = (
       profile: record.coreFields as ApplicationCoreFields,
       answers: record.answers as Record<string, string | string[]>,
       attachments: rows as ApplicationFile[],
+      unlinkedAttachments: unlinkedRows as Array<Omit<ApplicationFile, 'slotId'>>,
       retiredAnswerIds: Object.keys(record.answers).filter((id) => !activeIds.has(id)),
     }
   }
@@ -70,18 +78,26 @@ export const createApplicationRepository = (
     const [record] = await database.select({ payload: contentVersions.payload }).from(contentModules)
       .innerJoin(contentVersions, and(eq(contentVersions.moduleKey, contentModules.key), eq(contentVersions.id, contentModules.publishedVersionId)))
       .where(eq(contentModules.key, 'importantDates')).limit(1)
-    return registrationWindowFromPayload(record?.payload, now().toISOString().slice(0, 10))
+    return registrationWindowFromPayload(record?.payload, shanghaiBusinessDate(now()))
   }
 
   return {
     getOrCreateDraft: (user) => db.transaction(async (transaction) => {
-      await transaction.select({ id: users.id }).from(users).where(eq(users.id, user.id)).for('update')
+      const [existingApplication] = await transaction.select({ id: applications.id }).from(applications).where(eq(applications.userId, user.id)).for('update')
+      if (!existingApplication) {
+        await transaction.select({ id: users.id }).from(users).where(eq(users.id, user.id)).for('update')
+        await transaction.select({ id: applications.id }).from(applications).where(eq(applications.userId, user.id)).for('update')
+      }
       const current = await readRecord(transaction as NodePgDatabase<typeof schema>, user.id)
       if (current && current.status !== 'draft') return current
       const published = await latestForm(transaction as NodePgDatabase<typeof schema>)
       if (current) {
         if (current.formVersionId !== published.id) {
           await transaction.update(applications).set({ formVersionId: published.id, revision: current.revision + 1, updatedAt: now() }).where(eq(applications.id, current.id))
+          const activeSlotIds = published.form.attachments.filter((slot) => slot.active).map((slot) => slot.id)
+          await transaction.delete(applicationFiles).where(activeSlotIds.length === 0
+            ? eq(applicationFiles.applicationId, current.id)
+            : and(eq(applicationFiles.applicationId, current.id), notInArray(applicationFiles.attachmentSlot, activeSlotIds)))
         }
       } else {
         const [existingProfile] = await transaction.select().from(userProfiles).where(eq(userProfiles.userId, user.id)).limit(1)
@@ -125,17 +141,17 @@ export const createApplicationRepository = (
     submit: (input) => db.transaction(async (transaction) => {
       const window = await getWindow(transaction as NodePgDatabase<typeof schema>)
       if (!window.open) return null
-      const [account] = await transaction.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, input.user.id)).for('update')
-      if (!account || account.disabledAt !== null) return null
       const [locked] = await transaction.select().from(applications).where(eq(applications.userId, input.user.id)).for('update')
       if (!locked || locked.status !== 'draft' || locked.revision !== input.expectedRevision) return null
+      const [account] = await transaction.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, input.user.id)).for('update')
+      if (!account || account.disabledAt !== null) return null
       const record = await readRecord(transaction as NodePgDatabase<typeof schema>, input.user.id)
       if (!record) return null
       const lockedFiles = await transaction.select({
         id: files.id, slotId: applicationFiles.attachmentSlot, ownerUserId: files.ownerUserId, purpose: files.purpose,
         attachmentSlot: files.attachmentSlot, lifecycleState: files.lifecycleState, hiddenAt: files.hiddenAt, deletedAt: files.deletedAt,
       }).from(applicationFiles).innerJoin(files, eq(files.id, applicationFiles.fileId))
-        .where(eq(applicationFiles.applicationId, record.id)).for('update', { of: files })
+        .where(eq(applicationFiles.applicationId, record.id)).orderBy(asc(files.id)).for('update', { of: files })
       const validSlots = new Set(record.form.attachments.filter((slot) => slot.active).map((slot) => slot.id))
       if (lockedFiles.some((file) => file.ownerUserId !== input.user.id || file.purpose !== 'registration_attachment' || file.attachmentSlot !== file.slotId || !validSlots.has(file.slotId) || file.lifecycleState !== 'active' || file.hiddenAt !== null || file.deletedAt !== null)) {
         throw new Error('APPLICATION_ATTACHMENT_INVALID')

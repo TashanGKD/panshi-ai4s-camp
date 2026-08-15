@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type * as schema from '../../db/schema.js'
 import { applications, applicationFiles, auditLogs, files, fileStorageRecoveries } from '../../db/schema.js'
@@ -25,6 +25,7 @@ export type FileRecord = {
 }
 
 export type NewFileRecord = Omit<FileRecord, 'id' | 'hiddenAt' | 'deletedAt' | 'lifecycleState' | 'deleteFailureCode' | 'createdAt'>
+export type FileMutationResult = { kind: 'updated', record: FileRecord } | { kind: 'locked' } | { kind: 'unavailable' }
 
 export type FileRepository = {
   beginUploadRecovery: (storageKey: string, actorUserId: string) => Promise<{ id: string }>
@@ -33,9 +34,8 @@ export type FileRepository = {
   recordUploadStorageFailure: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   markUploadCleanupFailed: (recoveryId: string, actorUserId: string, failureCode: string) => Promise<void>
   findById: (id: string) => Promise<FileRecord | null>
-  isLockedApplicationFile?: (id: string) => Promise<boolean>
-  hideWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
-  beginDeleteWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
+  hideWithAudit: (id: string, actor: { id: string, role: 'user' | 'admin' }) => Promise<FileMutationResult>
+  beginDeleteWithAudit: (id: string, actor: { id: string, role: 'user' | 'admin' }) => Promise<FileMutationResult>
   markDeleteFailedWithAudit: (id: string, actorUserId: string, failureCode: string) => Promise<FileRecord | null>
   markDeletedWithAudit: (id: string, actorUserId: string) => Promise<FileRecord | null>
 }
@@ -109,39 +109,46 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
     return record ?? null
   },
 
-  isLockedApplicationFile: async (id) => {
-    const [record] = await db.select({ fileId: applicationFiles.fileId }).from(applicationFiles)
+  hideWithAudit: (id, actor) => db.transaction(async (transaction) => {
+    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status }).from(applicationFiles)
       .innerJoin(applications, eq(applications.id, applicationFiles.applicationId))
-      .where(and(eq(applicationFiles.fileId, id), ne(applications.status, 'draft'))).limit(1)
-    return record !== undefined
-  },
-
-  hideWithAudit: (id, actorUserId) => db.transaction(async (transaction) => {
+      .where(eq(applicationFiles.fileId, id)).orderBy(asc(applications.id)).for('update', { of: applications })
+    const [lockedFile] = await transaction.select().from(files).where(eq(files.id, id)).for('update')
+    if (!lockedFile || lockedFile.lifecycleState !== 'active' || lockedFile.hiddenAt !== null || lockedFile.deletedAt !== null
+      || (actor.role !== 'admin' && lockedFile.ownerUserId !== actor.id)) return { kind: 'unavailable' }
+    if (linkedApplications.some((application) => application.status !== 'draft')) return { kind: 'locked' }
     const [record] = await transaction.update(files).set({ hiddenAt: new Date() })
       .where(and(eq(files.id, id), eq(files.lifecycleState, 'active'), isNull(files.hiddenAt), isNull(files.deletedAt))).returning()
-    if (!record) return null
+    if (!record) return { kind: 'unavailable' }
     await transaction.insert(auditLogs).values({
-      actorUserId,
+      actorUserId: actor.id,
       action: 'file.hidden',
       entityType: 'file',
       entityId: id,
       metadata: { purpose: record.purpose, visibility: record.visibility },
     })
-    return record
+    return { kind: 'updated', record }
   }),
 
-  beginDeleteWithAudit: (id, actorUserId) => db.transaction(async (transaction) => {
+  beginDeleteWithAudit: (id, actor) => db.transaction(async (transaction) => {
+    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status }).from(applicationFiles)
+      .innerJoin(applications, eq(applications.id, applicationFiles.applicationId))
+      .where(eq(applicationFiles.fileId, id)).orderBy(asc(applications.id)).for('update', { of: applications })
+    const [lockedFile] = await transaction.select().from(files).where(eq(files.id, id)).for('update')
+    if (!lockedFile || lockedFile.deletedAt !== null || !['active', 'deleting', 'delete_failed'].includes(lockedFile.lifecycleState)
+      || (actor.role !== 'admin' && lockedFile.ownerUserId !== actor.id)) return { kind: 'unavailable' }
+    if (linkedApplications.some((application) => application.status !== 'draft')) return { kind: 'locked' }
     const [record] = await transaction.update(files).set({ lifecycleState: 'deleting', deleteFailureCode: null })
       .where(and(eq(files.id, id), isNull(files.deletedAt), inArray(files.lifecycleState, ['active', 'deleting', 'delete_failed']))).returning()
-    if (!record) return null
+    if (!record) return { kind: 'unavailable' }
     await transaction.insert(auditLogs).values({
-      actorUserId,
+      actorUserId: actor.id,
       action: 'file.delete_started',
       entityType: 'file',
       entityId: id,
       metadata: { purpose: record.purpose, visibility: record.visibility },
     })
-    return record
+    return { kind: 'updated', record }
   }),
 
   markDeleteFailedWithAudit: (id, actorUserId, failureCode) => db.transaction(async (transaction) => {

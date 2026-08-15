@@ -13,7 +13,7 @@ export function AccountPage() {
     let active = true
     void applicationClient.getMine().then((response) => { if (active) { setData(response.data); setMessage('') } }, async (error) => {
       if (!active) return
-      if (error instanceof ApplicationApiError && error.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); setMessage('账号已停用，当前会话已退出。') }
+      if (error instanceof ApplicationApiError && error.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); if (active) setMessage('账号已停用，当前会话已退出。') }
       else if (error instanceof ApplicationApiError && error.status === 401) setMessage('请先登录后查看个人中心。')
       else setMessage('个人中心暂时无法加载。')
     })

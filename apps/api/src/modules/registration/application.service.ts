@@ -17,6 +17,7 @@ export type ApplicationFile = {
 export type ApplicationRecord = {
   id: string; revision: number; status: ApplicationStatus; formVersionId: string; formVersion: number; form: RegistrationForm
   profile: ApplicationCoreFields; answers: Record<string, string | string[]>; attachments: ApplicationFile[]
+  unlinkedAttachments: Array<Omit<ApplicationFile, 'slotId'>>
   submittedAt: Date | null; updatedAt: Date; retiredAnswerIds: string[]
 }
 export type ApplicationRepository = {
@@ -74,6 +75,7 @@ const response = async (repository: ApplicationRepository, application: Applicat
     application: {
       ...application, locked: application.status !== 'draft', submittedAt: application.submittedAt?.toISOString() ?? null, updatedAt: application.updatedAt.toISOString(),
       attachments: application.attachments.map((file) => ({ ...file, downloadUrl: `/api/v1/files/${file.id}/download` })),
+      unlinkedAttachments: application.unlinkedAttachments.map((file) => ({ ...file, downloadUrl: `/api/v1/files/${file.id}/download` })),
     },
     timeline: (await repository.listTimeline(application.id)).map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
     supplementRequest: null,

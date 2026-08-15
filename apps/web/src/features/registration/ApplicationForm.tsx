@@ -8,9 +8,10 @@ export type FormDraft = {
   attachments: Array<{ slotId: string, fileId: string }>
 }
 
-export function ApplicationForm({ application, draft, disabled, errors, onChange, onUpload, onRemove }: {
+export function ApplicationForm({ application, draft, disabled, errors, onChange, onUpload, onRemove, onRemoveUnlinked }: {
   application: MyApplicationResponse['data']['application']; draft: FormDraft; disabled: boolean; errors: Record<string, string>
   onChange: (draft: FormDraft) => void; onUpload: (slotId: string, file: File) => void; onRemove: (slotId: string, fileId: string) => void
+  onRemoveUnlinked?: (fileId: string) => void
 }) {
   const coreValues = draft.profile as CoreFieldValues
   const currentFiles = new Map(application.attachments.map((file) => [file.slotId, file]))
@@ -30,5 +31,6 @@ export function ApplicationForm({ application, draft, disabled, errors, onChange
         {file ? <p><a href={file.downloadUrl}>{file.originalName}</a> <button type="button" onClick={() => onRemove(slot.id, file.id)}>删除并替换</button></p> : <input id={`attachment-${slot.id}`} type="file" accept={slot.allowedExtensions.map((extension) => `.${extension}`).join(',')} required={slot.required} onChange={(event) => { const selected = event.target.files?.[0]; if (selected) onUpload(slot.id, selected) }} />}
         {errors[`attachments.${slot.id}`] ? <p className="form-error" role="alert">{errors[`attachments.${slot.id}`]}</p> : null}</div>
     })}</section>
+    {application.unlinkedAttachments.length > 0 ? <section><h3>未关联附件</h3><p>以下文件来自已停用的附件项或尚未关联的上传，可下载留存或删除。</p><ul>{application.unlinkedAttachments.map((file) => <li key={file.id}><a href={file.downloadUrl}>{file.originalName}</a> <button type="button" onClick={() => onRemoveUnlinked?.(file.id)}>删除</button></li>)}</ul></section> : null}
   </fieldset>
 }

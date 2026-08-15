@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useBlocker } from 'react-router-dom'
 import type { MyApplicationResponse } from '@panshi/contracts'
 import { applicationClient, ApplicationApiError } from '../api/application-client'
 import { ApplicationForm, type FormDraft } from '../features/registration/ApplicationForm'
@@ -31,28 +31,34 @@ export function RegistrationPage() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const generation = useRef(0)
   const operationLocked = useRef(false)
-  const waitForOperation = async () => {
-    while (operationLocked.current) await new Promise((resolve) => window.setTimeout(resolve, 25))
-  }
+  const mounted = useRef(true)
 
   const load = useCallback(async () => {
     const current = ++generation.current
     try {
       const response = await applicationClient.getMine()
-      if (generation.current !== current) return
+      if (!mounted.current || generation.current !== current) return
       setState({ application: response.data.application, draft: draftFrom(response.data.application) }); setStatus('ready'); setDirty(false)
     } catch (caught) {
-      if (generation.current !== current) return
+      if (!mounted.current || generation.current !== current) return
       if (caught instanceof ApplicationApiError && caught.status === 401) setStatus('anonymous')
-      else if (caught instanceof ApplicationApiError && caught.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); setStatus('disabled') }
+      else if (caught instanceof ApplicationApiError && caught.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); if (mounted.current) setStatus('disabled') }
       else setStatus('error')
     }
   }, [])
-  useEffect(() => { void load(); return () => { generation.current += 1 } }, [load])
+  useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; generation.current += 1 } }, [load])
+  const shouldBlockNavigation = (dirty || pending) && status === 'ready' && state?.application.locked !== true
+  const blocker = useBlocker(shouldBlockNavigation)
   useEffect(() => {
-    const guard = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = '' } }
+    if (blocker.state !== 'blocked') return
+    const leave = window.confirm(pending ? '当前操作仍在进行，离开后结果可能已在服务端生效。确认离开吗？' : '报名草稿尚未保存，确认离开吗？')
+    if (leave) blocker.proceed()
+    else blocker.reset()
+  }, [blocker, pending])
+  useEffect(() => {
+    const guard = (event: BeforeUnloadEvent) => { if (dirty || pending) { event.preventDefault(); event.returnValue = '' } }
     window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard)
-  }, [dirty])
+  }, [dirty, pending])
 
   const save = useCallback(async (draftOverride?: FormDraft) => {
     if (!state || operationLocked.current || state.application.locked) return null
@@ -60,16 +66,16 @@ export function RegistrationPage() {
     const operation = ++generation.current; setPending(true); setMessage(''); setErrors({})
     try {
       const response = await applicationClient.saveDraft({ expectedRevision: state.application.revision, ...(draftOverride ?? state.draft) })
-      if (generation.current !== operation) return null
+      if (!mounted.current || generation.current !== operation) return null
       setState({ application: response.data.application, draft: draftFrom(response.data.application) }); setDirty(false); setMessage('草稿已保存')
       return response.data.application
     } catch (caught) {
-      if (generation.current !== operation) return null
-      if (caught instanceof ApplicationApiError) { setErrors(fieldErrors(caught)); setMessage(caught.message); if (caught.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); setStatus('disabled') } }
+      if (!mounted.current || generation.current !== operation) return null
+      if (caught instanceof ApplicationApiError) { setErrors(fieldErrors(caught)); setMessage(caught.message); if (caught.code === 'ACCOUNT_DISABLED') { await applicationClient.logout().catch(() => undefined); if (mounted.current) setStatus('disabled') } }
       else setMessage('保存失败，请稍后重试')
       return null
-    } finally { operationLocked.current = false; if (generation.current === operation) setPending(false) }
-  }, [pending, state])
+    } finally { operationLocked.current = false; if (mounted.current && generation.current === operation) setPending(false) }
+  }, [state])
 
   useEffect(() => {
     if (!dirty || pending || !state || state.application.locked) return
@@ -84,36 +90,48 @@ export function RegistrationPage() {
 
   const updateDraft = (draft: FormDraft) => { setState({ ...state, draft }); setDirty(true); setMessage('尚未保存') }
   const upload = async (slotId: string, file: File) => {
-    await waitForOperation()
+    if (operationLocked.current) return
     operationLocked.current = true
     setPending(true); setMessage('正在上传附件')
     try {
       const uploaded = await applicationClient.upload(file, slotId)
+      if (!mounted.current) return
       const next = { ...state.draft, attachments: [...state.draft.attachments.filter((item) => item.slotId !== slotId), { slotId, fileId: uploaded.data.file.id }] }
       operationLocked.current = false; setPending(false); await save(next)
-    } catch (caught) { operationLocked.current = false; setPending(false); setMessage(caught instanceof Error ? caught.message : '附件上传失败') }
+    } catch (caught) { operationLocked.current = false; if (mounted.current) { setPending(false); setMessage(caught instanceof Error ? caught.message : '附件上传失败') } }
   }
   const remove = async (slotId: string, fileId: string) => {
-    await waitForOperation()
+    if (operationLocked.current) return
     operationLocked.current = true
     setPending(true)
     try {
       await applicationClient.removeFile(fileId)
+      if (!mounted.current) return
       const next = { ...state.draft, attachments: state.draft.attachments.filter((item) => item.slotId !== slotId) }
       operationLocked.current = false; setPending(false); await save(next)
-    } catch (caught) { operationLocked.current = false; setPending(false); setMessage(caught instanceof Error ? caught.message : '附件删除失败') }
+    } catch (caught) { operationLocked.current = false; if (mounted.current) { setPending(false); setMessage(caught instanceof Error ? caught.message : '附件删除失败') } }
+  }
+  const removeUnlinked = async (fileId: string) => {
+    if (operationLocked.current) return
+    operationLocked.current = true; setPending(true)
+    try {
+      await applicationClient.removeFile(fileId)
+      if (mounted.current) setState((current) => current ? { ...current, application: { ...current.application, unlinkedAttachments: current.application.unlinkedAttachments.filter((file) => file.id !== fileId) } } : current)
+    }
+    catch (caught) { if (mounted.current) setMessage(caught instanceof Error ? caught.message : '附件删除失败') }
+    finally { operationLocked.current = false; if (mounted.current) setPending(false) }
   }
   const submit = async () => {
     if (operationLocked.current || state.application.locked || !window.confirm('提交后报名信息将锁定，确认正式提交吗？')) return
     const saved = dirty ? await save() : state.application
     if (!saved) return
     operationLocked.current = true; setPending(true); setErrors({}); setMessage('')
-    try { await applicationClient.submit(saved.revision); await load(); setMessage('报名已提交') }
-    catch (caught) { if (caught instanceof ApplicationApiError) { setErrors(fieldErrors(caught)); setMessage(caught.message) } else setMessage('提交失败，请稍后重试') }
-    finally { operationLocked.current = false; setPending(false) }
+    try { await applicationClient.submit(saved.revision); if (!mounted.current) return; await load(); if (mounted.current) setMessage('报名已提交') }
+    catch (caught) { if (mounted.current) { if (caught instanceof ApplicationApiError) { setErrors(fieldErrors(caught)); setMessage(caught.message) } else setMessage('提交失败，请稍后重试') } }
+    finally { operationLocked.current = false; if (mounted.current) setPending(false) }
   }
   return <section><h2>在线报名</h2>{state.application.retiredAnswerIds.length > 0 ? <p role="status">报名表已更新，原问题答案已保留；请核对当前表单后提交。</p> : null}
-    <ApplicationForm application={state.application} draft={state.draft} disabled={pending || state.application.locked} errors={errors} onChange={updateDraft} onUpload={(slot, file) => void upload(slot, file)} onRemove={(slot, file) => void remove(slot, file)} />
+    <ApplicationForm application={state.application} draft={state.draft} disabled={pending || state.application.locked} errors={errors} onChange={updateDraft} onUpload={(slot, file) => void upload(slot, file)} onRemove={(slot, file) => void remove(slot, file)} onRemoveUnlinked={(file) => void removeUnlinked(file)} />
     <div className="application-actions"><button type="button" disabled={pending || !dirty || state.application.locked} onClick={() => void save()}>{pending ? '处理中' : '保存草稿'}</button><button type="button" disabled={pending || state.application.locked} onClick={() => void submit()}>正式提交</button></div>
     {message ? <p role={Object.keys(errors).length > 0 ? 'alert' : 'status'}>{message}</p> : null}
     {state.application.locked ? <p role="status">报名已提交，当前内容为只读。</p> : null}</section>

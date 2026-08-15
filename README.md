@@ -168,7 +168,7 @@ CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何�
 
 `SESSION_TTL_SECONDS` 默认 `28800` 秒（8 小时），允许 300–604800 秒。登录事务锁定对应用户行，在同一事务内撤销旧会话、写入 replacement session 并追加成功登录审计；同一用户并发登录时最后提交的轮换获胜，最终仅一个返回 token 有效，审计失败会整体回滚。token 使用 32 字节安全随机数，数据库只保存 SHA-256 摘要，审计 metadata 不含 token 或密码。`panshi_session` Cookie 设置 `HttpOnly; SameSite=Lax; Path=/`，仅 `NODE_ENV=production` 增加 `Secure`；退出对缺失、未知、过期、已撤销或已轮换 token 都幂等返回 204，并用匹配属性清除 Cookie。只在真实 identity 与 auth transaction 依赖同时存在时挂载身份路由；生产服务器始终提供两者。
 
-写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。当前 Task 7 没有登录限流或独立 CSRF token，不应宣称已有暴力破解防护；这两项保留给后续安全加固。
+写请求必须带 `CORS_ORIGINS` allowlist 中的 `Origin`，缺失或恶意 Origin 返回 403。API 按登录失败、认证／验证码、公开、已登录和管理后台五类独立限流；登录失败键由客户端 IP 与规范化账号的 SHA-256 摘要组合，成功登录会重置对应失败桶。`TRUST_PROXY=false` 是安全默认；只有生产 Nginx 与 API 之间确认为单跳时才设置 `TRUST_PROXY=true`。当前内存存储仅适用于单 API 副本，多副本部署前必须替换为共享原子限流存储。
 
 ## 学员手机号账号
 
@@ -176,7 +176,7 @@ CLI 使用隐藏输入从终端读取密码，不接受 `--password` 或任何�
 
 验证码通过 `VerificationProvider` 适配。数据库仅保存以 32 个随机字节为密钥的 HMAC-SHA256 摘要、用途、投递状态、过期时间、失败次数和消费时间，不保存明文。记录先以 `pending` 创建，provider 成功后转为 `sent`，明确失败后转为 `failed`；冷却只计入 `pending` 和 `sent`，核验只读取最新 `sent`，因此失败投递不能核验，也不会遮蔽较早的已发送验证码。发送阶段不会查询或泄露账号是否存在。`VERIFICATION_PROVIDER` 安全默认值为 `disabled`，此时发送接口返回 503；`mock` 只允许 `development` 或 `test`，生产配置为 `mock` 会在启动配置解析阶段失败。启用 mock 时必须在未跟踪的本地环境中提供恰好 64 位十六进制的 `VERIFICATION_SECRET`（可通过 `openssl rand -hex 32` 生成）；固定 `VERIFICATION_MOCK_CODE` 只允许 `NODE_ENV=test`。
 
-Future：接入真实短信 provider 前，必须补充 IP 维度限流、手机号累计发送限额和全局费用熔断；这些能力当前未实现。
+Future：真实短信 provider 仍须补充供应商级累计发送限额和全局费用熔断；现有通用 IP／认证类别限流不能替代供应商成本风控。
 
 student-auth 浏览器测试只接受精确专用测试库，并要求所有测试手机号、密码、验证码和 HMAC secret 由运行环境显式提供。fixture 会先迁移、清空、建立公开内容和密码重置测试账号，退出 trap 与全局 teardown 均执行清理：
 
@@ -236,6 +236,14 @@ bash tests/backup-restore.test.sh
 ```
 
 `npm test` 包含 workspace 单元测试和快速静态部署契约；`npm run test:deployment:build` 是显式干净构建门禁，并在 Docker 可用时扩展到容器／代理检查。发布级真实旅程使用专用 PostgreSQL、独立临时上传目录和首版 mock 验证适配器，固定单 worker；fixture 在迁移后建立确定性数据，进程退出与全局 teardown 都会清理，且拒绝任何非精确测试库：
+
+所有单元／静态门禁和必需 PostgreSQL integration/schema 套件的单一入口为：
+
+```bash
+TEST_DATABASE_URL='postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test' npm run test:release
+```
+
+该命令只接受回环主机且数据库名精确为 `panshi_ai4s_camp_test`，串行运行迁移与全部数据库套件，并在成功或失败后截断领域表；不得指向开发库或生产库。
 
 ```bash
 LAUNCH_E2E=1 \

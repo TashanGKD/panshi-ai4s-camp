@@ -39,6 +39,12 @@ const publicSiteResponse = {
     importantDates: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] },
     contacts: { items: [] },
     display: { series: '磐石科学智能实训营', footer: '磐石 AI4S 实训营' },
+    features: { items: [] },
+    organizations: { items: [] },
+    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+    visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
+    scheduleOverview: [],
+    registrationCta: { label: '在线注册', to: '/application' },
   },
 }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { runApiLifecycle } from '../scripts/e2e-api-server.mjs'
+import { e2eApiEnvironment, runApiLifecycle } from '../scripts/e2e-api-server.mjs'
 
 test('failed migration skips seed and server but still runs cleanup', async () => {
   const calls = []
@@ -28,4 +28,13 @@ test('every Playwright API server uses the fail-fast lifecycle launcher', async 
     assert.match(source, new RegExp(`command: ['"]node scripts/e2e-api-server\\.mjs --fixture ${fixture}['"]`, 'u'), config)
     assert.doesNotMatch(source, /command: ['"][^'"]*db:migrate/u, config)
   }
+})
+
+test('shared Playwright API launcher uses explicit non-flaky test-only rate limits', () => {
+  const environment = e2eApiEnvironment({ RATE_LIMIT_AUTH_MAX: '4321' })
+  assert.equal(environment.RATE_LIMIT_LOGIN_FAILURE_MAX, '100')
+  assert.equal(environment.RATE_LIMIT_AUTH_MAX, '4321')
+  assert.equal(environment.RATE_LIMIT_PUBLIC_MAX, '10000')
+  assert.equal(environment.RATE_LIMIT_AUTHENTICATED_MAX, '10000')
+  assert.equal(environment.RATE_LIMIT_ADMIN_MAX, '10000')
 })

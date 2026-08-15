@@ -6,7 +6,7 @@ import { DUMMY_PASSWORD_HASH, verifyPassword } from './password.js'
 export const SESSION_COOKIE_NAME = 'panshi_session'
 
 export class AuthenticationError extends Error {
-  constructor(readonly kind: 'invalid_credentials' | 'unauthorized' | 'forbidden') {
+  constructor(readonly kind: 'invalid_credentials' | 'unauthorized' | 'forbidden' | 'account_disabled') {
     super(kind)
     this.name = 'AuthenticationError'
   }
@@ -39,7 +39,7 @@ export const createSessionService = (
         : null
       const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH)
       if (!user || !passwordMatches) throw new AuthenticationError('invalid_credentials')
-      if (user.role !== requiredRole || user.disabledAt !== null) {
+      if (user.role !== requiredRole || user.disabledAt !== null || user.passwordResetRequiredAt != null) {
         throw new AuthenticationError(requiredRole === 'admin' ? 'forbidden' : 'invalid_credentials')
       }
 
@@ -88,6 +88,10 @@ export const createSessionService = (
         throw new AuthenticationError('unauthorized')
       }
       if (session.user.disabledAt !== null || !['user', 'admin'].includes(session.user.role)) {
+        await repository.revokeSessionByTokenHash(session.tokenHash, now())
+        throw new AuthenticationError(session.user.disabledAt !== null ? 'account_disabled' : 'unauthorized')
+      }
+      if (session.user.passwordResetRequiredAt != null) {
         await repository.revokeSessionByTokenHash(session.tokenHash, now())
         throw new AuthenticationError('unauthorized')
       }

@@ -219,7 +219,7 @@ describe('student authentication PostgreSQL integration', () => {
 
   it('resets password and revokes all existing sessions in one transaction', async () => {
     const [user] = await database.db.insert(users).values({
-      displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: await hashPassword('password-1'), role: 'user',
+      displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: await hashPassword('password-1'), role: 'user', passwordResetRequiredAt: new Date(),
     }).returning({ id: users.id })
     if (!user) throw new Error('Missing test user')
     await database.db.insert(sessions).values([
@@ -232,6 +232,7 @@ describe('student authentication PostgreSQL integration', () => {
       .send({ phone: '13800138000', code: testCode, newPassword: 'password-2' })).status).toBe(204)
     expect((await database.db.select().from(sessions).where(eq(sessions.userId, user.id)))
       .every(({ revokedAt }) => revokedAt !== null)).toBe(true)
+    expect((await database.db.select({ passwordResetRequiredAt: users.passwordResetRequiredAt }).from(users).where(eq(users.id, user.id)))[0]?.passwordResetRequiredAt).toBeNull()
     expect(await database.db.select().from(auditLogs)).toContainEqual(expect.objectContaining({
       actorUserId: user.id, action: 'auth.password_reset', entityType: 'user', entityId: user.id,
     }))

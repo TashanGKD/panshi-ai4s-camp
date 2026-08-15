@@ -50,11 +50,11 @@ export function App() {
 
   const site = state.site
   return <Routes>
-    <Route path="/" element={<PublicShell site={site} sidebar><HomePage basic={site.basic} /></PublicShell>} />
-    <Route path="/schedule" element={<PublicShell site={site}><SchedulePage /></PublicShell>} />
-    <Route path="/travel" element={<PublicShell site={site}><TravelPage /></PublicShell>} />
-    <Route path="/contact" element={<PublicShell site={site}><ContactPage contacts={site.contacts} /></PublicShell>} />
-    <Route path="/resources" element={<PublicShell site={site}><ResourcesPage /></PublicShell>} />
+    <Route path="/" element={<PublicShell site={site} sidebar><HomePage site={site} /></PublicShell>} />
+    <Route path="/schedule" element={<PublicShell site={site} sidebar><SchedulePage /></PublicShell>} />
+    <Route path="/travel" element={<PublicShell site={site} sidebar><TravelPage /></PublicShell>} />
+    <Route path="/contact" element={<PublicShell site={site} sidebar><ContactPage contacts={site.contacts} /></PublicShell>} />
+    <Route path="/resources" element={<PublicShell site={site} sidebar><ResourcesPage /></PublicShell>} />
     <Route path="/register" element={<PublicShell site={site}><RegisterPage /></PublicShell>} />
     <Route path="/login" element={<PublicShell site={site}><LoginPage /></PublicShell>} />
     <Route path="/forgot-password" element={<PublicShell site={site}><ForgotPasswordPage /></PublicShell>} />

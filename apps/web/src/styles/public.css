@@ -14,6 +14,10 @@ body { margin: 0; color: var(--panshi-color-dark); background: var(--panshi-colo
 .contact-list dd { margin: 0; }
 .overview-list { margin: 0; padding-left: 22px; color: var(--panshi-color-gray-dark); font-size: 15px; line-height: 1.9; }
 .date-list, .organization-list { margin: 0; }
+.schedule-overview { display: grid; gap: 10px; padding: 0; list-style: none; }
+.schedule-overview li { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 16px; align-items: baseline; }
+.schedule-overview strong { color: var(--panshi-color-dark); }
+.registration-cta { display: inline-flex; min-height: 44px; align-items: center; padding: 0 20px; border-radius: 6px; background: var(--panshi-color-primary); color: white; font-weight: 700; text-decoration: none; }
 .date-list div { padding: 12px 0; border-bottom: 1px dashed var(--panshi-color-gray-light); }
 .date-list div:last-child { border-bottom: 0; }
 .date-list dt, .organization-list dt { color: var(--panshi-color-dark); font-size: 15px; font-weight: 700; }

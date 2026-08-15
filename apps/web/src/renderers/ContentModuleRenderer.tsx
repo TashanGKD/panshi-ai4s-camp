@@ -1,7 +1,6 @@
 import { ContentSection } from '@panshi/ui'
 import { PublicContentPayloadSchemas, type ContentModuleKey, type JsonObject } from '@panshi/contracts'
 import { ContactPage } from '../pages/ContactPage'
-import { HomePage } from '../pages/HomePage'
 import { ScheduleContent } from '../pages/SchedulePage'
 import { TravelContentView } from '../pages/TravelPage'
 import { RichText } from '../components/RichText'
@@ -17,7 +16,10 @@ export function ImportantDatesContent({ importantDates }: { importantDates: Impo
 export function ContentModuleRenderer({ moduleKey, payload }: { moduleKey: ContentModuleKey, payload: JsonObject }) {
   const content = PublicContentPayloadSchemas[moduleKey].parse(payload)
   switch (moduleKey) {
-    case 'basic': return <HomePage basic={content as ReturnType<typeof PublicContentPayloadSchemas.basic.parse>} />
+    case 'basic': {
+      const basic = content as ReturnType<typeof PublicContentPayloadSchemas.basic.parse>
+      return <><ContentSection title="实训营简介">{basic.intro.map((paragraph) => <RichText as="p" key={paragraph} html={paragraph} />)}</ContentSection>{basic.target ? <ContentSection title="面向对象"><p>{basic.target}</p></ContentSection> : null}</>
+    }
     case 'schedule': return <ScheduleContent schedule={content as ReturnType<typeof PublicContentPayloadSchemas.schedule.parse>} />
     case 'contacts': return <ContactPage contacts={content as ReturnType<typeof PublicContentPayloadSchemas.contacts.parse>} />
     case 'travel': {

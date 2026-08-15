@@ -646,6 +646,7 @@ describe('initial PostgreSQL schema', () => {
       '0016_resources_publication.sql',
       '0017_resource_revision.sql',
       '0018_admin_management_integrity.sql',
+      '0019_student_forced_password_reset.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

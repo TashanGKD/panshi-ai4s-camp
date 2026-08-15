@@ -28,6 +28,7 @@ export const initialPublishedContent = {
       '实训营围绕 AI for Science 的知识框架、科研智能体与真实科研问题实践展开。',
     ],
     target: '有志于从事 AI4S 及其交叉学科研究与应用的青年科研人员、硕博研究生和本科生。',
+    scale: '五天集中实训，按课程学习、实践与分组研讨组织。',
   },
   features: {
     items: [
@@ -36,6 +37,7 @@ export const initialPublishedContent = {
       { title: '真实问题牵引', description: '通过课程学习、习题课和分组研讨逐步完善 AI4S 问题分析方案。' },
     ],
   },
+  organizations: { items: [] },
   importantDates: {
     items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }],
   },
@@ -52,12 +54,16 @@ export const initialPublishedContent = {
   display: {
     series: '磐石科学智能实训营',
     footer: '磐石·科学智能（AI for Science）实训营',
+    visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
+    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+    registrationCta: { label: '在线注册', to: '/application' },
   },
 } as const
 
 const publishedVersionIds = {
   basic: '60000000-0000-4000-8000-000000000001',
   features: '60000000-0000-4000-8000-000000000002',
+  organizations: '60000000-0000-4000-8000-000000000003',
   importantDates: '60000000-0000-4000-8000-000000000004',
   schedule: '60000000-0000-4000-8000-000000000005',
   contacts: '60000000-0000-4000-8000-000000000006',

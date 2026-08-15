@@ -199,9 +199,12 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+TEST_DATABASE_URL='postgresql://local-role@127.0.0.1:5432/panshi_ai4s_camp_test' npm run test:release
 npm run test:deployment:build
 bash tests/backup-restore.test.sh
 ```
+
+Set `TRUST_PROXY=true` only when the production API is reached through the reviewed single Nginx hop; otherwise retain the default `false`. Configure the five `RATE_LIMIT_*_MAX` and `RATE_LIMIT_*_WINDOW_MS` pairs conservatively. The current limiter store is process-local and supports one API replica only; before adding replicas, deploy and test an external shared atomic store. A 429 response must retain structured error JSON and `Retry-After`; private auth families also retain `Cache-Control: private, no-store`.
 
 Run the browser release gate separately against the exact local test database with all six E2E safety switches and dedicated test credentials: `npm run test:e2e:all`. Its Node orchestrator creates one cryptographically random run token and start timestamp, passes both through launch, then runs visual/source, review workflow, content publishing, student authentication and application submission in order before verifying launch evidence again with the same identity. Never parallelize these configurations because they intentionally reset the same dedicated database. Launch, review and application submission sequentially reuse `var/e2e-uploads` and `var/e2e-temp`; visual/source, content publishing and student authentication use their separate `var/visual-e2e-*`, `var/content-e2e-*` and `var/student-auth-e2e-*` roots. Every API startup uses the shared fail-fast Node lifecycle: the cleanup guarantee is installed before migration begins, failed migration prevents seed/server, and exit cleanup is backed by Playwright global teardown, including review. Every configuration owns a unique `test-results/<suite>` output directory, so later suites cannot remove launch evidence. The final verifier accepts only `test-results/launch/evidence/launch-visual`: its exact 48 PNG names plus one matching marker, regular non-symlink files, valid PNG signature/IHDR, filename-matched viewport dimensions, current run timestamps and no extras. These generated files are not deployment inputs.
 

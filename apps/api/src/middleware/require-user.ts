@@ -22,6 +22,11 @@ export const createRequireUser = (
     response.locals.authenticatedUser = await sessions.resolve(readSessionCookie(request.cookies))
     next()
   } catch (error) {
+    if (error instanceof AuthenticationError && error.kind === 'account_disabled') {
+      response.clearCookie(SESSION_COOKIE_NAME, { path: '/' })
+      next(new HttpError(403, 'ACCOUNT_DISABLED', '账号已停用'))
+      return
+    }
     if (error instanceof AuthenticationError && error.kind === 'unauthorized') {
       if (readSessionCookie(request.cookies)) response.clearCookie(SESSION_COOKIE_NAME, { path: '/' })
       const status = options.unauthenticatedStatus ?? 401

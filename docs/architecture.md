@@ -22,9 +22,15 @@ All browser-visible payloads cross `/api/v1` contracts from `packages/contracts`
 
 Administrator and student accounts share `users` but have distinct roles. Passwords use bcrypt; sessions use a random browser token in an `HttpOnly`, `SameSite=Lax` cookie while PostgreSQL stores only its SHA-256 digest. Production cookies are `Secure`. Login rotates prior sessions. Mutating requests must carry an allowed `Origin`.
 
+Every authenticated request resolves the current user row. If that row has become disabled, the active session is revoked, the browser cookie is expired, and the API returns `403 ACCOUNT_DISABLED`; missing, revoked, or expired sessions remain `401`. Password and status changes revoke affected sessions in the same PostgreSQL transaction as the user update and whitelist-safe audit entry. An administrator's student force-reset action also records a database reset-required marker, blocks password login non-enumeratively, and is cleared only by the existing verification-code password-reset transaction.
+
+The API has five independent in-process fixed-window limiter categories: login failure, authentication/verification, public, authenticated, and admin. Login actors combine the effective client IP with a hash of the normalized account and reset on success. Proxy trust is explicitly false unless configured for exactly one Nginx hop. This store is valid only for the current single API replica; horizontal replication requires an external concurrency-safe shared store.
+
 Public routes need no session. Student profile and application routes require an ordinary student session; administrators are deliberately rejected from the student application endpoint. Administrator routes require an active admin session. Owner-only attachments and admitted-only resources use not-found responses for unauthorized object access so IDs cannot be enumerated. Private API families set `Cache-Control: private, no-store` and omit validators.
 
 The first verification delivery contract has `disabled` and development/test-only `mock` adapters. No production SMS adapter exists. A future provider must implement the existing `VerificationProvider` boundary and the operational controls described in `docs/operations.md` before production registration can be enabled.
+
+The public-site aggregator reads published pointers for basic, features, organizations, important dates, schedule, contacts, and display. It emits safe fixed-order navigation, configurable homepage section order, a five-day schedule overview, and a fixed-route registration CTA. Missing fields in older published revisions receive contract defaults; publishing and rollback still move only immutable PostgreSQL revision pointers, so the next public read reflects the selected revision without a duplicate content source.
 
 ## Main flows
 

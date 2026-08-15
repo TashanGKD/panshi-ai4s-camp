@@ -27,8 +27,10 @@ const writeCompleteBackup = async (root: string, name: string, markerTime: Date)
 
 const adminToken = 'a'.repeat(64)
 const studentToken = 'b'.repeat(64)
+const disabledAdminToken = 'c'.repeat(64)
 const adminHash = createHash('sha256').update(adminToken).digest('hex')
 const studentHash = createHash('sha256').update(studentToken).digest('hex')
+const disabledAdminHash = createHash('sha256').update(disabledAdminToken).digest('hex')
 
 const identityRepository = {
   findUserByPhoneNormalized: async () => null,
@@ -38,6 +40,9 @@ const identityRepository = {
   } : candidate === studentHash ? {
     tokenHash: studentHash, userId: 'student-1', expiresAt: new Date(Date.now() + 60_000), revokedAt: null, createdAt: new Date(),
     user: { id: 'student-1', displayName: '学员', phoneNormalized: '+8613800138001', passwordHash: 'unused', role: 'user' as const, disabledAt: null },
+  } : candidate === disabledAdminHash ? {
+    tokenHash: disabledAdminHash, userId: 'admin-disabled', expiresAt: new Date(Date.now() + 60_000), revokedAt: null, createdAt: new Date(),
+    user: { id: 'admin-disabled', displayName: '停用管理员', phoneNormalized: '+8613800138002', passwordHash: 'unused', role: 'admin' as const, disabledAt: new Date() },
   } : null,
   revokeSessionByTokenHash: async () => undefined,
 }
@@ -61,6 +66,13 @@ const createTestApp = (service = createService()) => createApp({
 })
 
 describe('administrator system health API', () => {
+  it('returns ACCOUNT_DISABLED and clears the cookie across an admin route', async () => {
+    const response = await request(createTestApp()).get('/api/v1/admin/system-health').set('Cookie', `panshi_session=${disabledAdminToken}`)
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
+    expect(response.headers['set-cookie']?.[0]).toMatch(/^panshi_session=;.*Path=\/.*Expires=/u)
+    expect(response.headers['cache-control']).toBe('private, no-store')
+  })
   it('is admin-only, no-store, and returns only the sanitized health contract', async () => {
     expect((await request(createTestApp()).get('/api/v1/admin/system-health')).status).toBe(401)
     expect((await request(createTestApp()).get('/api/v1/admin/system-health').set('Cookie', `panshi_session=${studentToken}`)).status).toBe(403)

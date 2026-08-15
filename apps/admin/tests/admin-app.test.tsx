@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 import { AdminApiError, type AdminClient } from '../src/api/admin-client'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
@@ -42,6 +42,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   listResources: async () => ({ data: { resources: [] } }), previewResource: async () => { throw new Error('unused') }, uploadResourceFile: async () => { throw new Error('unused') },
   createResource: async () => { throw new Error('unused') }, updateResource: async () => { throw new Error('unused') }, publishResource: async () => { throw new Error('unused') },
   listAdministrators: async () => ({ data: { administrators: [] } }), createAdministrator: async () => { throw new Error('unused') }, disableAdministrator: async () => { throw new Error('unused') }, resetAdministratorPassword: async () => { throw new Error('unused') }, listAuditLogs: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }), getAuditLog: async () => { throw new Error('unused') },
+  updateSelf: async () => { throw new Error('unused') }, changeOwnPassword: async () => { throw new Error('unused') }, listStudents: async () => ({ data: { students: [] } }), setStudentStatus: async () => { throw new Error('unused') }, forceStudentPasswordReset: async () => { throw new Error('unused') },
   ...overrides,
 })
 
@@ -140,5 +141,36 @@ describe('administrator route guard', () => {
     expect(await screen.findByRole('heading', { name: '系统状态' })).toBeInTheDocument()
     expect(await screen.findByText('运行正常')).toBeInTheDocument()
     expect(getSystemHealth).toHaveBeenCalledOnce()
+  })
+
+  it('requires confirmation and current password for a verification-based student reset', async () => {
+    const forceStudentPasswordReset = vi.fn(async () => ({ data: { student: { id: 's1', displayName: '测试学员', phone: '+8613900139000', disabledAt: null, createdAt: '2026-08-15T00:00:00.000Z' }, resetMethod: 'verification_code' as const } }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderApp(client({
+      listStudents: async () => ({ data: { students: [{ id: 's1', displayName: '测试学员', phone: '+8613900139000', disabledAt: null, createdAt: '2026-08-15T00:00:00.000Z' }] } }),
+      forceStudentPasswordReset,
+    }), '/students')
+
+    await screen.findByText('测试学员')
+    fireEvent.change(screen.getByLabelText('当前管理员密码'), { target: { value: 'CurrentAdmin!2026' } })
+    fireEvent.click(screen.getByRole('button', { name: '要求验证码重置' }))
+
+    await waitFor(() => expect(forceStudentPasswordReset).toHaveBeenCalledWith('s1', { currentPassword: 'CurrentAdmin!2026' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('学员须通过现有验证码流程重置密码')
+  })
+
+  it('changes the current administrator password and returns to login', async () => {
+    const changeOwnPassword = vi.fn(async () => ({ data: { sessionsRevoked: true as const } }))
+    const logout = vi.fn(async () => undefined)
+    renderApp(client({ changeOwnPassword, logout }), '/account')
+
+    await screen.findByRole('heading', { name: '我的账号' })
+    fireEvent.change(screen.getAllByLabelText('当前密码')[1]!, { target: { value: 'CurrentAdmin!2026' } })
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'ChangedAdmin!2026' } })
+    fireEvent.click(screen.getByRole('button', { name: '修改密码并退出全部设备' }))
+
+    await waitFor(() => expect(changeOwnPassword).toHaveBeenCalledWith({ currentPassword: 'CurrentAdmin!2026', newPassword: 'ChangedAdmin!2026' }))
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce())
+    expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
   })
 })

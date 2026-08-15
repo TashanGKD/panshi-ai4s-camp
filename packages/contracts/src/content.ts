@@ -67,6 +67,7 @@ export const BasicContentSchema = z.object({
   tagline: NonEmptyTextSchema.optional(),
   intro: z.array(NonEmptyTextSchema),
   target: NonEmptyTextSchema.optional(),
+  scale: NonEmptyTextSchema.optional(),
 }).strict()
 
 export const FeaturesContentSchema = z.object({
@@ -148,17 +149,20 @@ export const TravelContentSchema = z.object({
   }).strict()),
 }).strict()
 
-export const HomeSectionIdSchema = z.enum(['intro', 'target', 'features', 'organizations'])
+export const HomeSectionIdSchema = z.enum(['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'])
+export const PublicNavigationKeySchema = z.enum(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'])
+export const RegistrationCtaSchema = z.object({ label: NonEmptyTextSchema, to: z.literal('/application') }).strict()
 
 export const DisplayContentSchema = z.object({
   series: NonEmptyTextSchema,
   footer: NonEmptyTextSchema,
   showRegistrationCount: z.boolean().optional(),
-  visibleNavigation: z.array(NonEmptyTextSchema).optional(),
+  visibleNavigation: z.array(PublicNavigationKeySchema).refine((items) => new Set(items).size === items.length, 'navigation keys must not repeat').optional(),
   homeSectionOrder: z.array(HomeSectionIdSchema).refine(
     (items) => new Set(items).size === items.length,
     'home section IDs must not repeat',
   ).optional(),
+  registrationCta: RegistrationCtaSchema.optional(),
 }).strict()
 
 export const PublicContentPayloadSchemas = {
@@ -200,6 +204,12 @@ export const PublicSiteResponseSchema = z.object({
     importantDates: ImportantDatesContentSchema,
     contacts: ContactsContentSchema,
     display: DisplayContentSchema,
+    features: FeaturesContentSchema.default({ items: [] }),
+    organizations: OrganizationsContentSchema.default({ items: [] }),
+    homeSectionOrder: z.array(HomeSectionIdSchema).default(['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount']),
+    visibleNavigation: z.array(PublicNavigationKeySchema).default(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account']),
+    scheduleOverview: z.array(z.object({ date: IsoDateSchema, label: NonEmptyTextSchema, theme: NonEmptyTextSchema }).strict()).max(5).default([]),
+    registrationCta: RegistrationCtaSchema.default({ label: '在线注册', to: '/application' }),
   }).strip(),
 }).strip()
 
@@ -230,6 +240,7 @@ export type ContactsContent = z.infer<typeof ContactsContentSchema>
 export type TravelContent = z.infer<typeof TravelContentSchema>
 export type DisplayContent = z.infer<typeof DisplayContentSchema>
 export type HomeSectionId = z.infer<typeof HomeSectionIdSchema>
+export type PublicNavigationKey = z.infer<typeof PublicNavigationKeySchema>
 export type ResourceAccess = z.infer<typeof ResourceAccessSchema>
 export type PublicResource = z.infer<typeof PublicResourceSchema>
 export type ResourceListResponse = z.infer<typeof ResourceListResponseSchema>

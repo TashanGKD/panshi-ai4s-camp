@@ -30,8 +30,11 @@ describe('my application routes', () => {
   })
   it('expires the browser cookie when a disabled session is rejected', async () => {
     const response = await request(app(fakeService())).get('/api/v1/me/application').set('Cookie', 'panshi_session=disabled-token')
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
     expect(response.headers['set-cookie']?.[0]).toMatch(/^panshi_session=;.*Path=\/.*Expires=/u)
+    expect(response.headers['cache-control']).toBe('private, no-store')
+    expect(response.headers.etag).toBeUndefined()
   })
   it('marks account, application, forbidden, and missing me responses private without etags', async () => {
     const responses = await Promise.all([

@@ -20,6 +20,15 @@ export const runApiLifecycle = async ({ migrate, seed, serve, cleanup }) => {
   }
 }
 
+export const e2eApiEnvironment = (environment = process.env) => ({
+  RATE_LIMIT_LOGIN_FAILURE_MAX: '100',
+  RATE_LIMIT_AUTH_MAX: '10000',
+  RATE_LIMIT_PUBLIC_MAX: '10000',
+  RATE_LIMIT_AUTHENTICATED_MAX: '10000',
+  RATE_LIMIT_ADMIN_MAX: '10000',
+  ...environment,
+})
+
 const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]
 if (isMain) {
   const fixture = process.argv[2] === '--fixture' ? process.argv[3] : undefined
@@ -27,6 +36,7 @@ if (isMain) {
   if (!fixtureScript) throw new Error(`Expected --fixture ${Object.keys(fixtureScripts).join('|')}`)
 
   const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const apiEnvironment = e2eApiEnvironment()
   let activeChild
   let stoppingSignal
   const run = (command, args, options = {}) => new Promise((resolve, reject) => {
@@ -34,7 +44,7 @@ if (isMain) {
       reject(new Error(`Refusing to start ${command} after ${stoppingSignal}`))
       return
     }
-    const child = spawn(command, args, { cwd: process.cwd(), env: process.env, stdio: 'inherit' })
+    const child = spawn(command, args, { cwd: process.cwd(), env: apiEnvironment, stdio: 'inherit' })
     activeChild = child
     child.once('error', reject)
     child.once('exit', (code, signal) => {

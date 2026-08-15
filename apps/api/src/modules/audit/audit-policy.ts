@@ -21,11 +21,17 @@ const FileMetadata = z.object({ purpose: FilePurpose, visibility: FileVisibility
 const FileFailureMetadata = z.object({ failureCode: FileFailureCode }).strict()
 const AdminResult = z.object({ result: Result }).strict()
 const AdminSessionResult = z.object({ result: Result, revokedSessionCount: Count }).strict()
+const RevokedSessions = z.object({ revokedSessionCount: Count }).strict()
 
 const definitions = {
   'admin.created': { entityType: 'user', metadata: AdminResult },
   'admin.disabled': { entityType: 'user', metadata: AdminSessionResult },
   'admin.password_reset': { entityType: 'user', metadata: AdminSessionResult },
+  'admin.profile_updated': { entityType: 'user', metadata: z.object({ changedFields: z.tuple([z.literal('displayName')]) }).strict() },
+  'auth.password_changed': { entityType: 'user', metadata: RevokedSessions },
+  'student.disabled': { entityType: 'user', metadata: AdminResult },
+  'student.enabled': { entityType: 'user', metadata: AdminResult },
+  'student.password_reset_required': { entityType: 'user', metadata: z.object({ revokedSessionCount: Count, resetMethod: z.literal('verification_code') }).strict() },
   'auth.login_succeeded': { entityType: 'session', metadata: z.object({ authenticationMethod: z.literal('password') }).strict() },
   'auth.student_registered': { entityType: 'user', metadata: z.object({ authenticationMethod: z.literal('verification_code') }).strict() },
   'auth.password_reset': { entityType: 'user', metadata: z.object({ revokedSessions: z.literal(true) }).strict() },

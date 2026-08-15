@@ -42,6 +42,8 @@ export const createAuthClient = (apiBaseUrl?: string, runtime: { production: boo
       await request('/api/v1/auth/login', { phone, password }),
     ),
     resetPassword: (phone: string, code: string, newPassword: string) => request('/api/v1/auth/password/reset', { phone, code, newPassword }),
+    changePassword: (currentPassword: string, newPassword: string) => request('/api/v1/me/account/password', { currentPassword, newPassword }),
+    logout: () => request('/api/v1/auth/logout', {}),
   }
 }
 
@@ -50,3 +52,5 @@ export const sendVerificationCode = authClient.sendVerificationCode
 export const registerStudent = authClient.register
 export const loginStudent = authClient.login
 export const resetStudentPassword = authClient.resetPassword
+export const changeStudentPassword = authClient.changePassword
+export const logoutStudent = authClient.logout

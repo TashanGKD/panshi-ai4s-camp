@@ -9,6 +9,6 @@ const contentLinks = [
 
 export function AdminLayout({ children, displayName, onLogout }: { children: ReactNode, displayName: string, onLogout?: () => Promise<void> }) {
   return <div className="admin-layout"><aside className="admin-sidebar"><div className="admin-brand"><span>磐石·科学智能</span><strong>实训营管理后台</strong></div>
-    <nav aria-label="管理后台主导航"><NavLink end to="/">工作台</NavLink><p>网站内容</p>{contentLinks.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}<p>报名管理</p><NavLink to="/applications">报名审核</NavLink><NavLink to="/registration/form">表单配置</NavLink><p>系统管理</p><NavLink to="/administrators">管理员账号</NavLink><NavLink to="/audit-logs">操作日志</NavLink><NavLink to="/system-status">系统状态</NavLink></nav>
+    <nav aria-label="管理后台主导航"><NavLink end to="/">工作台</NavLink><p>网站内容</p>{contentLinks.map(([to, label]) => <NavLink key={to} to={to}>{label}</NavLink>)}<p>报名管理</p><NavLink to="/applications">报名审核</NavLink><NavLink to="/registration/form">表单配置</NavLink><p>账号管理</p><NavLink to="/students">学员账号</NavLink><NavLink to="/administrators">管理员账号</NavLink><NavLink to="/account">我的账号</NavLink><p>系统管理</p><NavLink to="/audit-logs">操作日志</NavLink><NavLink to="/system-status">系统状态</NavLink></nav>
   </aside><div className="admin-main"><header className="admin-topbar"><div><span>当前管理员</span><strong>{displayName}</strong></div>{onLogout ? <button type="button" className="button-secondary" onClick={() => { void onLogout() }}>退出登录</button> : null}</header><main>{children}</main></div></div>
 }

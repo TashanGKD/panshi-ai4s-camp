@@ -13,6 +13,7 @@ import { HttpError } from '../../middleware/error-handler.js'
 import { createRequireUser, getSessionToken, type AuthenticatedLocals } from '../../middleware/require-user.js'
 import { AuthenticationError, SESSION_COOKIE_NAME, type SessionService } from './session.service.js'
 import { VerificationError, type VerificationService } from './verification.service.js'
+import { loginRateLimitActor, type RateLimiter, type RateLimitPolicy } from '../../middleware/rate-limit.js'
 
 const authenticationHttpError = (error: AuthenticationError) => {
   if (error.kind === 'invalid_credentials') {
@@ -38,7 +39,7 @@ const cookieOptions = (secure: boolean): CookieOptions => ({
 
 export const createAuthRouter = (
   sessions: SessionService,
-  options: { secureCookies: boolean, sessionTtlSeconds: number, verificationService?: VerificationService },
+  options: { secureCookies: boolean, sessionTtlSeconds: number, verificationService?: VerificationService, rateLimiter: RateLimiter, loginFailurePolicy: RateLimitPolicy },
 ) => {
   const router = Router()
   const requireUser = createRequireUser(sessions)
@@ -56,6 +57,22 @@ export const createAuthRouter = (
       throw new HttpError(503, 'VERIFICATION_UNAVAILABLE', '验证码服务暂不可用')
     }
     return options.verificationService
+  }
+
+  const loginWithLimit = async (request: Parameters<Parameters<typeof router.post>[1]>[0], response: Response, phone: string, attempt: () => ReturnType<SessionService['loginStudent']>) => {
+    const actor = loginRateLimitActor(request.ip, phone)
+    const limit = options.rateLimiter.consume('login_failure', actor, options.loginFailurePolicy)
+    if (!limit.allowed) {
+      response.setHeader('Retry-After', String(limit.retryAfterSeconds))
+      throw new HttpError(429, 'LOGIN_RATE_LIMITED', '登录失败次数过多，请稍后重试')
+    }
+    try {
+      const result = await attempt()
+      options.rateLimiter.reset('login_failure', actor)
+      return result
+    } catch (error) {
+      return handleAuthenticationError(error)
+    }
   }
 
   const handleVerificationError = (error: unknown): never => {
@@ -93,7 +110,7 @@ export const createAuthRouter = (
     const input = StudentLoginRequestSchema.safeParse(request.body)
     if (!input.success) throw new HttpError(400, 'INVALID_REQUEST', '登录请求格式错误')
     try {
-      const result = await sessions.loginStudent(input.data.phone, input.data.password)
+      const result = await loginWithLimit(request, response, input.data.phone, () => sessions.loginStudent(input.data.phone, input.data.password))
       setSessionCookie(response, result)
       response.json(serializeLoginResponse({ apiVersion: 'v1', data: { user: result.user } }))
     } catch (error) {
@@ -117,7 +134,7 @@ export const createAuthRouter = (
     if (!input.success) throw new HttpError(400, 'INVALID_REQUEST', '登录请求格式错误')
 
     try {
-      const result = await sessions.loginAdmin(input.data.phone, input.data.password)
+      const result = await loginWithLimit(request, response, input.data.phone, () => sessions.loginAdmin(input.data.phone, input.data.password))
       setSessionCookie(response, result)
       response.json(serializeLoginResponse({ apiVersion: 'v1', data: { user: result.user } }))
     } catch (error) {

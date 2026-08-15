@@ -13,6 +13,10 @@ const siteResponse = {
     importantDates: { items: [] },
     contacts: { items: [] },
     display: { series: '磐石科学智能实训营', footer: '活动标题' },
+    features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
+    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+    visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
+    registrationCta: { label: '在线注册', to: '/application' },
   },
 }
 

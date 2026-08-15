@@ -100,6 +100,11 @@ export type AdminClient = {
   createAdministrator: (input: { displayName: string, phone: string, password: string, currentPassword: string }) => Promise<{ data: { administrator: Administrator } }>
   disableAdministrator: (id: string, input: { currentPassword: string }) => Promise<{ data: { administrator: Administrator } }>
   resetAdministratorPassword: (id: string, input: { currentPassword: string, newPassword: string }) => Promise<{ data: { administrator: Administrator } }>
+  updateSelf: (input: { displayName: string, currentPassword: string }) => Promise<{ data: { administrator: Administrator } }>
+  changeOwnPassword: (input: { currentPassword: string, newPassword: string }) => Promise<{ data: { sessionsRevoked: true } }>
+  listStudents: (search: string, signal?: AbortSignal) => Promise<{ data: { students: StudentAccount[] } }>
+  setStudentStatus: (id: string, input: { currentPassword: string, disabled: boolean }) => Promise<{ data: { student: StudentAccount } }>
+  forceStudentPasswordReset: (id: string, input: { currentPassword: string }) => Promise<{ data: { student: StudentAccount, resetMethod: 'verification_code' } }>
   listAuditLogs: (query: URLSearchParams, signal?: AbortSignal) => Promise<{ data: { items: AuditLogItem[], total: number, page: number, pageSize: number } }>
   getAuditLog: (id: string, signal?: AbortSignal) => Promise<{ data: { item: AuditLogItem } }>
 }
@@ -107,6 +112,7 @@ export type AdminClient = {
 export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean, revision: number }
 export type AdminResourceInput = Omit<AdminResource, 'id' | 'active' | 'revision'>
 export type Administrator = { id: string, displayName: string, phone: string, disabledAt: string | null, createdAt: string, isCurrent: boolean }
+export type StudentAccount = Omit<Administrator, 'isCurrent'>
 export type AuditLogItem = { id: string, actor: { id: string, displayName: string | null } | null, action: string, entityType: string, entityId: string | null, metadata: Record<string, unknown>, createdAt: string }
 
 export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
@@ -183,6 +189,11 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     createAdministrator: async (input) => (await send('/api/v1/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     disableAdministrator: async (id, input) => (await send(`/api/v1/admin/users/${encodeURIComponent(id)}/disable`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     resetAdministratorPassword: async (id, input) => (await send(`/api/v1/admin/users/${encodeURIComponent(id)}/reset-password`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    updateSelf: async (input) => (await send('/api/v1/admin/users/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    changeOwnPassword: async (input) => (await send('/api/v1/admin/users/me/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    listStudents: async (search, signal) => (await send(`/api/v1/admin/users/students?search=${encodeURIComponent(search)}`, { signal, cache: 'no-store' })).json(),
+    setStudentStatus: async (id, input) => (await send(`/api/v1/admin/users/students/${encodeURIComponent(id)}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    forceStudentPasswordReset: async (id, input) => (await send(`/api/v1/admin/users/students/${encodeURIComponent(id)}/force-password-reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     listAuditLogs: async (query, signal) => (await send(`/api/v1/admin/audit-logs?${query.toString()}`, { signal })).json(),
     getAuditLog: async (id, signal) => (await send(`/api/v1/admin/audit-logs/${encodeURIComponent(id)}`, { signal })).json(),
   }

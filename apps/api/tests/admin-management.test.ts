@@ -21,6 +21,11 @@ const adminManagementService = {
   create: vi.fn(async (_actor: typeof admin, input: unknown) => ({ apiVersion: 'v1', data: { administrator: administrators[0], input } })),
   disable: vi.fn(async () => ({ apiVersion: 'v1', data: { administrator: { ...administrators[0], disabledAt: '2026-08-15T01:00:00.000Z' } } })),
   resetPassword: vi.fn(async () => ({ apiVersion: 'v1', data: { administrator: administrators[0] } })),
+  listStudents: vi.fn(async () => ({ apiVersion: 'v1', data: { students: [] } })),
+  updateSelf: vi.fn(async () => ({ apiVersion: 'v1', data: { administrator: { ...administrators[0], isCurrent: true } } })),
+  changeOwnPassword: vi.fn(async () => ({ apiVersion: 'v1', data: { sessionsRevoked: true } })),
+  setStudentStatus: vi.fn(async () => ({ apiVersion: 'v1', data: { student: administrators[0] } })),
+  forceStudentPasswordReset: vi.fn(async () => ({ apiVersion: 'v1', data: { student: administrators[0], resetMethod: 'verification_code' } })),
 }
 const auditQueryService = {
   auditLogs: vi.fn(async () => ({ apiVersion: 'v1', data: { items: [{ id: '20000000-0000-4000-8000-000000000001', actor: { id: admin.id, displayName: admin.displayName }, action: 'admin.created', entityType: 'user', entityId: admin.id, metadata: { result: 'success' }, createdAt: '2026-08-15T00:00:00.000Z' }], total: 1, page: 1, pageSize: 20 } })),
@@ -58,6 +63,16 @@ describe('administrator management and audit routes', () => {
       .send({}).expect(422)
     await request(app).post(`/api/v1/admin/users/${admin.id}/reset-password`).set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example')
       .send({ newPassword: 'Replacement!2026' }).expect(422)
+  })
+
+  it('provides no-store student management and self-service routes with reauthentication inputs', async () => {
+    const app = makeApp()
+    const list = await request(app).get('/api/v1/admin/users/students?search=test').set('Cookie', `panshi_session=${token}`).expect(200)
+    expect(list.headers['cache-control']).toBe('private, no-store')
+    await request(app).patch('/api/v1/admin/users/me').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example').send({ displayName: '新名称' }).expect(422)
+    await request(app).post('/api/v1/admin/users/students/not-a-uuid/status').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example').send({ currentPassword: 'Current!2026', disabled: true }).expect(422)
+    await request(app).post('/api/v1/me/account/password').set('Cookie', `panshi_session=${token}`).set('Origin', 'https://admin.example').send({ currentPassword: 'Current!2026', newPassword: 'Replacement!2026' }).expect(200)
+    expect(adminManagementService.changeOwnPassword).toHaveBeenCalled()
   })
 
   it('provides filtered read-only audit access without mutation routes', async () => {

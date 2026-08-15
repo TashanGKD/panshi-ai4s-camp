@@ -43,6 +43,7 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   role: text('role').$type<UserRole>().notNull().default('user'),
   disabledAt: timestamp('disabled_at', { withTimezone: true }),
+  passwordResetRequiredAt: timestamp('password_reset_required_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, (table) => [
   check('users_display_name_check', sql`char_length(btrim(${table.displayName})) > 0`),

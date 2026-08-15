@@ -3,12 +3,14 @@ import {
   PublicScheduleResponseSchema,
   PublicSiteResponseSchema,
   type ContentModuleKey,
+  type DisplayContent,
+  type ScheduleContent,
 } from '@panshi/contracts'
 import type { PublicContentRepository, PublishedContentRecord } from './content.repository.js'
 import { parsePublishedContent } from './content.schemas.js'
 import { sanitizeContentPayload } from './content-sanitizer.js'
 
-const siteKeys = ['basic', 'importantDates', 'contacts', 'display'] as const
+const siteKeys = ['basic', 'features', 'organizations', 'importantDates', 'schedule', 'contacts', 'display'] as const
 
 export class ContentNotFoundError extends Error {
   constructor(readonly key: ContentModuleKey) {
@@ -27,6 +29,7 @@ const requireRecord = (
 }
 
 const versionLabel = (record: PublishedContentRecord) => `${record.key}:${record.version}`
+const optionalRecord = (records: readonly PublishedContentRecord[], key: ContentModuleKey) => records.find((record) => record.key === key)
 
 export const createContentService = (repository: PublicContentRepository) => ({
   getPublicSite: async () => {
@@ -35,15 +38,29 @@ export const createContentService = (repository: PublicContentRepository) => ({
     const importantDates = requireRecord(records, 'importantDates')
     const contacts = requireRecord(records, 'contacts')
     const display = requireRecord(records, 'display')
+    const features = optionalRecord(records, 'features')
+    const organizations = optionalRecord(records, 'organizations')
+    const schedule = optionalRecord(records, 'schedule')
+    const parsedDisplay = parsePublishedContent('display', display.payload) as DisplayContent
+    const parsedSchedule = schedule ? parsePublishedContent('schedule', schedule.payload) as ScheduleContent : undefined
+    const defaultNavigation = ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'] as const
+    const fixedNavigation = defaultNavigation.filter((key) => parsedDisplay.visibleNavigation?.includes(key) ?? true)
+    const defaultOrder = ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'] as const
 
     return PublicSiteResponseSchema.parse({
       apiVersion: 'v1',
       data: {
-        contentVersion: [basic, importantDates, contacts, display].map(versionLabel).join(','),
+        contentVersion: [basic, features, organizations, importantDates, schedule, contacts, display].filter((record): record is PublishedContentRecord => Boolean(record)).map(versionLabel).join(','),
         basic: parsePublishedContent('basic', sanitizeContentPayload('basic', basic.payload)),
         importantDates: parsePublishedContent('importantDates', importantDates.payload),
         contacts: parsePublishedContent('contacts', contacts.payload),
-        display: parsePublishedContent('display', display.payload),
+        display: parsedDisplay,
+        features: features ? parsePublishedContent('features', features.payload) : { items: [] },
+        organizations: organizations ? parsePublishedContent('organizations', organizations.payload) : { items: [] },
+        homeSectionOrder: parsedDisplay.homeSectionOrder ?? defaultOrder,
+        visibleNavigation: fixedNavigation,
+        scheduleOverview: parsedSchedule?.days.slice(0, 5).map(({ date, label, theme }) => ({ date, label, theme })) ?? [],
+        registrationCta: parsedDisplay.registrationCta ?? { label: '在线注册', to: '/application' },
       },
     })
   },

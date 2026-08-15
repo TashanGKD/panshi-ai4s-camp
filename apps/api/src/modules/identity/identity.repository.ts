@@ -12,6 +12,7 @@ export type IdentityUser = {
   passwordHash: string
   role: UserRole
   disabledAt: Date | null
+  passwordResetRequiredAt?: Date | null
 }
 
 export type ResolvedSession = {
@@ -106,6 +107,7 @@ const userSelection = {
   passwordHash: users.passwordHash,
   role: users.role,
   disabledAt: users.disabledAt,
+  passwordResetRequiredAt: users.passwordResetRequiredAt,
 }
 
 export const createIdentityRepository = (
@@ -118,9 +120,9 @@ export const createIdentityRepository = (
 
   rotateSessionAndAudit: async ({ userId, expectedPasswordHash, requiredRole, tokenHash, expiresAt, revokedAt, audit }) => {
     await db.transaction(async (transaction) => {
-      const [lockedUser] = await transaction.select({ passwordHash: users.passwordHash, role: users.role, disabledAt: users.disabledAt })
+      const [lockedUser] = await transaction.select({ passwordHash: users.passwordHash, role: users.role, disabledAt: users.disabledAt, passwordResetRequiredAt: users.passwordResetRequiredAt })
         .from(users).where(eq(users.id, userId)).for('update')
-      if (!lockedUser || lockedUser.role !== requiredRole || lockedUser.disabledAt !== null) {
+      if (!lockedUser || lockedUser.role !== requiredRole || lockedUser.disabledAt !== null || lockedUser.passwordResetRequiredAt !== null) {
         throw new SessionRotationRejectedError('inactive')
       }
       if (lockedUser.passwordHash !== expectedPasswordHash) {
@@ -153,6 +155,7 @@ export const createIdentityRepository = (
         passwordHash: row.passwordHash,
         role: row.role,
         disabledAt: row.disabledAt,
+        passwordResetRequiredAt: row.passwordResetRequiredAt,
       },
     }
   },
@@ -284,7 +287,7 @@ export const createIdentityRepository = (
     if (!user || user.role !== 'user' || user.disabledAt !== null) return 'invalid_account' as const
 
     const passwordHash = await input.createPasswordHash()
-    await transaction.update(users).set({ passwordHash }).where(eq(users.id, user.id))
+    await transaction.update(users).set({ passwordHash, passwordResetRequiredAt: null }).where(eq(users.id, user.id))
     await transaction.update(sessions).set({ revokedAt: input.consumedAt })
       .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)))
     await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {

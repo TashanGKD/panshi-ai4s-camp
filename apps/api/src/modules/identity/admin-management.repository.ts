@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { auditLogs, sessions, users } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
@@ -25,6 +25,39 @@ export const createAdminManagementRepository = (db: NodePgDatabase<typeof schema
 
   return {
     listAdmins: async (): Promise<AdminRecord[]> => db.select(adminSelection).from(users).where(eq(users.role, 'admin')).orderBy(asc(users.createdAt), asc(users.id)),
+    listStudents: async (search?: string): Promise<AdminRecord[]> => db.select(adminSelection).from(users).where(and(eq(users.role, 'user'), search ? or(ilike(users.displayName, `%${search}%`), ilike(users.phoneNormalized, `%${search}%`)) : undefined)).orderBy(desc(users.createdAt), desc(users.id)).limit(200),
+    updateOwnDisplayName: async (input: { actorId: string, displayName: string }) => db.transaction(async (transaction) => {
+      const [updated] = await transaction.update(users).set({ displayName: input.displayName }).where(and(eq(users.id, input.actorId), eq(users.role, 'admin'), isNull(users.disabledAt))).returning(adminSelection)
+      if (!updated) return 'actor_invalid' as const
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'admin.profile_updated', entityType: 'user', entityId: input.actorId, metadata: { changedFields: ['displayName'] } })
+      return updated
+    }),
+    changeOwnPassword: async (input: { actorId: string, expectedPasswordHash: string, passwordHash: string, changedAt: Date }) => db.transaction(async (transaction) => {
+      const [actor] = await transaction.select({ id: users.id, passwordHash: users.passwordHash, disabledAt: users.disabledAt }).from(users).where(eq(users.id, input.actorId)).for('update')
+      if (!actor || actor.disabledAt || actor.passwordHash !== input.expectedPasswordHash) return 'actor_invalid' as const
+      await transaction.update(users).set({ passwordHash: input.passwordHash }).where(eq(users.id, actor.id))
+      const revoked = await transaction.update(sessions).set({ revokedAt: input.changedAt }).where(and(eq(sessions.userId, actor.id), isNull(sessions.revokedAt))).returning({ id: sessions.id })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: actor.id, action: 'auth.password_changed', entityType: 'user', entityId: actor.id, metadata: { revokedSessionCount: revoked.length } })
+      return 'changed' as const
+    }),
+    setStudentDisabled: async (input: { targetId: string, actorId: string, disabled: boolean, changedAt: Date }) => db.transaction(async (transaction) => {
+      if (!await actorIsActive(transaction as NodePgDatabase<typeof schema>, input.actorId)) return 'actor_invalid' as const
+      const [target] = await transaction.select(adminSelection).from(users).where(and(eq(users.id, input.targetId), eq(users.role, 'user'))).for('update')
+      if (!target) return 'not_found' as const
+      const [updated] = await transaction.update(users).set({ disabledAt: input.disabled ? input.changedAt : null }).where(eq(users.id, target.id)).returning(adminSelection)
+      if (input.disabled) await transaction.update(sessions).set({ revokedAt: input.changedAt }).where(and(eq(sessions.userId, target.id), isNull(sessions.revokedAt)))
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: input.disabled ? 'student.disabled' : 'student.enabled', entityType: 'user', entityId: target.id, metadata: { result: 'success' } })
+      return updated!
+    }),
+    forceStudentPasswordReset: async (input: { targetId: string, actorId: string, changedAt: Date }) => db.transaction(async (transaction) => {
+      if (!await actorIsActive(transaction as NodePgDatabase<typeof schema>, input.actorId)) return 'actor_invalid' as const
+      const [target] = await transaction.select(adminSelection).from(users).where(and(eq(users.id, input.targetId), eq(users.role, 'user'))).for('update')
+      if (!target) return 'not_found' as const
+      await transaction.update(users).set({ passwordResetRequiredAt: input.changedAt }).where(eq(users.id, target.id))
+      const revoked = await transaction.update(sessions).set({ revokedAt: input.changedAt }).where(and(eq(sessions.userId, target.id), isNull(sessions.revokedAt))).returning({ id: sessions.id })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.actorId, action: 'student.password_reset_required', entityType: 'user', entityId: target.id, metadata: { revokedSessionCount: revoked.length, resetMethod: 'verification_code' } })
+      return target
+    }),
     createAdmin: async (input: { displayName: string, phone: string, passwordHash: string, actorId: string }) => {
       try {
         return await db.transaction(async (transaction) => {

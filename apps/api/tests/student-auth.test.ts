@@ -189,7 +189,7 @@ describe('student phone authentication', () => {
     currentTime = new Date(now)
   })
 
-  const app = (options: { providerEnabled?: boolean, maxAttempts?: number, provider?: VerificationProvider } = {}) => {
+  const app = (options: { providerEnabled?: boolean, maxAttempts?: number, provider?: VerificationProvider, loginFailureMax?: number } = {}) => {
     const provider = options.provider ?? (options.providerEnabled === false
       ? undefined
       : createMockVerificationProvider({
@@ -214,6 +214,7 @@ describe('student phone authentication', () => {
         healthcheckTimeoutMs: 2_000,
         jsonLimitBytes: 1_048_576,
         sessionTtlSeconds: 28_800,
+        ...(options.loginFailureMax ? { rateLimits: { login_failure: { max: options.loginFailureMax, windowMs: 60_000 } } } : {}),
       },
     })
   }
@@ -444,6 +445,26 @@ describe('student phone authentication', () => {
 
     expect([wrong, unknown, disabled, admin].map(({ status }) => status)).toEqual([401, 401, 401, 401])
     expect(new Set([wrong, unknown, disabled, admin].map(({ body }) => body.error.code))).toEqual(new Set(['INVALID_CREDENTIALS']))
+  })
+
+  it('rate-limits login failures per hashed account actor and resets that actor on success', async () => {
+    repository.users.push({
+      id: 'student-1', displayName: '学员', phoneNormalized: '+8613800138000',
+      passwordHash: await bcrypt.hash('password-1', 12), role: 'user', disabledAt: null,
+    })
+    const authApp = app({ loginFailureMax: 2 })
+    const attempt = (password: string) => request(authApp).post('/api/v1/auth/login').set('Origin', origin)
+      .send({ phone: '13800138000', password })
+
+    await attempt('password-x').expect(401)
+    await attempt('password-1').expect(200)
+    await attempt('password-x').expect(401)
+    await attempt('password-x').expect(401)
+    const blocked = await attempt('password-1').expect(429)
+    expect(blocked.body.error.code).toBe('LOGIN_RATE_LIMITED')
+    expect(blocked.headers['retry-after']).toBe('60')
+    expect(blocked.headers['cache-control']).toBe('private, no-store')
+    expect(JSON.stringify(blocked.body)).not.toContain('13800138000')
   })
 
   it('resets a password, atomically consumes the code, revokes every old session, and writes a redacted audit', async () => {

@@ -28,10 +28,11 @@ import { createAdminResourceRouter, createResourceRouter } from './modules/resou
 import type { ResourceService } from './modules/resources/resource.service.js'
 import { createStatisticsRouter } from './modules/statistics/statistics.routes.js'
 import type { StatisticsService } from './modules/statistics/statistics.service.js'
-import { createAdminUsersRouter } from './modules/identity/admin-users.routes.js'
+import { createAdminUsersRouter, createMyAccountRouter } from './modules/identity/admin-users.routes.js'
 import { createAuditRouter } from './modules/audit/audit.routes.js'
 import type { AdminManagementService } from './modules/identity/admin-management.service.js'
 import { createAdminHealthRouter, type AdminHealthService } from './modules/health/admin-health.routes.js'
+import { createRateLimiter, createRateLimitMiddleware, defaultRateLimits, type RateLimiter, type RateLimitCategory, type RateLimitPolicy, type RateLimitStore } from './middleware/rate-limit.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -47,6 +48,8 @@ export type ApiRuntimeConfig = {
   fileUploadPerUserConcurrency?: number
   fileUploadPerUserWindowMax?: number
   fileUploadPerUserWindowMs?: number
+  trustProxy?: boolean
+  rateLimits?: Partial<Record<RateLimitCategory, RateLimitPolicy>>
 }
 
 export type AppDependencies = {
@@ -67,6 +70,8 @@ export type AppDependencies = {
   adminManagementService?: AdminManagementService
   auditQueryService?: Pick<AdminManagementService, 'auditLogs' | 'auditLog'>
   adminHealthService?: AdminHealthService
+  rateLimitStore?: RateLimitStore
+  rateLimitNow?: () => number
   config: ApiRuntimeConfig
 }
 
@@ -138,15 +143,21 @@ export const createApp = ({
   adminManagementService,
   auditQueryService,
   adminHealthService,
+  rateLimitStore,
+  rateLimitNow,
   config,
 }: AppDependencies) => {
   const app = express()
   const sessionTtlSeconds = config.sessionTtlSeconds ?? 28_800
+  const rateLimiter: RateLimiter = createRateLimiter({ ...(rateLimitStore ? { store: rateLimitStore } : {}), ...(rateLimitNow ? { now: rateLimitNow } : {}) })
+  const rateLimits = { ...defaultRateLimits, ...config.rateLimits }
 
+  app.set('trust proxy', config.trustProxy ? 1 : false)
   app.use(requestId)
   app.use(['/api/v1/me', '/api/v1/files', '/api/v1/auth', '/api/v1/admin'], privateNoStore)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
+  app.use(createRateLimitMiddleware(rateLimiter, rateLimits))
   app.use(createOriginGuard(config.allowedOrigins))
   app.use('/healthz', createHealthRouter(checkDatabase, config.healthcheckTimeoutMs))
   if (identityRepository && authTransactionRepository) {
@@ -155,6 +166,8 @@ export const createApp = ({
       secureCookies: config.secureCookies ?? false,
       sessionTtlSeconds,
       ...(studentIdentityRepository && verificationService ? { verificationService } : {}),
+      rateLimiter,
+      loginFailurePolicy: rateLimits.login_failure,
     }))
     if (contentPublishingService) {
       app.use('/api/v1/admin/content', createAdminContentRouter(sessions, contentPublishingService))
@@ -179,6 +192,7 @@ export const createApp = ({
     if (resourceService) app.use('/api/v1/resources', createResourceRouter(sessions, resourceService))
     if (resourceService) app.use('/api/v1/admin/resources', createAdminResourceRouter(sessions, resourceService))
     if (adminManagementService) app.use('/api/v1/admin/users', createAdminUsersRouter(sessions, adminManagementService))
+    if (adminManagementService) app.use('/api/v1/me/account', createMyAccountRouter(sessions, adminManagementService))
     if (auditQueryService) app.use('/api/v1/admin/audit-logs', createAuditRouter(sessions, auditQueryService))
     if (adminHealthService) app.use('/api/v1/admin/system-health', createAdminHealthRouter(sessions, adminHealthService))
   }

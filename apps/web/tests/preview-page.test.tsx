@@ -23,6 +23,10 @@ const site: PublicSiteResponse['data'] = {
   importantDates: { items: [] },
   contacts: { items: [] },
   display: { series: '磐石实训营', footer: '正式页脚' },
+  features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
+  homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+  visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
+  registrationCta: { label: '在线注册', to: '/application' },
 }
 
 const preview = (key: ContentModuleKey, payload: JsonObject): AdminContentPreviewResponse => ({

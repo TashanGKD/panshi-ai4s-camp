@@ -38,6 +38,34 @@ export const createAdminManagementService = (repository: AdminManagementReposito
   }
   return {
     list: async (actor?: IdentityUser) => ({ apiVersion: 'v1' as const, data: { administrators: (await repository.listAdmins()).map((record) => presentForActor(record, actor?.id)) } }),
+    listStudents: async (search?: string) => ({ apiVersion: 'v1' as const, data: { students: (await repository.listStudents(search?.trim().slice(0, 100) || undefined)).map(present) } }),
+    updateSelf: async (actor: IdentityUser, input: { currentPassword: string, displayName: string }) => {
+      await reauthenticate(actor, input.currentPassword)
+      const displayName = input.displayName.trim()
+      if (!displayName || displayName.length > 100) throw new AdminManagementError(422, 'ADMIN_NAME_INVALID', '管理员名称无效')
+      return { apiVersion: 'v1' as const, data: { administrator: presentForActor(ensureActor(await repository.updateOwnDisplayName({ actorId: actor.id, displayName })), actor.id) } }
+    },
+    changeOwnPassword: async (actor: IdentityUser, input: { currentPassword: string, newPassword: string }) => {
+      await reauthenticate(actor, input.currentPassword)
+      const newPassword = actor.role === 'admin' ? validateAdminPassword(input.newPassword) : input.newPassword
+      const bytes = new TextEncoder().encode(newPassword).byteLength
+      if (bytes < 8 || bytes > 72) throw new AdminManagementError(422, 'PASSWORD_WEAK', '新密码须为8至72字节')
+      const result = await repository.changeOwnPassword({ actorId: actor.id, expectedPasswordHash: actor.passwordHash, passwordHash: await hashPassword(newPassword), changedAt: now() })
+      if (result !== 'changed') throw new AdminManagementError(403, 'ACCOUNT_CHANGED', '账号状态已变化，请重新登录')
+      return { apiVersion: 'v1' as const, data: { sessionsRevoked: true as const } }
+    },
+    setStudentStatus: async (actor: IdentityUser, targetId: string, input: { currentPassword: string, disabled: boolean }) => {
+      await reauthenticate(actor, input.currentPassword)
+      const result = ensureActor(await repository.setStudentDisabled({ actorId: actor.id, targetId, disabled: input.disabled, changedAt: now() }))
+      if (result === 'not_found') throw new AdminManagementError(404, 'STUDENT_NOT_FOUND', '学员账号不存在')
+      return { apiVersion: 'v1' as const, data: { student: present(result) } }
+    },
+    forceStudentPasswordReset: async (actor: IdentityUser, targetId: string, input: { currentPassword: string }) => {
+      await reauthenticate(actor, input.currentPassword)
+      const result = ensureActor(await repository.forceStudentPasswordReset({ actorId: actor.id, targetId, changedAt: now() }))
+      if (result === 'not_found') throw new AdminManagementError(404, 'STUDENT_NOT_FOUND', '学员账号不存在')
+      return { apiVersion: 'v1' as const, data: { student: present(result), resetMethod: 'verification_code' as const } }
+    },
     create: async (actor: IdentityUser, input: { displayName: string, phone: string, password: string, currentPassword: string }) => {
       await reauthenticate(actor, input.currentPassword)
       const displayName = input.displayName.trim()

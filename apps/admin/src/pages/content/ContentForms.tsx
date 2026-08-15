@@ -33,6 +33,7 @@ export function BasicForm({ value, errors, onChange }: FormProps) {
     <TextField label="举办地点" path="venue" value={text(data.venue)} errors={errors} onChange={(next) => set('venue', next)} />
     <TextField label="首页标语" path="tagline" value={text(data.tagline)} errors={errors} onChange={(next) => set('tagline', next)} />
     <TextField label="招生对象" path="target" value={text(data.target)} errors={errors} onChange={(next) => set('target', next)} />
+    <TextField label="实训规模与形式" path="scale" value={text(data.scale)} errors={errors} onChange={(next) => set('scale', next)} />
     {intro.map((item, index) => <fieldset key={introEditors.keys[index]}><legend>简介段落 {index + 1}</legend>
       <RichTextField label={`简介段落 ${index + 1}`} path={`intro.${index}`} value={text(item)} errors={errors} onChange={(next) => set('intro', intro.map((entry, itemIndex) => itemIndex === index ? next : entry))} />
       <CollectionActions label={`简介段落 ${index + 1}`} index={index} length={intro.length} onMove={(direction) => { introEditors.move(index, direction); set('intro', moveItem(intro, index, direction)) }} onDelete={() => { introEditors.remove(index); set('intro', intro.filter((_, itemIndex) => itemIndex !== index)) }} />
@@ -178,7 +179,7 @@ export function ContactsForm({ value, errors, onChange }: FormProps) {
   />)}<FieldError path="items" errors={errors} /><button type="button" className="button-secondary" onClick={() => { editors.append(); update([...items, { name: '', responsibility: '', methods: [{ type: 'email', value: '' }] }]) }}>添加联系人</button></div>
 }
 
-const homeSectionLabels: Record<string, string> = { intro: '实训营简介', target: '面向对象', features: '实训特色', organizations: '组织单位' }
+const homeSectionLabels: Record<string, string> = { intro: '实训营简介', target: '面向对象', scale: '实训规模与形式', features: '实训特色', scheduleOverview: '五日实训概览', organizations: '组织单位', registrationCta: '报名入口', registrationCount: '报名人数' }
 
 export function DisplayForm({ value, errors, onChange }: FormProps) {
   const data = object(value)
@@ -189,8 +190,9 @@ export function DisplayForm({ value, errors, onChange }: FormProps) {
   return <div className="structured-form">
     <TextField label="系列名称" path="series" value={text(data.series)} errors={errors} onChange={(next) => set('series', next)} />
     <TextField label="页脚文字" path="footer" value={text(data.footer)} errors={errors} onChange={(next) => set('footer', next)} />
+    <TextField label="报名按钮文字" path="registrationCta.label" value={text(object(data.registrationCta).label)} errors={errors} onChange={(next) => set('registrationCta', { label: next, to: '/application' })} />
     <label className="check-field"><input type="checkbox" checked={data.showRegistrationCount === true} onChange={(event) => set('showRegistrationCount', event.target.checked)} />公开显示已提交报名人数</label>
-    <fieldset><legend>公开导航</legend>{['home', 'schedule', 'register', 'travel', 'contacts', 'resources'].map((key) => <label className="check-field" key={key}><input type="checkbox" checked={visible.includes(key)} onChange={(event) => set('visibleNavigation', event.target.checked ? [...visible, key] : visible.filter((item) => item !== key))} />{key}</label>)}</fieldset>
+    <fieldset><legend>公开导航</legend>{['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'].map((key) => <label className="check-field" key={key}><input type="checkbox" checked={visible.includes(key)} onChange={(event) => set('visibleNavigation', event.target.checked ? [...visible, key] : visible.filter((item) => item !== key))} />{key}</label>)}</fieldset>
     <fieldset><legend>首页模块顺序</legend>{order.map((sectionId, index) => <div key={sectionId} className="ordered-setting"><strong>{homeSectionLabels[sectionId] ?? sectionId}</strong><CollectionActions label={homeSectionLabels[sectionId] ?? sectionId} index={index} length={order.length} onMove={(direction) => set('homeSectionOrder', moveItem(order, index, direction))} onDelete={() => set('homeSectionOrder', order.filter((_, itemIndex) => itemIndex !== index))} /></div>)}
       <div className="form-grid"><div className="form-field"><label htmlFor="home-section-to-add">待添加首页模块</label><select id="home-section-to-add" value={sectionToAdd} aria-describedby={errorDescription('homeSectionOrder', errors)} aria-invalid={errors.homeSectionOrder ? true : undefined} onChange={(event) => setSectionToAdd(event.target.value)}><option value="">请选择</option>{Object.entries(homeSectionLabels).filter(([id]) => !order.includes(id)).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
         <button type="button" className="button-secondary" disabled={!sectionToAdd} onClick={() => { if (!sectionToAdd || order.includes(sectionToAdd)) return; set('homeSectionOrder', [...order, sectionToAdd]); setSectionToAdd('') }}>添加首页模块</button></div>

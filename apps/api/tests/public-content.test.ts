@@ -23,9 +23,18 @@ const basic = {
 
 const publishedSiteRows: PublishedRow[] = [
   { key: 'basic', payload: basic, version: 1 },
+  { key: 'features', payload: { items: [{ title: '真实问题', description: '围绕真实科研问题实践' }] }, version: 2 },
+  { key: 'organizations', payload: { items: [{ role: '承办单位', name: '测试组织' }] }, version: 3 },
   { key: 'importantDates', payload: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] }, version: 1 },
   { key: 'contacts', payload: { items: [] }, version: 1 },
   { key: 'display', payload: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营' }, version: 1 },
+  { key: 'schedule', payload: { days: [
+    { date: '2026-08-23', label: '第一天', theme: '主题一', sessions: [] },
+    { date: '2026-08-24', label: '第二天', theme: '主题二', sessions: [] },
+    { date: '2026-08-25', label: '第三天', theme: '主题三', sessions: [] },
+    { date: '2026-08-26', label: '第四天', theme: '主题四', sessions: [] },
+    { date: '2026-08-27', label: '第五天', theme: '主题五', sessions: [] },
+  ] }, version: 4 },
 ]
 
 const schedule = {
@@ -93,7 +102,7 @@ describe('public published content', () => {
   })
 
   it('omits unpublished modules instead of falling back to draft JSON', async () => {
-    const response = await request(createPublicApp(publishedSiteRows)).get('/api/v1/public/schedule')
+    const response = await request(createPublicApp(publishedSiteRows.filter((row) => row.key !== 'schedule'))).get('/api/v1/public/schedule')
 
     expect(response.status).toBe(404)
     expect(ApiErrorSchema.parse(response.body).error.code).toBe('CONTENT_NOT_FOUND')
@@ -114,7 +123,7 @@ describe('public published content', () => {
 
   it('aggregates only published shell modules and keeps schedule separate', async () => {
     const app = createPublicApp([
-      ...publishedSiteRows,
+      ...publishedSiteRows.filter((row) => row.key !== 'schedule'),
       { key: 'schedule', payload: schedule, version: 3 },
     ])
 
@@ -123,10 +132,11 @@ describe('public published content', () => {
 
     const site = PublicSiteResponseSchema.parse(siteResponse.body)
     expect(siteResponse.status).toBe(200)
-    expect(Object.keys(site.data).sort()).toEqual([
-      'basic', 'contacts', 'contentVersion', 'display', 'importantDates',
-    ])
-    expect(JSON.stringify(site)).not.toContain('科研智能体')
+    expect(site.data.features.items[0]?.title).toBe('真实问题')
+    expect(site.data.organizations.items[0]?.name).toBe('测试组织')
+    expect(site.data.scheduleOverview).toEqual([{ date: '2026-08-23', label: '第一天', theme: '科研智能体' }])
+    expect(site.data.visibleNavigation).toEqual(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'])
+    expect(site.data.registrationCta).toEqual({ label: '在线注册', to: '/application' })
 
     expect(scheduleResponse.status).toBe(200)
     expect(scheduleResponse.body).toEqual({
@@ -166,7 +176,7 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
     const { seedInitialContent } = await import('../src/db/seeds/initial-content.js')
     const creatorId = await createCreator()
     await seedInitialContent(testDatabase!.db, creatorId)
-    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(12)
+    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(14)
     await seedInitialContent(testDatabase!.db, creatorId)
     await testDatabase!.db.update(contentModules).set({ draft: { title: '数据库草稿标题' } }).where(eq(contentModules.key, 'basic'))
     await testDatabase!.db.update(contentModules).set({ draft: { directions: '虚构交通路线' } }).where(eq(contentModules.key, 'travel'))
@@ -184,8 +194,8 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
     expect(travelResponse.status).toBe(404)
     expect(JSON.stringify(travelResponse.body)).not.toContain('虚构交通路线')
     expect(await testDatabase!.db.select().from(contentModules)).toHaveLength(8)
-    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(6)
-    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(12)
+    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(7)
+    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(14)
   })
 
   it('reuses a matching pre-existing version instead of pointing at a missing deterministic id', async () => {
@@ -233,10 +243,10 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
     ])).resolves.toEqual([undefined, undefined])
 
     expect(await testDatabase!.db.select().from(contentModules)).toHaveLength(8)
-    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(6)
+    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(7)
     const audits = await testDatabase!.db.select().from(auditLogs)
-    expect(audits).toHaveLength(12)
-    expect(audits.filter(({ action }) => action === 'content.version_created')).toHaveLength(6)
-    expect(audits.filter(({ action }) => action === 'content.version_published')).toHaveLength(6)
+    expect(audits).toHaveLength(14)
+    expect(audits.filter(({ action }) => action === 'content.version_created')).toHaveLength(7)
+    expect(audits.filter(({ action }) => action === 'content.version_published')).toHaveLength(7)
   })
 })

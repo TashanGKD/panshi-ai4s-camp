@@ -106,6 +106,28 @@ describe('administrator management PostgreSQL truth', () => {
     expect(JSON.stringify(actions.map((entry) => entry.metadata))).not.toMatch(/password|hash|token|phone|CurrentAdmin|Replacement/iu)
   })
 
+  it('manages student status and self-service changes atomically with safe audits', async () => {
+    const repository = createAdminManagementRepository(database.db)
+    const service = createAdminManagementService(repository)
+    const actor = await readActor(ids[0])
+    const [student] = await database.db.insert(users).values({ displayName: '测试学员', phoneNormalized: '+8613900139000', passwordHash: await hashPassword('Student!2026'), role: 'user' }).returning()
+    await database.db.insert(sessions).values({ tokenHash: hashSessionToken('student-active'), userId: student!.id, expiresAt: new Date(Date.now() + 60_000) })
+    expect((await service.listStudents('测试')).data.students).toHaveLength(1)
+    await service.setStudentStatus(actor, student!.id, { currentPassword: password, disabled: true })
+    expect((await database.db.select().from(sessions).where(eq(sessions.userId, student!.id)))[0]?.revokedAt).toBeInstanceOf(Date)
+    await service.setStudentStatus(actor, student!.id, { currentPassword: password, disabled: false })
+    await service.forceStudentPasswordReset(actor, student!.id, { currentPassword: password })
+    const identity = createIdentityRepository(database.db)
+    await expect(createSessionService(identity, identity, { sessionTtlSeconds: 60 }).loginStudent('+8613900139000', 'Student!2026')).rejects.toMatchObject({ kind: 'invalid_credentials' })
+    const updated = await service.updateSelf(actor, { currentPassword: password, displayName: '更新后的管理员' })
+    expect(updated.data.administrator.displayName).toBe('更新后的管理员')
+    await database.db.insert(sessions).values({ tokenHash: hashSessionToken('admin-self'), userId: actor.id, expiresAt: new Date(Date.now() + 60_000) })
+    await service.changeOwnPassword(await readActor(actor.id), { currentPassword: password, newPassword: 'ChangedAdmin!2026' })
+    expect((await database.db.select().from(sessions).where(eq(sessions.userId, actor.id))).every((row) => row.revokedAt !== null)).toBe(true)
+    const serialized = JSON.stringify(await database.db.select({ action: auditLogs.action, metadata: auditLogs.metadata }).from(auditLogs))
+    expect(serialized).not.toMatch(/Student!2026|ChangedAdmin|passwordHash|tokenHash|\+8613900139000/u)
+  })
+
   it('rejects a login that read the account before a concurrent disable committed', async () => {
     const identity = createIdentityRepository(database.db)
     const userRead = deferred<void>(); const resumeLogin = deferred<void>()
@@ -154,7 +176,7 @@ describe('administrator management PostgreSQL truth', () => {
     await database.db.insert(sessions).values({ tokenHash: hashSessionToken(token), userId: ids[1], expiresAt: new Date(Date.now() + 60_000) })
     await database.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, ids[1]))
 
-    await expect(createSessionService(identity, identity, { sessionTtlSeconds: 60 }).resolve(token)).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(createSessionService(identity, identity, { sessionTtlSeconds: 60 }).resolve(token)).rejects.toMatchObject({ kind: 'account_disabled' })
     const [record] = await database.db.select().from(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)))
     expect(record?.revokedAt).toBeInstanceOf(Date)
   })

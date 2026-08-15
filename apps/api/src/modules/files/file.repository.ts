@@ -110,13 +110,13 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
   },
 
   hideWithAudit: (id, actor) => db.transaction(async (transaction) => {
-    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status }).from(applicationFiles)
+    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status, slot: applicationFiles.attachmentSlot, editableSlots: applications.supplementEditableAttachmentIds }).from(applicationFiles)
       .innerJoin(applications, eq(applications.id, applicationFiles.applicationId))
       .where(eq(applicationFiles.fileId, id)).orderBy(asc(applications.id)).for('update', { of: applications })
     const [lockedFile] = await transaction.select().from(files).where(eq(files.id, id)).for('update')
     if (!lockedFile || lockedFile.lifecycleState !== 'active' || lockedFile.hiddenAt !== null || lockedFile.deletedAt !== null
       || (actor.role !== 'admin' && lockedFile.ownerUserId !== actor.id)) return { kind: 'unavailable' }
-    if (linkedApplications.some((application) => application.status !== 'draft')) return { kind: 'locked' }
+    if (linkedApplications.some((application) => application.status !== 'draft' && !(application.status === 'needs_supplement' && application.editableSlots.includes(application.slot)))) return { kind: 'locked' }
     const [record] = await transaction.update(files).set({ hiddenAt: new Date() })
       .where(and(eq(files.id, id), eq(files.lifecycleState, 'active'), isNull(files.hiddenAt), isNull(files.deletedAt))).returning()
     if (!record) return { kind: 'unavailable' }
@@ -131,13 +131,13 @@ export const createFileRepository = (db: NodePgDatabase<typeof schema>): FileRep
   }),
 
   beginDeleteWithAudit: (id, actor) => db.transaction(async (transaction) => {
-    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status }).from(applicationFiles)
+    const linkedApplications = await transaction.select({ id: applications.id, status: applications.status, slot: applicationFiles.attachmentSlot, editableSlots: applications.supplementEditableAttachmentIds }).from(applicationFiles)
       .innerJoin(applications, eq(applications.id, applicationFiles.applicationId))
       .where(eq(applicationFiles.fileId, id)).orderBy(asc(applications.id)).for('update', { of: applications })
     const [lockedFile] = await transaction.select().from(files).where(eq(files.id, id)).for('update')
     if (!lockedFile || lockedFile.deletedAt !== null || !['active', 'deleting', 'delete_failed'].includes(lockedFile.lifecycleState)
       || (actor.role !== 'admin' && lockedFile.ownerUserId !== actor.id)) return { kind: 'unavailable' }
-    if (linkedApplications.some((application) => application.status !== 'draft')) return { kind: 'locked' }
+    if (linkedApplications.some((application) => application.status !== 'draft' && !(application.status === 'needs_supplement' && application.editableSlots.includes(application.slot)))) return { kind: 'locked' }
     const [record] = await transaction.update(files).set({ lifecycleState: 'deleting', deleteFailureCode: null })
       .where(and(eq(files.id, id), isNull(files.deletedAt), inArray(files.lifecycleState, ['active', 'deleting', 'delete_failed']))).returning()
     if (!record) return { kind: 'unavailable' }

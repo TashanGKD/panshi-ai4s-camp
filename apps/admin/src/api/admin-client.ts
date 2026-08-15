@@ -80,7 +80,16 @@ export type AdminClient = {
   previewRegistrationForm: () => Promise<RegistrationFormDraftResponse>
   publishRegistrationForm: (expectedRevision: number) => Promise<RegistrationFormPublishResponse>
   getRegistrationFormHistory: () => Promise<RegistrationFormHistoryResponse>
+  listApplications: (query: URLSearchParams) => Promise<{ data: { items: AdminApplicationListItem[], total: number, page: number, pageSize: number } }>
+  getApplication: (id: string) => Promise<{ data: AdminApplicationDetail }>
+  transitionApplication: (id: string, input: ReviewTransitionInput) => Promise<{ data: { id: string, revision: number, status: string } }>
+  bulkTransitionApplications: (input: { applicationIds: string[], targetStatus: string, publicMessage?: string, internalNote?: string }) => Promise<{ data: { results: Array<{ applicationId: string, success: boolean, status?: string, code?: string, message?: string }> } }>
+  exportApplications: (query: URLSearchParams) => Promise<Blob>
 }
+
+export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
+export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, string | string[]>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
+export type ReviewTransitionInput = { expectedRevision: number, targetStatus: string, publicMessage?: string, internalNote?: string, supplementDeadline?: string, editableFieldIds: string[], editableAttachmentIds: string[] }
 
 export const createAdminClient = (apiBaseUrl: string | undefined, runtime: AdminClientRuntime): AdminClient => {
   const prefix = resolveApiBaseUrl(apiBaseUrl, runtime)
@@ -128,6 +137,11 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }),
     })).json()),
     getRegistrationFormHistory: async () => RegistrationFormHistoryResponseSchema.parse(await (await send('/api/v1/admin/registration-form/history')).json()),
+    listApplications: async (query) => (await send(`/api/v1/admin/applications?${query.toString()}`)).json(),
+    getApplication: async (id) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}`)).json(),
+    transitionApplication: async (id, input) => (await send(`/api/v1/admin/applications/${encodeURIComponent(id)}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    bulkTransitionApplications: async (input) => (await send('/api/v1/admin/applications/bulk-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
+    exportApplications: async (query) => (await send(`/api/v1/admin/applications/export.csv?${query.toString()}`)).blob(),
   }
 }
 

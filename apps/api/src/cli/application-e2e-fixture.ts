@@ -28,7 +28,7 @@ export const runApplicationFixture = async (operation: 'seed' | 'cleanup') => {
       await Promise.all(['var/e2e-uploads', 'var/e2e-temp'].map((path) => rm(resolve(projectRoot, path), { recursive: true, force: true })))
     }
     if (operation === 'seed') {
-      const [admin] = await database.db.insert(users).values({ displayName: 'E2E管理员', phoneNormalized: '+8613999999999', passwordHash: await hashPassword(randomBytes(32).toString('hex')), role: 'admin' }).returning({ id: users.id })
+      const [admin] = await database.db.insert(users).values({ displayName: 'E2E管理员', phoneNormalized: '+8613999999999', passwordHash: await hashPassword(process.env.E2E_ADMIN_PASSWORD ?? randomBytes(32).toString('hex')), role: 'admin' }).returning({ id: users.id })
       await seedInitialContent(database.db, admin!.id)
       const [currentDates] = await database.db.select({ version: contentVersions.version }).from(contentModules).innerJoin(contentVersions, eq(contentVersions.id, contentModules.publishedVersionId)).where(eq(contentModules.key, 'importantDates'))
       const [dates] = await database.db.insert(contentVersions).values({ moduleKey: 'importantDates', version: (currentDates?.version ?? 0) + 1, payload: { items: [{ label: '报名开放', value: '2026-08-01', machineKey: 'registrationOpen' }, { label: '报名截止', value: '2026-08-31', machineKey: 'registrationDeadline' }, { label: '开营', value: '2026-08-23', machineKey: 'campStart' }, { label: '结营', value: '2026-08-27', machineKey: 'campEnd' }] }, createdBy: admin!.id }).returning({ id: contentVersions.id })

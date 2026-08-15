@@ -4,7 +4,7 @@ import type { MyApplicationResponse } from '@panshi/contracts'
 import { applicationClient, ApplicationApiError } from '../api/application-client'
 import { ApplicationForm, type FormDraft } from '../features/registration/ApplicationForm'
 
-type ReadyState = { application: MyApplicationResponse['data']['application'], draft: FormDraft }
+type ReadyState = { application: MyApplicationResponse['data']['application'], supplementRequest: MyApplicationResponse['data']['supplementRequest'], draft: FormDraft }
 
 const draftFrom = (application: MyApplicationResponse['data']['application']): FormDraft => {
   const profile = {
@@ -38,7 +38,7 @@ export function RegistrationPage() {
     try {
       const response = await applicationClient.getMine()
       if (!mounted.current || generation.current !== current) return
-      setState({ application: response.data.application, draft: draftFrom(response.data.application) }); setStatus('ready'); setDirty(false)
+      setState({ application: response.data.application, supplementRequest: response.data.supplementRequest, draft: draftFrom(response.data.application) }); setStatus('ready'); setDirty(false)
     } catch (caught) {
       if (!mounted.current || generation.current !== current) return
       if (caught instanceof ApplicationApiError && caught.status === 401) setStatus('anonymous')
@@ -67,7 +67,7 @@ export function RegistrationPage() {
     try {
       const response = await applicationClient.saveDraft({ expectedRevision: state.application.revision, ...(draftOverride ?? state.draft) })
       if (!mounted.current || generation.current !== operation) return null
-      setState({ application: response.data.application, draft: draftFrom(response.data.application) }); setDirty(false); setMessage('草稿已保存')
+      setState({ application: response.data.application, supplementRequest: response.data.supplementRequest, draft: draftFrom(response.data.application) }); setDirty(false); setMessage('草稿已保存')
       return response.data.application
     } catch (caught) {
       if (!mounted.current || generation.current !== operation) return null
@@ -131,7 +131,8 @@ export function RegistrationPage() {
     finally { operationLocked.current = false; if (mounted.current) setPending(false) }
   }
   return <section><h2>在线报名</h2>{state.application.retiredAnswerIds.length > 0 ? <p role="status">报名表已更新，原问题答案已保留；请核对当前表单后提交。</p> : null}
-    <ApplicationForm application={state.application} draft={state.draft} disabled={pending || state.application.locked} errors={errors} onChange={updateDraft} onUpload={(slot, file) => void upload(slot, file)} onRemove={(slot, file) => void remove(slot, file)} onRemoveUnlinked={(file) => void removeUnlinked(file)} />
+    {state.supplementRequest ? <aside role="status"><h3>请补充材料</h3><p>{state.supplementRequest.message}</p>{state.supplementRequest.deadline ? <p>截止时间：{new Date(state.supplementRequest.deadline).toLocaleString('zh-CN')}</p> : null}</aside> : null}
+    <ApplicationForm application={state.application} supplementRequest={state.supplementRequest} draft={state.draft} disabled={pending || state.application.locked} errors={errors} onChange={updateDraft} onUpload={(slot, file) => void upload(slot, file)} onRemove={(slot, file) => void remove(slot, file)} onRemoveUnlinked={(file) => void removeUnlinked(file)} />
     <div className="application-actions"><button type="button" disabled={pending || !dirty || state.application.locked} onClick={() => void save()}>{pending ? '处理中' : '保存草稿'}</button><button type="button" disabled={pending || state.application.locked} onClick={() => void submit()}>正式提交</button></div>
     {message ? <p role={Object.keys(errors).length > 0 ? 'alert' : 'status'}>{message}</p> : null}
     {state.application.locked ? <p role="status">报名已提交，当前内容为只读。</p> : null}</section>

@@ -2,10 +2,11 @@ import type { RegistrationDynamicQuestion } from '@panshi/contracts'
 
 type QuestionValue = string | readonly string[]
 
-export function DynamicQuestion({ question, value, onChange }: {
+export function DynamicQuestion({ question, value, onChange, disabled = false }: {
   question: RegistrationDynamicQuestion
   value: QuestionValue
   onChange: (value: QuestionValue) => void
+  disabled?: boolean
 }) {
   const descriptionId = `${question.id}-help`
   const validation = [
@@ -17,12 +18,12 @@ export function DynamicQuestion({ question, value, onChange }: {
 
   if (question.type === 'short_text') {
     return <div className="registration-question"><label htmlFor={question.id}>{label}</label>
-      <input id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
+      <input disabled={disabled} id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
   }
 
   if (question.type === 'long_text') {
     return <div className="registration-question"><label htmlFor={question.id}>{label}</label>
-      <textarea id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
+      <textarea disabled={disabled} id={question.id} name={question.id} value={typeof value === 'string' ? value : ''} minLength={question.validation.minLength} maxLength={question.validation.maxLength} required={question.required} onChange={(event) => onChange(event.target.value)} aria-describedby={descriptionId} />{help}</div>
   }
 
   const selected = Array.isArray(value) ? value : value === '' ? [] : [value]
@@ -32,6 +33,7 @@ export function DynamicQuestion({ question, value, onChange }: {
     {options.map((option) => <label key={option.id}>
       <input
         type={question.type === 'single_choice' ? 'radio' : 'checkbox'}
+        disabled={disabled}
         name={question.id}
         value={option.value}
         checked={selected.includes(option.value)}

@@ -19,6 +19,7 @@ export type ApplicationRecord = {
   profile: ApplicationCoreFields; answers: Record<string, string | string[]>; attachments: ApplicationFile[]
   unlinkedAttachments: Array<Omit<ApplicationFile, 'slotId'>>
   submittedAt: Date | null; updatedAt: Date; retiredAnswerIds: string[]
+  supplement?: { message: string, deadline: Date | null, editableFieldIds: string[], editableAttachmentIds: string[] } | null
 }
 export type ApplicationRepository = {
   getOrCreateDraft: (user: AuthenticatedSessionUser) => Promise<ApplicationRecord>
@@ -76,18 +77,20 @@ const validateProfile = (profile: Omit<ApplicationCoreFields, 'phone'>, complete
   }
 }
 
-const response = async (repository: ApplicationRepository, application: ApplicationRecord): Promise<MyApplicationResponse> => MyApplicationResponseSchema.parse({
+const response = async (repository: ApplicationRepository, application: ApplicationRecord): Promise<MyApplicationResponse> => {
+  const { supplement, ...publicApplication } = application
+  return MyApplicationResponseSchema.parse({
   apiVersion: 'v1', data: {
     application: {
-      ...application, locked: application.status !== 'draft', submittedAt: application.submittedAt?.toISOString() ?? null, updatedAt: application.updatedAt.toISOString(),
+      ...publicApplication, locked: !['draft', 'needs_supplement'].includes(application.status), submittedAt: application.submittedAt?.toISOString() ?? null, updatedAt: application.updatedAt.toISOString(),
       attachments: application.attachments.map((file) => ({ ...file, downloadUrl: `/api/v1/files/${file.id}/download` })),
       unlinkedAttachments: application.unlinkedAttachments.map((file) => ({ ...file, downloadUrl: `/api/v1/files/${file.id}/download` })),
     },
     timeline: (await repository.listTimeline(application.id)).map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
-    supplementRequest: null,
+    supplementRequest: supplement ? { ...supplement, deadline: supplement.deadline?.toISOString() ?? null } : null,
     accessibleResources: [],
   },
-})
+}) }
 
 export type ApplicationService = ReturnType<typeof createApplicationService>
 export const createApplicationService = (repository: ApplicationRepository) => ({
@@ -100,10 +103,21 @@ export const createApplicationService = (repository: ApplicationRepository) => (
     const parsed = ApplicationDraftSaveRequestSchema.safeParse(input)
     if (!parsed.success) throw new ApplicationError(422, 'APPLICATION_VALIDATION_FAILED', '报名内容校验失败', parsed.error.issues.map((issue) => ({ path: issue.path.map(String).join('.'), message: issue.message })))
     const current = await repository.getOrCreateDraft(user)
-    if (current.status !== 'draft') throw new ApplicationError(409, 'APPLICATION_LOCKED', '报名已提交，不能修改')
+    if (!['draft', 'needs_supplement'].includes(current.status)) throw new ApplicationError(409, 'APPLICATION_LOCKED', '报名当前不能修改')
+    if (current.status === 'needs_supplement') {
+      const supplement = current.supplement!
+      if (supplement.deadline && supplement.deadline.getTime() < Date.now()) throw new ApplicationError(409, 'SUPPLEMENT_DEADLINE_PASSED', '补充材料提交时间已截止')
+      const editable = new Set(supplement.editableFieldIds)
+      const profileKeys = ['name', 'email', 'organization', 'department', 'identityType', 'educationStage', 'majorResearchDirection'] as const
+      for (const key of profileKeys) if (!editable.has(key) && parsed.data.profile[key] !== current.profile[key]) throw validationError(`profile.${key}`, '该字段未开放修改')
+      for (const [id, value] of Object.entries(parsed.data.answers)) if (!editable.has(id) && JSON.stringify(value) !== JSON.stringify(current.answers[id])) throw validationError(`answers.${id}`, '该问题未开放修改')
+      const editableSlots = new Set(supplement.editableAttachmentIds)
+      const before = new Map(current.attachments.map((item) => [item.slotId, item.id])); const after = new Map(parsed.data.attachments.map((item) => [item.slotId, item.fileId]))
+      for (const slot of new Set([...before.keys(), ...after.keys()])) if (!editableSlots.has(slot) && before.get(slot) !== after.get(slot)) throw validationError(`attachments.${slot}`, '该附件未开放修改')
+    }
     validateProfile(parsed.data.profile, false)
     const retired = new Set(current.retiredAnswerIds)
-    const answers = { ...parsed.data.answers }
+    const answers = current.status === 'needs_supplement' ? { ...current.answers, ...parsed.data.answers } : { ...parsed.data.answers }
     for (const id of retired) if (current.answers[id] !== undefined) answers[id] = current.answers[id]
     validateAnswers(RegistrationFormSchema.parse(current.form), answers, false, retired)
     const saved = await repository.saveDraft({ ...parsed.data, answers, user })
@@ -114,10 +128,10 @@ export const createApplicationService = (repository: ApplicationRepository) => (
     if (user.disabledAt !== null) throw new ApplicationError(403, 'ACCOUNT_DISABLED', '账号已停用')
     const parsed = ApplicationSubmitRequestSchema.safeParse(input)
     if (!parsed.success) throw new ApplicationError(400, 'INVALID_REQUEST', '提交请求格式错误')
-    const window = await repository.registrationWindow()
-    if (!window.open) throw new ApplicationError(409, window.reason ?? 'REGISTRATION_CLOSED', '当前不在报名时间内')
     const current = await repository.getOrCreateDraft(user)
-    if (current.status !== 'draft') throw new ApplicationError(409, 'APPLICATION_ALREADY_SUBMITTED', '报名已提交')
+    if (!['draft', 'needs_supplement'].includes(current.status)) throw new ApplicationError(409, 'APPLICATION_ALREADY_SUBMITTED', '报名当前不能提交')
+    if (current.status === 'draft') { const window = await repository.registrationWindow(); if (!window.open) throw new ApplicationError(409, window.reason ?? 'REGISTRATION_CLOSED', '当前不在报名时间内') }
+    if (current.status === 'needs_supplement' && current.supplement?.deadline && current.supplement.deadline.getTime() < Date.now()) throw new ApplicationError(409, 'SUPPLEMENT_DEADLINE_PASSED', '补充材料提交时间已截止')
     const currentProfile = {
       name: current.profile.name, email: current.profile.email, organization: current.profile.organization,
       department: current.profile.department, identityType: current.profile.identityType,
@@ -142,6 +156,6 @@ export const createApplicationService = (repository: ApplicationRepository) => (
       throw new ApplicationError(422, 'APPLICATION_ATTACHMENT_INVALID', '附件不符合当前报名表要求', error.fields)
     }
     if (!result) throw new ApplicationError(409, 'APPLICATION_REVISION_CONFLICT', '草稿已变化或报名已提交，请刷新后重试')
-    return { apiVersion: 'v1' as const, data: { applicationId: result.applicationId, versionId: result.versionId, status: 'submitted' as const, submittedAt: result.submittedAt.toISOString() } }
+    return { apiVersion: 'v1' as const, data: { applicationId: result.applicationId, versionId: result.versionId, status: current.status === 'needs_supplement' ? 'reviewing' as const : 'submitted' as const, submittedAt: result.submittedAt.toISOString() } }
   },
 })

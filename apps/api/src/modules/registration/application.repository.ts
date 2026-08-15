@@ -52,6 +52,8 @@ export const createApplicationRepository = (
       id: applications.id, revision: applications.revision, status: applications.status, formVersionId: applications.formVersionId,
       formVersion: registrationFormVersions.version, form: registrationFormVersions.schema, coreFields: applications.coreFields,
       answers: applications.answers, submittedAt: applications.submittedAt, updatedAt: applications.updatedAt,
+      supplementPublicMessage: applications.supplementPublicMessage, supplementDeadline: applications.supplementDeadline,
+      supplementEditableFieldIds: applications.supplementEditableFieldIds, supplementEditableAttachmentIds: applications.supplementEditableAttachmentIds,
     }).from(applications).innerJoin(registrationFormVersions, eq(registrationFormVersions.id, applications.formVersionId))
       .where(eq(applications.userId, userId)).limit(1)
     if (!record) return null
@@ -76,6 +78,7 @@ export const createApplicationRepository = (
       attachments: rows as ApplicationFile[],
       unlinkedAttachments: unlinkedRows as Array<Omit<ApplicationFile, 'slotId'>>,
       retiredAnswerIds: Object.keys(record.answers).filter((id) => !activeIds.has(id)),
+      supplement: record.status === 'needs_supplement' && record.supplementPublicMessage ? { message: record.supplementPublicMessage, deadline: record.supplementDeadline, editableFieldIds: record.supplementEditableFieldIds, editableAttachmentIds: record.supplementEditableAttachmentIds } : null,
     }
   }
 
@@ -118,7 +121,7 @@ export const createApplicationRepository = (
     saveDraft: (input) => db.transaction(async (transaction) => {
       const [locked] = await transaction.select({ id: applications.id, revision: applications.revision, status: applications.status, formVersionId: applications.formVersionId })
         .from(applications).where(eq(applications.userId, input.user.id)).for('update')
-      if (!locked || locked.status !== 'draft' || locked.revision !== input.expectedRevision) return null
+      if (!locked || !['draft', 'needs_supplement'].includes(locked.status) || locked.revision !== input.expectedRevision) return null
       const [formRow] = await transaction.select({ form: registrationFormVersions.schema }).from(registrationFormVersions).where(eq(registrationFormVersions.id, locked.formVersionId))
       const form = RegistrationFormSchema.parse(formRow?.form)
       const slots = new Map(form.attachments.filter((slot) => slot.active).map((slot) => [slot.id, slot]))
@@ -144,10 +147,9 @@ export const createApplicationRepository = (
     }),
 
     submit: (input) => db.transaction(async (transaction) => {
-      const window = await getWindow(transaction as NodePgDatabase<typeof schema>)
-      if (!window.open) return null
       const [locked] = await transaction.select().from(applications).where(eq(applications.userId, input.user.id)).for('update')
-      if (!locked || locked.status !== 'draft' || locked.revision !== input.expectedRevision) return null
+      if (!locked || !['draft', 'needs_supplement'].includes(locked.status) || locked.revision !== input.expectedRevision) return null
+      if (locked.status === 'draft') { const window = await getWindow(transaction as NodePgDatabase<typeof schema>); if (!window.open) return null }
       const [published] = await transaction.select({ versionId: registrationFormDrafts.baseVersionId }).from(registrationFormDrafts)
         .where(eq(registrationFormDrafts.id, DRAFT_ID)).for('share')
       if (!published?.versionId || published.versionId !== locked.formVersionId) throw new ApplicationSubmissionError('form_version_changed')
@@ -196,11 +198,13 @@ export const createApplicationRepository = (
         })),
         submittedAt: submittedAt.toISOString(),
       }
-      const [version] = await transaction.insert(applicationVersions).values({ applicationId: record.id, snapshot: snapshot as unknown as JsonObject, reason: 'initial_submission' }).returning({ id: applicationVersions.id })
+      const isSupplement = locked.status === 'needs_supplement'
+      const [version] = await transaction.insert(applicationVersions).values({ applicationId: record.id, snapshot: snapshot as unknown as JsonObject, reason: isSupplement ? 'supplement_resubmission' : 'initial_submission' }).returning({ id: applicationVersions.id })
       if (!version) throw new Error('Application version creation failed')
-      await transaction.update(applications).set({ status: 'submitted', revision: locked.revision + 1, submittedAt, updatedAt: submittedAt }).where(eq(applications.id, record.id))
-      await transaction.insert(applicationStatusHistory).values({ applicationId: record.id, fromStatus: 'draft', toStatus: 'submitted', changedBy: input.user.id })
-      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
+      const nextStatus = isSupplement ? 'reviewing' : 'submitted'
+      await transaction.update(applications).set({ status: nextStatus, revision: locked.revision + 1, submittedAt, updatedAt: submittedAt, supplementPublicMessage: null, supplementDeadline: null, supplementEditableFieldIds: [], supplementEditableAttachmentIds: [] }).where(eq(applications.id, record.id))
+      await transaction.insert(applicationStatusHistory).values({ applicationId: record.id, fromStatus: locked.status, toStatus: nextStatus, changedBy: input.user.id })
+      await transaction.insert(auditLogs).values({ actorUserId: input.user.id, action: isSupplement ? 'application.supplement_resubmitted' : 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
       return { applicationId: record.id, versionId: version.id, submittedAt }
     }),
 

@@ -118,6 +118,7 @@ const expectedChecks = [
   { constraintName: 'application_status_history_to_status_check', tokens: ['to_status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
   { constraintName: 'applications_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'applications_status_check', tokens: ['status', 'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
+  { constraintName: 'applications_supplement_message_check', tokens: ['status', 'needs_supplement', 'supplement_public_message', 'btrim'] },
   { constraintName: 'content_modules_draft_revision_check', tokens: ['draft_revision', '>= 0'] },
   { constraintName: 'content_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'file_storage_recoveries_failure_state_check', tokens: ['state', 'delete_failed', 'failure_code', 'NULL'] },
@@ -607,6 +608,7 @@ describe('initial PostgreSQL schema', () => {
       '0010_secure_file_metadata.sql',
       '0011_recoverable_file_lifecycle.sql',
       '0012_application_submission.sql',
+      '0013_review_workflow.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

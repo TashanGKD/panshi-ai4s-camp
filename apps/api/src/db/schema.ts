@@ -162,6 +162,11 @@ export const applications = pgTable('applications', {
   coreFields: jsonb('core_fields').$type<JsonObject>().notNull().default(sql`'{}'::jsonb`),
   answers: jsonb('answers').$type<JsonObject>().notNull().default(sql`'{}'::jsonb`),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  supplementPublicMessage: text('supplement_public_message'),
+  supplementDeadline: timestamp('supplement_deadline', { withTimezone: true }),
+  supplementEditableFieldIds: jsonb('supplement_editable_field_ids').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  supplementEditableAttachmentIds: jsonb('supplement_editable_attachment_ids').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  internalReviewNote: text('internal_review_note'),
   createdAt: createdAt(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -169,6 +174,7 @@ export const applications = pgTable('applications', {
     'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'
   )`),
   check('applications_revision_check', sql`${table.revision} >= 0`),
+  check('applications_supplement_message_check', sql`${table.status} <> 'needs_supplement' or char_length(btrim(${table.supplementPublicMessage})) > 0`),
   index('applications_status_idx').on(table.status),
 ])
 

@@ -321,7 +321,8 @@ export const MyApplicationResponseSchema = z.object({
     timeline: z.array(ApplicationTimelineEntrySchema),
     supplementRequest: z.object({
       message: z.string(),
-      editableFieldIds: z.array(UuidSchema),
+      deadline: z.iso.datetime().nullable(),
+      editableFieldIds: z.array(z.string().min(1)),
       editableAttachmentIds: z.array(UuidSchema),
     }).strict().nullable(),
     accessibleResources: z.array(z.object({ id: UuidSchema, title: z.string(), downloadUrl: z.string() }).strict()),
@@ -336,7 +337,7 @@ export const ApplicationSubmitResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
     applicationId: UuidSchema,
-    status: z.literal('submitted'),
+    status: z.enum(['submitted', 'reviewing']),
     submittedAt: z.iso.datetime(),
     versionId: UuidSchema,
   }).strict(),

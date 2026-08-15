@@ -2,10 +2,11 @@ import { DEFAULT_REGISTRATION_FORM, type RegistrationCoreFieldKey } from '@pansh
 
 export type CoreFieldValues = Partial<Record<RegistrationCoreFieldKey, string>>
 
-export function CoreFields({ values, phone, onChange }: {
+export function CoreFields({ values, phone, onChange, editableKeys }: {
   values: CoreFieldValues
   phone: string
   onChange: (key: RegistrationCoreFieldKey, value: string) => void
+  editableKeys?: ReadonlySet<string>
 }) {
   return <fieldset className="registration-core-fields">
     <legend>固定身份信息</legend>
@@ -18,6 +19,7 @@ export function CoreFields({ values, phone, onChange }: {
           name={field.key}
           value={isPhone ? phone : values[field.key] ?? ''}
           readOnly={isPhone}
+          disabled={!isPhone && editableKeys !== undefined && !editableKeys.has(field.key)}
           required={field.required}
           aria-label={field.label}
           onChange={(event) => { if (!isPhone) onChange(field.key, event.target.value) }}

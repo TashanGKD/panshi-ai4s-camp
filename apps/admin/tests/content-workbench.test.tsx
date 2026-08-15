@@ -45,6 +45,9 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   previewRegistrationForm: async () => ({ apiVersion: 'v1', data: { form: DEFAULT_REGISTRATION_FORM, revision: 0, baseVersion: null, publishedVersionId: null } }),
   publishRegistrationForm: async () => ({ apiVersion: 'v1', data: { formVersionId: '00000000-0000-4000-8000-000000000020', revision: 0, version: 1 } }),
   getRegistrationFormHistory: async () => ({ apiVersion: 'v1', data: { publishedVersion: null, versions: [] } }),
+  listApplications: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }),
+  getApplication: async () => { throw new Error('unused') }, transitionApplication: async () => { throw new Error('unused') },
+  bulkTransitionApplications: async () => ({ data: { results: [] } }), exportApplications: async () => new Blob(),
   ...overrides,
 })
 

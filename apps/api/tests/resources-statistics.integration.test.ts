@@ -2,16 +2,18 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { applications, contentModules, contentVersions, files, registrationFormVersions, resources, users } from '../src/db/schema.js'
+import { applications, auditLogs, contentModules, contentVersions, files, registrationFormVersions, resources, users } from '../src/db/schema.js'
 import { createResourceRepository } from '../src/modules/resources/resource.repository.js'
 import { createResourceService } from '../src/modules/resources/resource.service.js'
 import { createStatisticsRepository } from '../src/modules/statistics/statistics.repository.js'
 import { createStatisticsService } from '../src/modules/statistics/statistics.service.js'
+import { applicationCountVisibilityLockKey } from '../src/db/application-count-lock.js'
 
 const url = process.env.TEST_DATABASE_URL
 if (!url || new URL(url).pathname !== '/panshi_ai4s_camp_test') throw new Error('TEST_DATABASE_URL must target exactly panshi_ai4s_camp_test')
 const database = createDatabaseClient(url)
 const admin = { id: '10000000-0000-4000-8000-000000000001', displayName: '管理员', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'admin' as const, disabledAt: null }
+const secondAdmin = { ...admin, id: '10000000-0000-4000-8000-000000000004', displayName: '第二管理员', phoneNormalized: '+8613600136000' }
 const student = { id: '10000000-0000-4000-8000-000000000002', displayName: '学员', phoneNormalized: '+8613900139000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
 const admitted = { ...student, id: '10000000-0000-4000-8000-000000000003', phoneNormalized: '+8613700137000' }
 
@@ -19,7 +21,7 @@ describe('resources and statistics PostgreSQL truth', () => {
   beforeAll(async () => { await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await runMigrations({ connect: () => database.pool.connect(), close: async () => undefined }) })
   beforeEach(async () => {
     await database.pool.query('TRUNCATE application_files, application_status_history, application_versions, applications, resources, files, registration_form_drafts, registration_form_versions, content_versions, content_modules, audit_logs, sessions, users CASCADE')
-    await database.db.insert(users).values([admin, student, admitted])
+    await database.db.insert(users).values([admin, student, admitted, secondAdmin])
   })
   afterAll(async () => { await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await database.close() })
 
@@ -42,14 +44,52 @@ describe('resources and statistics PostgreSQL truth', () => {
   it('keeps a resource private until an administrator explicitly publishes it', async () => {
     const [file] = await database.db.insert(files).values({ id: '20000000-0000-4000-8000-000000000010', storageKey: 'aa/bb/draft', originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 100, sha256: 'a'.repeat(64), uploadedBy: admin.id, ownerUserId: admin.id, purpose: 'resource', visibility: 'public' }).returning({ id: files.id })
     const repository = createResourceRepository(database.db)
-    const draft = await repository.createDraft({ key: 'guide', title: '报名指南', description: null, fileId: file!.id, accessScope: 'public', sortOrder: 0 }, admin.id)
-    expect(draft.active).toBe(false); expect(await repository.listAvailable()).toEqual([])
+    const draft = await repository.createDraft({ key: 'guide', title: '报名指南', description: null, fileId: file!.id, accessScope: 'public', sortOrder: 0 }, 0, admin.id)
+    expect(draft).toMatchObject({ active: false, revision: 0 }); expect(await repository.listAvailable()).toEqual([])
     const service = createResourceService(repository, { openPublishedResource: async () => ({ record: { id: file!.id }, stream: 'stream' }) } as never)
     await expect(service.open(draft.id, null)).rejects.toMatchObject({ code: 'RESOURCE_NOT_AVAILABLE' })
     await expect(service.open(draft.id, admin)).rejects.toMatchObject({ code: 'RESOURCE_NOT_AVAILABLE' })
     await expect(service.preview(draft.id, admin)).resolves.toMatchObject({ record: { id: file!.id }, isPublished: false, isAdminPreview: true })
-    await repository.setPublished(draft.id, true, admin.id)
+    await repository.setPublished(draft.id, true, draft.revision, admin.id)
     expect((await repository.listAvailable()).map((item) => item.key)).toEqual(['guide'])
+  })
+
+  it('allows only one administrator to win stale save, publish and unpublish mutations', async () => {
+    const [file] = await database.db.insert(files).values({ id: '20000000-0000-4000-8000-000000000011', storageKey: 'aa/bb/concurrent', originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 100, sha256: 'b'.repeat(64), uploadedBy: admin.id, ownerUserId: admin.id, purpose: 'resource', visibility: 'public' }).returning({ id: files.id })
+    const repository = createResourceRepository(database.db)
+    const draft = await repository.createDraft({ key: 'concurrent', title: '并发资料', description: null, fileId: file!.id, accessScope: 'public', sortOrder: 0 }, 0, admin.id)
+
+    const saves = await Promise.all([
+      repository.updateDraft(draft.id, { key: 'concurrent', title: '管理员甲修改', description: null, fileId: file!.id, accessScope: 'public', sortOrder: 1 }, draft.revision, admin.id),
+      repository.updateDraft(draft.id, { key: 'concurrent', title: '管理员乙修改', description: null, fileId: file!.id, accessScope: 'public', sortOrder: 2 }, draft.revision, secondAdmin.id),
+    ])
+    expect(saves.filter((result) => result.kind === 'updated')).toHaveLength(1)
+    expect(saves.filter((result) => result.kind === 'conflict')).toHaveLength(1)
+    const saved = saves.find((result) => result.kind === 'updated')
+    if (!saved || saved.kind !== 'updated') throw new Error('Expected one save winner')
+    expect(saved.resource.revision).toBe(1)
+
+    const publishes = await Promise.all([
+      repository.setPublished(draft.id, true, saved.resource.revision, admin.id),
+      repository.setPublished(draft.id, true, saved.resource.revision, secondAdmin.id),
+    ])
+    expect(publishes.filter((result) => result.kind === 'updated')).toHaveLength(1)
+    expect(publishes.filter((result) => result.kind === 'conflict')).toHaveLength(1)
+    const published = publishes.find((result) => result.kind === 'updated')
+    if (!published || published.kind !== 'updated') throw new Error('Expected one publish winner')
+    expect(published.resource).toMatchObject({ active: true, revision: 2 })
+
+    const unpublishes = await Promise.all([
+      repository.setPublished(draft.id, false, published.resource.revision, admin.id),
+      repository.setPublished(draft.id, false, published.resource.revision, secondAdmin.id),
+    ])
+    expect(unpublishes.filter((result) => result.kind === 'updated')).toHaveLength(1)
+    expect(unpublishes.filter((result) => result.kind === 'conflict')).toHaveLength(1)
+    const unpublished = unpublishes.find((result) => result.kind === 'updated')
+    if (!unpublished || unpublished.kind !== 'updated') throw new Error('Expected one unpublish winner')
+    expect(unpublished.resource).toMatchObject({ active: false, revision: 3 })
+    const audits = await database.db.select().from(auditLogs).where(eq(auditLogs.entityId, draft.id))
+    expect(audits.map((entry) => entry.action)).toEqual(['resource.draft_created', 'resource.draft_saved', 'resource.published', 'resource.unpublished'])
   })
 
   it('counts every submitted-or-later status, excludes drafts, and obeys the published switch without a side channel', async () => {
@@ -66,5 +106,43 @@ describe('resources and statistics PostgreSQL truth', () => {
     const [on] = await database.db.insert(contentVersions).values({ moduleKey: 'display', version: 2, payload: { showRegistrationCount: true }, createdBy: admin.id }).returning({ id: contentVersions.id })
     await database.db.update(contentModules).set({ publishedVersionId: on!.id }).where(eq(contentModules.key, 'display'))
     expect(await service.readPublic()).toEqual({ visible: true, submittedCount: 6, updatedAt: '2026-08-15T12:06:00.000Z' })
+  })
+
+  it('waits for a concurrent switch-off commit and then returns no count side channel', async () => {
+    await database.db.insert(contentModules).values({ key: 'display', draft: {}, draftRevision: 0 })
+    const versions = await database.db.insert(contentVersions).values([
+      { moduleKey: 'display', version: 1, payload: { showRegistrationCount: true }, createdBy: admin.id },
+      { moduleKey: 'display', version: 2, payload: { showRegistrationCount: false }, createdBy: admin.id },
+    ]).returning({ id: contentVersions.id, version: contentVersions.version })
+    const enabled = versions.find((version) => version.version === 1)!
+    const disabled = versions.find((version) => version.version === 2)!
+    await database.db.update(contentModules).set({ publishedVersionId: enabled.id }).where(eq(contentModules.key, 'display'))
+
+    const closing = await database.pool.connect()
+    await closing.query('begin')
+    await closing.query('select pg_advisory_xact_lock($1::bigint)', [applicationCountVisibilityLockKey])
+    await closing.query('update content_modules set published_version_id = $1 where key = $2', [disabled.id, 'display'])
+
+    let settled = false
+    const reading = createStatisticsService(createStatisticsRepository(database.db)).readPublic().finally(() => { settled = true })
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const blocked = await database.pool.query<{ blocked: boolean }>(`
+        select exists (
+          select 1 from pg_stat_activity
+          where datname = current_database()
+            and pid <> pg_backend_pid()
+            and wait_event_type = 'Lock'
+            and query like '%pg_advisory_xact_lock%'
+        ) as blocked
+      `)
+      if (blocked.rows[0]?.blocked) break
+      if (attempt === 99) throw new Error('Statistics query did not wait on the visibility lock')
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+    expect(settled).toBe(false)
+    await closing.query('commit')
+    closing.release()
+
+    await expect(reading).resolves.toEqual({ visible: false })
   })
 })

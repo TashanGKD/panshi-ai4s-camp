@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AdminApiError, type AdminClient, type AdminResource, type AdminResourceInput } from '../api/admin-client'
 
 const empty: AdminResourceInput = { key: '', title: '', description: null, fileId: '', accessScope: 'public', sortOrder: 0 }
@@ -10,8 +10,19 @@ export function ResourcesPage({ client }: { client: AdminClient }) {
   const [pending, setPending] = useState(false)
   const [previewing, setPreviewing] = useState<string | null>(null)
   const [message, setMessage] = useState('')
-  const load = useCallback(async () => { const response = await client.listResources(); setItems(response.data.resources) }, [client])
-  useEffect(() => { void load().catch(() => setMessage('资料列表加载失败')) }, [load])
+  const mounted = useRef(true)
+  const loadSequence = useRef(0)
+  const operationSequence = useRef(0)
+  const load = useCallback(async () => {
+    const sequence = ++loadSequence.current
+    const response = await client.listResources()
+    if (mounted.current && sequence === loadSequence.current) setItems(response.data.resources)
+  }, [client])
+  useEffect(() => {
+    mounted.current = true
+    void load().catch(() => { if (mounted.current) setMessage('资料列表加载失败') })
+    return () => { mounted.current = false; loadSequence.current += 1; operationSequence.current += 1 }
+  }, [load])
   const upload = async (file?: File) => {
     if (!file) return
     setPending(true); setMessage('')
@@ -19,14 +30,46 @@ export function ResourcesPage({ client }: { client: AdminClient }) {
     catch { setMessage('文件上传失败') } finally { setPending(false) }
   }
   const save = async () => {
+    if (pending) return
+    const sequence = ++operationSequence.current
     setPending(true); setMessage('')
     try {
-      if (editing) await client.updateResource(editing, form); else await client.createResource(form)
-      setEditing(null); setForm(empty); await load(); setMessage('资料草稿已保存，请确认后发布')
-    } catch (error) { setMessage(error instanceof Error ? error.message : '保存失败') } finally { setPending(false) }
+      const current = editing ? items.find((item) => item.id === editing) : null
+      if (editing && !current) throw new Error('资料已变化，请刷新后重试')
+      const response = editing
+        ? await client.updateResource(editing, form, current!.revision)
+        : await client.createResource(form, 0)
+      if (!mounted.current || sequence !== operationSequence.current) return
+      setItems((existing) => editing
+        ? existing.map((item) => item.id === response.data.resource.id ? response.data.resource : item)
+        : [...existing, response.data.resource].sort((left, right) => left.sortOrder - right.sortOrder))
+      setEditing(null); setForm(empty); setMessage('资料草稿已保存，请确认后发布')
+    } catch (error) {
+      if (!mounted.current || sequence !== operationSequence.current) return
+      if (error instanceof AdminApiError && error.code === 'RESOURCE_REVISION_CONFLICT') {
+        try { await load() } catch { /* Keep the conflict message even if refresh fails. */ }
+        if (mounted.current && sequence === operationSequence.current) setMessage('资料已被其他管理员修改，已刷新最新状态')
+      } else setMessage(error instanceof Error ? error.message : '保存失败')
+    } finally { if (mounted.current && sequence === operationSequence.current) setPending(false) }
   }
   const edit = (item: AdminResource) => { setEditing(item.id); setForm({ key: item.key, title: item.title, description: item.description, fileId: item.fileId, accessScope: item.accessScope, sortOrder: item.sortOrder }) }
-  const publish = async (item: AdminResource) => { setPending(true); try { await client.publishResource(item.id, !item.active); await load() } catch { setMessage('发布状态更新失败') } finally { setPending(false) } }
+  const publish = async (item: AdminResource) => {
+    if (pending) return
+    const sequence = ++operationSequence.current
+    setPending(true); setMessage('')
+    try {
+      const response = await client.publishResource(item.id, !item.active, item.revision)
+      if (!mounted.current || sequence !== operationSequence.current) return
+      setItems((existing) => existing.map((current) => current.id === response.data.resource.id ? response.data.resource : current))
+      setMessage(response.data.resource.active ? '资料已发布' : '资料已下线')
+    } catch (error) {
+      if (!mounted.current || sequence !== operationSequence.current) return
+      if (error instanceof AdminApiError && error.code === 'RESOURCE_REVISION_CONFLICT') {
+        try { await load() } catch { /* Keep the conflict message even if refresh fails. */ }
+        if (mounted.current && sequence === operationSequence.current) setMessage('资料已被其他管理员修改，已刷新最新状态')
+      } else setMessage('发布状态更新失败')
+    } finally { if (mounted.current && sequence === operationSequence.current) setPending(false) }
+  }
   const preview = async (item: AdminResource) => {
     setPreviewing(item.id); setMessage('正在准备预览')
     try {

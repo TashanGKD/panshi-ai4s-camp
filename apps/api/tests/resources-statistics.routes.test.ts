@@ -3,7 +3,7 @@ import request from 'supertest'
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { hashSessionToken } from '../src/modules/identity/session.service.js'
-import { ResourceAccessError, type ResourceService } from '../src/modules/resources/resource.service.js'
+import { ResourceAccessError, ResourceRevisionConflictError, type ResourceService } from '../src/modules/resources/resource.service.js'
 
 const user = { id: '10000000-0000-4000-8000-000000000001', displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
 const admitted = { ...user, id: '10000000-0000-4000-8000-000000000002', phoneNormalized: '+8613900139000' }
@@ -34,6 +34,14 @@ const service = {
 const makeApp = (visible = true) => createApp({
   checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined }, resourceService: service,
   statisticsService: { readPublic: async () => visible ? { visible: true, submittedCount: 7, updatedAt: '2026-08-15T12:00:00.000Z' } : { visible: false } },
+  config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 100_000 },
+})
+
+const makeAdminMutationApp = (overrides: Partial<ResourceService>) => createApp({
+  checkDatabase: async () => undefined,
+  identityRepository,
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  resourceService: { ...service, ...overrides } as ResourceService,
   config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 100_000 },
 })
 
@@ -74,5 +82,19 @@ describe('resource and statistics routes', () => {
   it('omits count and timestamp when the published switch is off', async () => {
     const response = await request(makeApp(false)).get('/api/v1/public/statistics/applications').expect(200)
     expect(response.body).toEqual({ apiVersion: 'v1', data: { visible: false } }); expect(response.text).not.toContain('count'); expect(response.text).not.toContain('updatedAt')
+  })
+
+  it('requires expected revisions and maps stale resource mutations to 409', async () => {
+    const stale = new ResourceRevisionConflictError()
+    const updateDraft = async () => { throw stale }
+    const setPublished = async () => { throw stale }
+    const app = makeAdminMutationApp({ updateDraft, setPublished } as Partial<ResourceService>)
+    const input = { key: 'draft', title: '更新', description: null, fileId: '30000000-0000-4000-8000-000000000003', accessScope: 'public', sortOrder: 0 }
+
+    await request(app).put(`/api/v1/admin/resources/${draftItem.id}`).set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send(input).expect(422)
+    const save = await request(app).put(`/api/v1/admin/resources/${draftItem.id}`).set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send({ ...input, expectedRevision: 0 }).expect(409)
+    expect(save.body.error.code).toBe('RESOURCE_REVISION_CONFLICT')
+    const publish = await request(app).post(`/api/v1/admin/resources/${draftItem.id}/publish`).set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=admin-token').send({ expectedRevision: 0 }).expect(409)
+    expect(publish.body.error.code).toBe('RESOURCE_REVISION_CONFLICT')
   })
 })

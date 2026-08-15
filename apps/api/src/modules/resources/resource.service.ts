@@ -6,6 +6,12 @@ export class ResourceAccessError extends Error {
   constructor(readonly status: 404, readonly code: 'RESOURCE_NOT_AVAILABLE', message = '资料不存在或不可访问') { super(message); this.name = 'ResourceAccessError' }
 }
 
+export class ResourceRevisionConflictError extends Error {
+  readonly status = 409
+  readonly code = 'RESOURCE_REVISION_CONFLICT'
+  constructor(message = '资料已被其他管理员修改，请刷新后重试') { super(message); this.name = 'ResourceRevisionConflictError' }
+}
+
 const available = () => new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
 
 export const createResourceService = (repository: ResourceRepository, files: Pick<FileService, 'openPublishedResource'>) => {
@@ -49,16 +55,22 @@ export const createResourceService = (repository: ResourceRepository, files: Pic
       } catch { throw available() }
     },
     listAdmin: () => repository.listAdmin(),
-    createDraft: (input: Omit<ResourceRecord, 'id'>, actorUserId: string) => repository.createDraft(input, actorUserId),
-    updateDraft: async (id: string, input: Omit<ResourceRecord, 'id'>, actorUserId: string) => {
-      const record = await repository.updateDraft(id, input, actorUserId)
-      if (!record) throw available()
-      return record
+    createDraft: async (input: Omit<ResourceRecord, 'id' | 'revision'>, expectedRevision: number, actorUserId: string) => {
+      if (expectedRevision !== 0) throw new ResourceRevisionConflictError()
+      try { return await repository.createDraft(input, expectedRevision, actorUserId) }
+      catch (error) { if (error instanceof Error && error.message === 'RESOURCE_REVISION_CONFLICT') throw new ResourceRevisionConflictError(); throw error }
     },
-    setPublished: async (id: string, active: boolean, actorUserId: string) => {
-      const record = await repository.setPublished(id, active, actorUserId)
-      if (!record) throw available()
-      return record
+    updateDraft: async (id: string, input: Omit<ResourceRecord, 'id' | 'revision'>, expectedRevision: number, actorUserId: string) => {
+      const result = await repository.updateDraft(id, input, expectedRevision, actorUserId)
+      if (result.kind === 'not_found') throw available()
+      if (result.kind === 'conflict') throw new ResourceRevisionConflictError()
+      return result.resource
+    },
+    setPublished: async (id: string, active: boolean, expectedRevision: number, actorUserId: string) => {
+      const result = await repository.setPublished(id, active, expectedRevision, actorUserId)
+      if (result.kind === 'not_found') throw available()
+      if (result.kind === 'conflict') throw new ResourceRevisionConflictError()
+      return result.resource
     },
   }
 }

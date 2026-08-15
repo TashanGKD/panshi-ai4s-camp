@@ -135,6 +135,7 @@ const expectedChecks = [
   { constraintName: 'registration_form_drafts_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'registration_form_versions_version_check', tokens: ['version', '> 0'] },
   { constraintName: 'resources_access_level_check', tokens: ['access_level', 'public', 'authenticated', 'admitted'] },
+  { constraintName: 'resources_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'resources_sort_order_check', tokens: ['sort_order', '>= 0'] },
   { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
   { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
@@ -642,6 +643,7 @@ describe('initial PostgreSQL schema', () => {
       '0014_private_review_history.sql',
       '0015_application_status_history_immutability.sql',
       '0016_resources_publication.sql',
+      '0017_resource_revision.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

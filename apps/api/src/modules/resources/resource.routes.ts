@@ -7,7 +7,7 @@ import { createRequireUser, type AuthenticatedLocals } from '../../middleware/re
 import { requireAdmin } from '../../middleware/require-admin.js'
 import { AuthenticationError, type AuthenticatedSessionUser, type SessionService } from '../identity/session.service.js'
 import { buildContentDisposition } from '../files/file-validation.js'
-import { ResourceAccessError, type ResourceService } from './resource.service.js'
+import { ResourceAccessError, ResourceRevisionConflictError, type ResourceService } from './resource.service.js'
 
 const Id = z.string().uuid()
 const resolveOptional = async (sessions: SessionService, cookies: unknown): Promise<AuthenticatedSessionUser | null> => {
@@ -16,7 +16,7 @@ const resolveOptional = async (sessions: SessionService, cookies: unknown): Prom
     throw error
   }
 }
-const mapError = (error: unknown) => error instanceof ResourceAccessError ? new HttpError(error.status, error.code, error.message) : error
+const mapError = (error: unknown) => error instanceof ResourceAccessError || error instanceof ResourceRevisionConflictError ? new HttpError(error.status, error.code, error.message) : error
 const privateNoStore = (response: Response) => {
   response.setHeader('Cache-Control', 'private, no-store')
   const setHeader = response.setHeader.bind(response)
@@ -67,6 +67,8 @@ const ResourceInput = z.object({
   fileId: z.string().uuid(), accessScope: z.enum(['public', 'authenticated', 'admitted']),
   sortOrder: z.number().int().min(0).max(10000),
 }).strict()
+const ExpectedRevision = z.object({ expectedRevision: z.number().int().min(0) }).strict()
+const ResourceMutationInput = ResourceInput.extend({ expectedRevision: z.number().int().min(0) }).strict()
 
 export const createAdminResourceRouter = (sessions: SessionService, service: ResourceService) => {
   const router = Router()
@@ -97,26 +99,30 @@ export const createAdminResourceRouter = (sessions: SessionService, service: Res
   router.get('/', async (_request, response, next) => { try { response.json({ apiVersion: 'v1', data: { resources: await service.listAdmin() } }) } catch (error) { next(mapError(error)) } })
   router.post('/', async (request, response, next) => {
     try {
-      const parsed = ResourceInput.safeParse(request.body)
+      const parsed = ResourceMutationInput.safeParse(request.body)
       if (!parsed.success) throw new HttpError(422, 'RESOURCE_VALIDATION_FAILED', '资料配置无效')
       const actor = (response.locals as AuthenticatedLocals).authenticatedUser
-      response.status(201).json({ apiVersion: 'v1', data: { resource: await service.createDraft(parsed.data, actor.id) } })
+      const { expectedRevision, ...input } = parsed.data
+      response.status(201).json({ apiVersion: 'v1', data: { resource: await service.createDraft(input, expectedRevision, actor.id) } })
     } catch (error) { next(mapError(error)) }
   })
   router.put('/:id', async (request, response, next) => {
     try {
-      const id = Id.safeParse(request.params.id); const input = ResourceInput.safeParse(request.body)
+      const id = Id.safeParse(request.params.id); const input = ResourceMutationInput.safeParse(request.body)
       if (!id.success || !input.success) throw new HttpError(422, 'RESOURCE_VALIDATION_FAILED', '资料配置无效')
       const actor = (response.locals as AuthenticatedLocals).authenticatedUser
-      response.json({ apiVersion: 'v1', data: { resource: await service.updateDraft(id.data, input.data, actor.id) } })
+      const { expectedRevision, ...resourceInput } = input.data
+      response.json({ apiVersion: 'v1', data: { resource: await service.updateDraft(id.data, resourceInput, expectedRevision, actor.id) } })
     } catch (error) { next(mapError(error)) }
   })
   router.post('/:id/:action', async (request, response, next) => {
     try {
       const id = Id.safeParse(request.params.id)
+      const input = ExpectedRevision.safeParse(request.body)
       if (!id.success || !['publish', 'unpublish'].includes(request.params.action ?? '')) throw new HttpError(404, 'RESOURCE_NOT_AVAILABLE', '资料不存在或不可访问')
+      if (!input.success) throw new HttpError(422, 'RESOURCE_VALIDATION_FAILED', '资料配置无效')
       const actor = (response.locals as AuthenticatedLocals).authenticatedUser
-      response.json({ apiVersion: 'v1', data: { resource: await service.setPublished(id.data, request.params.action === 'publish', actor.id) } })
+      response.json({ apiVersion: 'v1', data: { resource: await service.setPublished(id.data, request.params.action === 'publish', input.data.expectedRevision, actor.id) } })
     } catch (error) { next(mapError(error)) }
   })
   return router

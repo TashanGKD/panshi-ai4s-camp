@@ -88,13 +88,13 @@ export type AdminClient = {
   listResources: () => Promise<{ data: { resources: AdminResource[] } }>
   previewResource: (id: string) => Promise<{ blob: Blob, filename: string }>
   uploadResourceFile: (file: File, accessScope: AdminResource['accessScope']) => Promise<{ data: { file: { id: string } } }>
-  createResource: (input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
-  updateResource: (id: string, input: AdminResourceInput) => Promise<{ data: { resource: AdminResource } }>
-  publishResource: (id: string, active: boolean) => Promise<{ data: { resource: AdminResource } }>
+  createResource: (input: AdminResourceInput, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
+  updateResource: (id: string, input: AdminResourceInput, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
+  publishResource: (id: string, active: boolean, expectedRevision: number) => Promise<{ data: { resource: AdminResource } }>
 }
 
-export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean }
-export type AdminResourceInput = Omit<AdminResource, 'id' | 'active'>
+export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean, revision: number }
+export type AdminResourceInput = Omit<AdminResource, 'id' | 'active' | 'revision'>
 
 export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
 export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, string | string[]>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null, changedBy: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
@@ -162,9 +162,9 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
       const body = new FormData(); body.append('file', file); body.append('purpose', 'resource'); body.append('visibility', accessScope)
       return (await send('/api/v1/files', { method: 'POST', body })).json()
     },
-    createResource: async (input) => (await send('/api/v1/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
-    updateResource: async (id, input) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
-    publishResource: async (id, active) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}/${active ? 'publish' : 'unpublish'}`, { method: 'POST' })).json(),
+    createResource: async (input, expectedRevision) => (await send('/api/v1/admin/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, expectedRevision }) })).json(),
+    updateResource: async (id, input, expectedRevision) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, expectedRevision }) })).json(),
+    publishResource: async (id, active, expectedRevision) => (await send(`/api/v1/admin/resources/${encodeURIComponent(id)}/${active ? 'publish' : 'unpublish'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }) })).json(),
   }
 }
 

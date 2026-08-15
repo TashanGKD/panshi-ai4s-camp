@@ -5,6 +5,7 @@ import { auditLogs, contentModules, contentVersions, resources, users } from '..
 import { createContentPublishingRepository } from '../src/modules/content/content.repository.js'
 import { createContentPublishingService, ContentConflictError } from '../src/modules/content/publish.service.js'
 import { ContentValidationError } from '../src/modules/content/content.validators.js'
+import { applicationCountVisibilityLockKey } from '../src/db/application-count-lock.js'
 
 const requiredUrl = 'postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test'
 if (process.env.TEST_DATABASE_URL !== requiredUrl) {
@@ -58,6 +59,7 @@ describe('content publishing PostgreSQL transactions', () => {
       { key: 'importantDates', draft: {}, draftRevision: 0 },
       { key: 'schedule', draft: {}, draftRevision: 0 },
       { key: 'contacts', draft: {}, draftRevision: 0 },
+      { key: 'display', draft: {}, draftRevision: 0 },
     ])
   })
 
@@ -132,6 +134,37 @@ describe('content publishing PostgreSQL transactions', () => {
     const history = await service.getHistory('basic')
     expect(history.data.versions.map(({ version }) => version)).toEqual([2, 1])
     expect(history.data.publishedVersion).toBe(2)
+  })
+
+  it('keeps display publication revision checks while serializing the public count switch', async () => {
+    const display = { series: '磐石科学智能实训营', footer: '实训营', showRegistrationCount: false }
+    const saved = await service.saveDraft('display', display, 0, adminA)
+    const blocker = await database.pool.connect()
+    await blocker.query('begin')
+    await blocker.query('select pg_advisory_xact_lock($1::bigint)', [applicationCountVisibilityLockKey])
+
+    let settled = false
+    const publishing = service.publish('display', saved.data.revision, adminA).finally(() => { settled = true })
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const waiting = await database.pool.query<{ blocked: boolean }>(`
+        select exists (
+          select 1 from pg_stat_activity
+          where datname = current_database()
+            and pid <> pg_backend_pid()
+            and wait_event_type = 'Lock'
+            and query like '%pg_advisory_xact_lock%'
+        ) as blocked
+      `)
+      if (waiting.rows[0]?.blocked) break
+      if (attempt === 99) throw new Error('Display publication did not wait on the visibility lock')
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+    expect(settled).toBe(false)
+    await blocker.query('commit')
+    blocker.release()
+
+    await expect(publishing).resolves.toMatchObject({ data: { revision: saved.data.revision, version: 1 } })
+    await expect(service.publish('display', saved.data.revision - 1, adminB)).rejects.toBeInstanceOf(ContentConflictError)
   })
 
   it('keeps historical rows immutable and rollback creates a new copied version', async () => {

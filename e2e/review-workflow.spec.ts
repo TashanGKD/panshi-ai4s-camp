@@ -138,9 +138,10 @@ test('review workflow enforces state, privacy, bulk, export and revision contrac
   const resourceUpload = await adminContext.request.post(`${apiBase}/api/v1/files`, { headers: { Origin: adminOrigin }, multipart: { purpose: 'resource', visibility: 'admitted', file: { name: '录取学员指南.pdf', mimeType: 'application/pdf', buffer: pdf } } })
   privateResponse(resourceUpload); expect(resourceUpload.status()).toBe(201)
   const resourceFileId = (await resourceUpload.json()).data.file.id
-  const resourceDraftResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources`, { headers: { Origin: adminOrigin }, data: { key: 'admitted-guide', title: '录取学员指南', description: '仅向已录取学员开放', fileId: resourceFileId, accessScope: 'admitted', sortOrder: 0 } })
+  const resourceDraftResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources`, { headers: { Origin: adminOrigin }, data: { key: 'admitted-guide', title: '录取学员指南', description: '仅向已录取学员开放', fileId: resourceFileId, accessScope: 'admitted', sortOrder: 0, expectedRevision: 0 } })
   privateResponse(resourceDraftResponse); expect(resourceDraftResponse.status()).toBe(201)
-  const resourceId = (await resourceDraftResponse.json()).data.resource.id
+  const resourceDraft = (await resourceDraftResponse.json()).data.resource
+  const resourceId = resourceDraft.id
   const unpublishedStudentDownload = await studentContext.request.get(`${apiBase}/api/v1/resources/${resourceId}/download`)
   privateResponse(unpublishedStudentDownload); expect(unpublishedStudentDownload.status()).toBe(404)
   const adminPreviewResponse = await adminContext.request.get(`${apiBase}/api/v1/admin/resources/${resourceId}/preview`)
@@ -152,7 +153,7 @@ test('review workflow enforces state, privacy, bulk, export and revision contrac
   await admin.getByRole('button', { name: '预览文件' }).click()
   await expect(admin.getByRole('status')).toContainText('已打开预览')
 
-  const resourcePublishResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources/${resourceId}/publish`, { headers: { Origin: adminOrigin } })
+  const resourcePublishResponse = await adminContext.request.post(`${apiBase}/api/v1/admin/resources/${resourceId}/publish`, { headers: { Origin: adminOrigin }, data: { expectedRevision: resourceDraft.revision } })
   privateResponse(resourcePublishResponse); expect(resourcePublishResponse.ok()).toBe(true)
 
   await student.goto('http://127.0.0.1:4194/resources')

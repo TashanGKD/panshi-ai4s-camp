@@ -275,6 +275,7 @@ export const resources = pgTable('resources', {
   fileId: uuid('file_id').references(() => files.id, { onDelete: 'restrict' }),
   accessLevel: text('access_level').$type<ResourceAccess>().notNull().default('public'),
   sortOrder: integer('sort_order').notNull().default(0),
+  revision: integer('revision').notNull().default(0),
   active: boolean('active').notNull().default(true),
   publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -282,6 +283,7 @@ export const resources = pgTable('resources', {
 }, (table) => [
   check('resources_access_level_check', sql`${table.accessLevel} in ('public', 'authenticated', 'admitted')`),
   check('resources_sort_order_check', sql`${table.sortOrder} >= 0`),
+  check('resources_revision_check', sql`${table.revision} >= 0`),
   index('resources_access_level_sort_order_idx').on(table.accessLevel, table.sortOrder),
   index('resources_active_scope_sort_idx').on(table.active, table.accessLevel, table.sortOrder, table.id),
 ])

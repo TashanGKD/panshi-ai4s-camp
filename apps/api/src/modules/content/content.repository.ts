@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { auditLogs, contentModules, contentVersions } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
+import { lockApplicationCountVisibility } from '../../db/application-count-lock.js'
 import { validateContentForPublication, type ContentValidationRepository } from './content.validators.js'
 
 export type PublishedContentRecord = {
@@ -146,6 +147,7 @@ export const createContentPublishingRepository = (
 
     publishDraft: async ({ key, expectedRevision, actorUserId }) => db.transaction(async (transaction) => {
       const executor = transaction as NodePgDatabase<typeof schema>
+      if (key === 'display') await lockApplicationCountVisibility(executor)
       const module = await lockModule(executor, key)
       if (!module) return null
       if (module.revision !== expectedRevision) return null
@@ -189,6 +191,7 @@ export const createContentPublishingRepository = (
 
     rollback: async ({ key, sourceVersion, actorUserId }) => db.transaction(async (transaction) => {
       const executor = transaction as NodePgDatabase<typeof schema>
+      if (key === 'display') await lockApplicationCountVisibility(executor)
       const module = await lockModule(executor, key)
       if (!module) return null
       const [source] = await transaction.select({ payload: contentVersions.payload }).from(contentVersions).where(and(

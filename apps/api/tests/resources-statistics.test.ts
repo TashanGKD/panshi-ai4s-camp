@@ -5,9 +5,9 @@ import type { ResourceRepository } from '../src/modules/resources/resource.repos
 
 describe('resource access', () => {
   const records = [
-    { id: '10000000-0000-4000-8000-000000000001', key: 'public', title: '公开资料', description: null, fileId: '20000000-0000-4000-8000-000000000001', accessScope: 'public' as const, sortOrder: 0 },
-    { id: '10000000-0000-4000-8000-000000000002', key: 'auth', title: '学员资料', description: '登录后查看', fileId: '20000000-0000-4000-8000-000000000002', accessScope: 'authenticated' as const, sortOrder: 1 },
-    { id: '10000000-0000-4000-8000-000000000003', key: 'admitted', title: '录取资料', description: null, fileId: '20000000-0000-4000-8000-000000000003', accessScope: 'admitted' as const, sortOrder: 2 },
+    { id: '10000000-0000-4000-8000-000000000001', key: 'public', title: '公开资料', description: null, fileId: '20000000-0000-4000-8000-000000000001', accessScope: 'public' as const, sortOrder: 0, revision: 0 },
+    { id: '10000000-0000-4000-8000-000000000002', key: 'auth', title: '学员资料', description: '登录后查看', fileId: '20000000-0000-4000-8000-000000000002', accessScope: 'authenticated' as const, sortOrder: 1, revision: 0 },
+    { id: '10000000-0000-4000-8000-000000000003', key: 'admitted', title: '录取资料', description: null, fileId: '20000000-0000-4000-8000-000000000003', accessScope: 'admitted' as const, sortOrder: 2, revision: 0 },
   ]
 
   it('returns only public metadata to anonymous visitors', async () => {
@@ -55,13 +55,13 @@ describe('resource access', () => {
 
 describe('submitted application statistics', () => {
   it('returns no count side channel while the published display switch is off', async () => {
-    const repository = { readPublishedVisibility: vi.fn().mockResolvedValue(false), countSubmitted: vi.fn() }
+    const repository = { readPublicCount: vi.fn().mockResolvedValue({ visible: false as const }) }
     expect(await createStatisticsService(repository).readPublic()).toEqual({ visible: false })
-    expect(repository.countSubmitted).not.toHaveBeenCalled()
+    expect(repository.readPublicCount).toHaveBeenCalledOnce()
   })
 
   it('returns the real count and ISO update time while enabled', async () => {
-    const repository = { readPublishedVisibility: vi.fn().mockResolvedValue(true), countSubmitted: vi.fn().mockResolvedValue({ count: 6, updatedAt: new Date('2026-08-15T12:00:00.000Z') }) }
+    const repository = { readPublicCount: vi.fn().mockResolvedValue({ visible: true as const, count: 6, updatedAt: new Date('2026-08-15T12:00:00.000Z') }) }
     expect(await createStatisticsService(repository).readPublic()).toEqual({ visible: true, submittedCount: 6, updatedAt: '2026-08-15T12:00:00.000Z' })
   })
 })

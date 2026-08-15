@@ -112,6 +112,29 @@ describe('administrator API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/summary', expect.objectContaining({ credentials: 'same-origin' }))
   })
 
+  it('sends the exact resource revision with create, save, publish and unpublish', async () => {
+    const resource = { id: '20000000-0000-4000-8000-000000000001', key: 'guide', title: '指南', description: null, fileId: '30000000-0000-4000-8000-000000000001', accessScope: 'public' as const, sortOrder: 0, active: false, revision: 0 }
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      void args
+      return new Response(JSON.stringify({ data: { resource } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createAdminClient(undefined, { production: true })
+    const input = { key: resource.key, title: resource.title, description: resource.description, fileId: resource.fileId, accessScope: resource.accessScope, sortOrder: resource.sortOrder }
+
+    await client.createResource(input, 0)
+    await client.updateResource(resource.id, input, 3)
+    await client.publishResource(resource.id, true, 4)
+    await client.publishResource(resource.id, false, 5)
+
+    expect(fetchMock.mock.calls.map(([, init]) => init?.body)).toEqual([
+      JSON.stringify({ ...input, expectedRevision: 0 }),
+      JSON.stringify({ ...input, expectedRevision: 3 }),
+      JSON.stringify({ expectedRevision: 4 }),
+      JSON.stringify({ expectedRevision: 5 }),
+    ])
+  })
+
   it('preserves stable conflict and field validation details', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       error: {

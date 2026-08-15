@@ -24,46 +24,27 @@ require_maintenance() {
   set -e
   case "$curl_status" in
     0) die 'API health URL is reachable; stop frontend and API before continuing' ;;
-    6|7|28) ;;
+    6|7) ;;
     *) die 'API health URL verification failed without proving the API is unreachable' ;;
   esac
 }
 
-OPERATIONS_LOCK_KIND=
-OPERATIONS_LOCK_DIR=
+OPERATIONS_LOCK_ACQUIRED=false
 acquire_operations_lock() {
   local backup_root="$1"
-  if [[ "${OPERATIONS_FORCE_PORTABLE_LOCK:-}" != 1 ]] && command -v flock >/dev/null 2>&1; then
-    exec 9>"$backup_root/.panshi-operations.lock"
-    chmod 600 "$backup_root/.panshi-operations.lock"
-    flock -n 9 || die 'another backup or restore operation holds the shared lock'
-    OPERATIONS_LOCK_KIND=flock
-    return
-  fi
-
-  OPERATIONS_LOCK_DIR="$backup_root/.panshi-operations.lock.d"
-  if ! mkdir -m 700 "$OPERATIONS_LOCK_DIR" 2>/dev/null; then
-    die 'another backup or restore operation holds the shared lock'
-  fi
-  printf '%s\n' "$$" > "$OPERATIONS_LOCK_DIR/pid"
-  chmod 600 "$OPERATIONS_LOCK_DIR/pid"
-  OPERATIONS_LOCK_KIND=portable
+  command -v flock >/dev/null 2>&1 || die 'flock is required for backup and restore locking'
+  exec 9>"$backup_root/.panshi-operations.lock"
+  chmod 600 "$backup_root/.panshi-operations.lock"
+  flock -n 9 || die 'another backup or restore operation holds the shared lock'
+  OPERATIONS_LOCK_ACQUIRED=true
 }
 
 release_operations_lock() {
-  case "$OPERATIONS_LOCK_KIND" in
-    flock)
-      flock -u 9 >/dev/null 2>&1 || true
-      exec 9>&-
-      ;;
-    portable)
-      if [[ -d "$OPERATIONS_LOCK_DIR" && ! -L "$OPERATIONS_LOCK_DIR" ]]; then
-        find "$OPERATIONS_LOCK_DIR" -depth -mindepth 1 -delete >/dev/null 2>&1 || true
-        rmdir "$OPERATIONS_LOCK_DIR" >/dev/null 2>&1 || true
-      fi
-      ;;
-  esac
-  OPERATIONS_LOCK_KIND=
+  if [[ "$OPERATIONS_LOCK_ACQUIRED" == true ]]; then
+    flock -u 9 >/dev/null 2>&1 || true
+    exec 9>&-
+    OPERATIONS_LOCK_ACQUIRED=false
+  fi
 }
 
 validate_archive_metadata() {

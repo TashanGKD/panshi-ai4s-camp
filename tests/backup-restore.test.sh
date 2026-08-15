@@ -5,6 +5,7 @@ export COPYFILE_DISABLE=1
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BACKUP_SCRIPT="$PROJECT_ROOT/deploy/backup.sh"
 RESTORE_SCRIPT="$PROJECT_ROOT/deploy/restore.sh"
+OPERATIONS_COMMON="$PROJECT_ROOT/deploy/operations-common.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -43,6 +44,11 @@ assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_PGPASSFILE'
 assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_UPLOAD_DIR'
 assert_file_contains "$RESTORE_SCRIPT" 'MAINTENANCE_ACK'
 assert_file_contains "$RESTORE_SCRIPT" 'RESTORE_MIN_FREE_BYTES'
+assert_file_contains "$OPERATIONS_COMMON" "6\|7\)"
+assert_file_contains "$OPERATIONS_COMMON" "flock is required"
+if grep -Eq 'OPERATIONS_FORCE_PORTABLE_LOCK|panshi-operations\.lock\.d' "$OPERATIONS_COMMON"; then
+  fail 'operations lock contains an unsafe portable fallback'
+fi
 
 for command in initdb pg_ctl createdb dropdb psql pg_dump pg_restore; do
   if ! command -v "$command" >/dev/null 2>&1; then
@@ -69,6 +75,7 @@ PGPASSFILE="$TEST_ROOT/panshi_task18.pgpass"
 REAL_PG_DUMP="$(command -v pg_dump)"
 REAL_PG_RESTORE="$(command -v pg_restore)"
 PG_DUMP_WRAPPER_DIR="$TEST_ROOT/panshi_task18_bin"
+FLOCK_WRAPPER_DIR="$TEST_ROOT/panshi_task18_flock_bin"
 SERVER_STARTED=false
 HEALTH_SERVER_PID=
 
@@ -92,13 +99,28 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$PGSOCKET" "$BACKUP_ROOT" "$SOURCE_UPLOADS/nested" "$DATA_ROOT/uploads" "$OUTSIDE_ROOT" "$PG_DUMP_WRAPPER_DIR"
+mkdir -p "$PGSOCKET" "$BACKUP_ROOT" "$SOURCE_UPLOADS/nested" "$DATA_ROOT/uploads" "$OUTSIDE_ROOT" "$PG_DUMP_WRAPPER_DIR" "$FLOCK_WRAPPER_DIR"
 RESTORE_UPLOADS="$DATA_ROOT/uploads"
 TEST_DATABASE_SECRET='panshi-task18-secret-password'
 printf '127.0.0.1:%s:*:%s:%s\n' "$PGPORT" "$PGUSER" "$TEST_DATABASE_SECRET" > "$PGPASSFILE"
 chmod 600 "$PGPASSFILE"
 ln -s "$PROJECT_ROOT/tests/helpers/pg_dump-delay-wrapper.sh" "$PG_DUMP_WRAPPER_DIR/pg_dump"
 ln -s "$PROJECT_ROOT/tests/helpers/pg_restore-argv-wrapper.sh" "$PG_DUMP_WRAPPER_DIR/pg_restore"
+ln -s "$PROJECT_ROOT/tests/helpers/flock-compat.py" "$FLOCK_WRAPPER_DIR/flock"
+export PATH="$FLOCK_WRAPPER_DIR:$PATH"
+
+NO_FLOCK_BIN="$TEST_ROOT/panshi_task18_no_flock_bin"
+mkdir "$NO_FLOCK_BIN"
+ln -s "$(command -v bash)" "$NO_FLOCK_BIN/bash"
+NO_FLOCK_OUTPUT="$TEST_ROOT/panshi_task18_no_flock_output"
+if env PATH="$NO_FLOCK_BIN" bash -c '
+  die() { printf "%s\n" "$*" >&2; exit 1; }
+  source "$1"
+  acquire_operations_lock "$2"
+' bash "$OPERATIONS_COMMON" "$BACKUP_ROOT" >"$NO_FLOCK_OUTPUT" 2>&1; then
+  fail 'operations lock succeeded without flock'
+fi
+grep -Fq 'flock is required' "$NO_FLOCK_OUTPUT" || fail 'missing flock did not produce a clear failure'
 initdb -D "$PGDATA" -A trust -U "$PGUSER" --no-locale >/dev/null
 pg_ctl -D "$PGDATA" -l "$TEST_ROOT/panshi_task18_postgres.log" -o "-F -h 127.0.0.1 -k $PGSOCKET -p $PGPORT" -w start >/dev/null
 SERVER_STARTED=true
@@ -202,6 +224,34 @@ if env \
   fail 'backup accepted a reachable API during maintenance'
 fi
 [[ ! -e "$REACHABLE_CALLED" ]] || fail 'backup checked API reachability after pg_dump'
+kill "$HEALTH_SERVER_PID"
+wait "$HEALTH_SERVER_PID" >/dev/null 2>&1 || true
+HEALTH_SERVER_PID=
+
+# Rejection: a TCP listener that accepts but never answers is not proof of maintenance.
+node -e 'require("node:net").createServer(()=>{}).listen(Number(process.argv[1]), "127.0.0.1")' "$HEALTH_PORT" &
+HEALTH_SERVER_PID=$!
+health_deadline=$((SECONDS + 5))
+until node -e '
+  const socket=require("node:net").connect(Number(process.argv[1]), "127.0.0.1");
+  socket.on("connect",()=>{ socket.destroy(); process.exit(0) });
+  socket.on("error",()=>process.exit(1));
+  setTimeout(()=>process.exit(1), 200);
+' "$HEALTH_PORT"; do
+  (( SECONDS < health_deadline )) || fail 'hung maintenance fixture did not start'
+  sleep 0.05
+done
+HUNG_BACKUP_CALLED="$TEST_ROOT/panshi_task18_hung_backup_called"
+if env \
+  "${BACKUP_ENV[@]}" \
+  MAINTENANCE_API_HEALTH_URL="http://127.0.0.1:$HEALTH_PORT/healthz" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_DUMP=/usr/bin/false \
+  PANSHI_PG_DUMP_CALLED_FILE="$HUNG_BACKUP_CALLED" \
+  "$BACKUP_SCRIPT" >/dev/null 2>&1; then
+  fail 'backup accepted a timed-out maintenance health check'
+fi
+[[ ! -e "$HUNG_BACKUP_CALLED" ]] || fail 'timed-out backup maintenance check reached pg_dump'
 kill "$HEALTH_SERVER_PID"
 wait "$HEALTH_SERVER_PID" >/dev/null 2>&1 || true
 HEALTH_SERVER_PID=
@@ -318,6 +368,30 @@ done
 [[ -L "$BACKUP_ROOT/panshi-backup-20000101T000000Z-symlink" ]] || fail 'retention followed or deleted a symlink'
 [[ -d "$OUTSIDE_ROOT" ]] || fail 'retention escaped the backup root'
 
+# Rejection: restore also rejects a health check that connects but times out.
+node -e 'require("node:net").createServer(()=>{}).listen(Number(process.argv[1]), "127.0.0.1")' "$HEALTH_PORT" &
+HEALTH_SERVER_PID=$!
+sleep 0.1
+HUNG_RESTORE_UPLOADS="$DATA_ROOT/hung-restore-uploads"
+mkdir "$HUNG_RESTORE_UPLOADS"
+printf unchanged > "$HUNG_RESTORE_UPLOADS/sentinel.txt"
+HUNG_RESTORE_CALLED="$TEST_ROOT/panshi_task18_hung_restore_called"
+if env \
+  "${RESTORE_ENV[@]}" \
+  RESTORE_UPLOAD_DIR="$HUNG_RESTORE_UPLOADS" \
+  MAINTENANCE_API_HEALTH_URL="http://127.0.0.1:$HEALTH_PORT/healthz" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_RESTORE=/usr/bin/true \
+  PANSHI_PG_RESTORE_CALLED_FILE="$HUNG_RESTORE_CALLED" \
+  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
+  fail 'restore accepted a timed-out maintenance health check'
+fi
+[[ ! -e "$HUNG_RESTORE_CALLED" ]] || fail 'timed-out restore maintenance check reached pg_restore'
+[[ "$(<"$HUNG_RESTORE_UPLOADS/sentinel.txt")" == unchanged ]] || fail 'timed-out restore mutated uploads'
+kill "$HEALTH_SERVER_PID"
+wait "$HEALTH_SERVER_PID" >/dev/null 2>&1 || true
+HEALTH_SERVER_PID=
+
 # Rejection: restore acknowledgement is exact and binds backup ID plus target database.
 WRONG_RESTORE_UPLOADS="$DATA_ROOT/wrong-ack-uploads"
 mkdir "$WRONG_RESTORE_UPLOADS"
@@ -336,13 +410,12 @@ fi
 [[ ! -e "$WRONG_RESTORE_CALLED" ]] || fail 'restore checked target-bound maintenance after pg_restore'
 [[ "$(<"$WRONG_RESTORE_UPLOADS/sentinel.txt")" == unchanged ]] || fail 'wrong restore acknowledgement mutated uploads'
 
-# Rejection: backup and restore share one exclusive lock on BACKUP_ROOT.
+# Rejection: backup and restore share one exclusive flock on BACKUP_ROOT.
 LOCK_READY="$TEST_ROOT/panshi_task18_lock_ready"
 LOCK_CONTINUE="$TEST_ROOT/panshi_task18_lock_continue"
 env \
   "${BACKUP_ENV[@]}" \
   BACKUP_APP_VERSION=lock-holder \
-  OPERATIONS_FORCE_PORTABLE_LOCK=1 \
   PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
   PANSHI_REAL_PG_DUMP="$REAL_PG_DUMP" \
   PANSHI_PG_DUMP_READY_FILE="$LOCK_READY" \
@@ -354,11 +427,10 @@ while [[ ! -f "$LOCK_READY" ]]; do
   (( SECONDS < lock_deadline )) || fail 'lock holder did not reach pg_dump'
   sleep 0.05
 done
-[[ -d "$BACKUP_ROOT/.panshi-operations.lock.d" ]] || fail 'portable shared lock was not acquired'
+[[ -f "$BACKUP_ROOT/.panshi-operations.lock" ]] || fail 'shared flock file was not created'
 LOCKED_RESTORE_CALLED="$TEST_ROOT/panshi_task18_locked_restore_called"
 if env \
   "${RESTORE_ENV[@]}" \
-  OPERATIONS_FORCE_PORTABLE_LOCK=1 \
   RESTORE_UPLOAD_DIR="$WRONG_RESTORE_UPLOADS" \
   PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
   PANSHI_REAL_PG_RESTORE=/usr/bin/true \
@@ -370,7 +442,45 @@ fi
 kill -TERM "$lock_pid"
 : > "$LOCK_CONTINUE"
 wait "$lock_pid" >/dev/null 2>&1 || true
-[[ ! -e "$BACKUP_ROOT/.panshi-operations.lock.d" ]] || fail 'shared lock was not released after signal'
+env "${BACKUP_ENV[@]}" BACKUP_APP_VERSION=lock-reacquire "$BACKUP_SCRIPT" >/dev/null \
+  || fail 'shared flock could not be reacquired after signal termination'
+
+# Rejection: one restore excludes a second restore for the full operation.
+RESTORE_LOCK_ONE="$DATA_ROOT/restore-lock-one"
+RESTORE_LOCK_TWO="$DATA_ROOT/restore-lock-two"
+mkdir "$RESTORE_LOCK_ONE" "$RESTORE_LOCK_TWO"
+printf first > "$RESTORE_LOCK_ONE/sentinel.txt"
+printf second > "$RESTORE_LOCK_TWO/sentinel.txt"
+RESTORE_LOCK_READY="$TEST_ROOT/panshi_task18_restore_lock_ready"
+RESTORE_LOCK_CONTINUE="$TEST_ROOT/panshi_task18_restore_lock_continue"
+env \
+  "${RESTORE_ENV[@]}" \
+  RESTORE_UPLOAD_DIR="$RESTORE_LOCK_ONE" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_RESTORE=/usr/bin/true \
+  PANSHI_PG_RESTORE_READY_FILE="$RESTORE_LOCK_READY" \
+  PANSHI_PG_RESTORE_CONTINUE_FILE="$RESTORE_LOCK_CONTINUE" \
+  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1 &
+restore_lock_pid=$!
+restore_lock_deadline=$((SECONDS + 5))
+while [[ ! -f "$RESTORE_LOCK_READY" ]]; do
+  (( SECONDS < restore_lock_deadline )) || fail 'restore lock holder did not reach pg_restore'
+  sleep 0.05
+done
+SECOND_RESTORE_CALLED="$TEST_ROOT/panshi_task18_second_restore_called"
+if env \
+  "${RESTORE_ENV[@]}" \
+  RESTORE_UPLOAD_DIR="$RESTORE_LOCK_TWO" \
+  PATH="$PG_DUMP_WRAPPER_DIR:$PATH" \
+  PANSHI_REAL_PG_RESTORE=/usr/bin/true \
+  PANSHI_PG_RESTORE_CALLED_FILE="$SECOND_RESTORE_CALLED" \
+  "$RESTORE_SCRIPT" --yes "$BACKUP_ID" >/dev/null 2>&1; then
+  fail 'second restore acquired the shared flock'
+fi
+[[ ! -e "$SECOND_RESTORE_CALLED" ]] || fail 'second restore reached pg_restore while first restore held flock'
+[[ "$(<"$RESTORE_LOCK_TWO/sentinel.txt")" == second ]] || fail 'locked second restore mutated uploads'
+: > "$RESTORE_LOCK_CONTINUE"
+wait "$restore_lock_pid" || fail 'first restore failed after releasing test delay'
 
 # A direct, complete, hash-valid expired backup is the only retention deletion target.
 VALID_EXPIRED="$BACKUP_ROOT/panshi-backup-20000101T000000Z-valid"

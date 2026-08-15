@@ -130,6 +130,7 @@ const webDockerfile = await readProjectFile('apps/web/Dockerfile')
 const adminDockerfile = await readProjectFile('apps/admin/Dockerfile')
 const apiDockerfile = await readProjectFile('apps/api/Dockerfile')
 const operationsDockerfile = await readProjectFile('deploy/Dockerfile.operations')
+const operationsCommon = await readProjectFile('deploy/operations-common.sh')
 for (const [path, dockerfile] of Object.entries({
   'apps/web/Dockerfile': webDockerfile,
   'apps/admin/Dockerfile': adminDockerfile,
@@ -140,6 +141,11 @@ for (const [path, dockerfile] of Object.entries({
 }
 assert.match(operationsDockerfile, /^FROM postgres:16\.12-alpine3\.23$/mu)
 for (const tool of ['bash', 'coreutils', 'curl', 'findutils', 'python3', 'tar', 'util-linux']) assert.match(operationsDockerfile, new RegExp(`\\b${tool}\\b`, 'u'))
+assert.match(operationsCommon, /command -v flock[^\n]+flock is required/u)
+assert.match(operationsCommon, /flock -n 9/u)
+assert.doesNotMatch(operationsCommon, /OPERATIONS_FORCE_PORTABLE_LOCK|panshi-operations\.lock\.d/u)
+assert.match(operationsCommon, /6\|7\) ;;/u)
+assert.doesNotMatch(operationsCommon, /6\|7\|28/u)
 assert.match(webDockerfile, /^FROM nginxinc\/nginx-unprivileged:1\.29\.4-alpine3\.23 AS production$/mu)
 assert.match(adminDockerfile, /^FROM scratch AS artifact$/mu)
 assert.match(adminDockerfile, /COPY --from=admin-build \/app\/apps\/admin\/dist \/admin/u)

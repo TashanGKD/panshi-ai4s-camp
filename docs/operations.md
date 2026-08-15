@@ -117,9 +117,9 @@ The named volumes separately hold PostgreSQL data, API-managed uploads, and oper
 
 ## Backup schedule and verification
 
-The backup script creates a PostgreSQL custom-format dump with `pg_dump --format=custom`, archives the upload tree, enforces the configured archive resource limits, writes a SHA-256 manifest, and publishes the directory atomically with a `COMPLETE` marker. A failed run remains unpublished and is cleaned up. Backup and restore take the same exclusive `flock` on the shared backup volume; a concurrent job fails fast and the kernel releases the lock on process exit or crash. Retention runs only after a successful backup and deletes only direct descendants of `BACKUP_ROOT` that match the backup naming contract, contain `COMPLETE`, and pass their manifest check.
+The backup script creates a PostgreSQL custom-format dump with `pg_dump --format=custom`, archives the upload tree, enforces the configured archive resource limits, writes a SHA-256 manifest, and publishes the directory atomically with a `COMPLETE` marker. A failed run remains unpublished and is cleaned up. Backup and restore require `flock` (provided by `util-linux` in the operations image) and take the same exclusive lock on the shared backup volume; there is no mkdir fallback. A concurrent job fails fast and the kernel releases the lock on process exit or crash. Retention runs only after a successful backup and deletes only direct descendants of `BACKUP_ROOT` that match the backup naming contract, contain `COMPLETE`, and pass their manifest check.
 
-The database and uploads form one coherent application snapshot only while writers are stopped. For this architecture, every backup follows this exact maintenance sequence:
+The database and uploads form one coherent application snapshot only while writers are stopped. For this architecture, every backup follows this exact maintenance sequence. The script accepts only curl exit 6 (DNS resolution failed) or 7 (connection failed) as proof that the API is unreachable; timeout 28, TLS errors, and every other ambiguous failure reject the operation:
 
 ```sh
 docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml stop frontend api

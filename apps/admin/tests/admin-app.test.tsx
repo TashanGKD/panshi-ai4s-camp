@@ -44,7 +44,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   ...overrides,
 })
 
-const renderApp = (api: AdminClient) => render(<MemoryRouter initialEntries={['/']}><App client={api} /></MemoryRouter>)
+const renderApp = (api: AdminClient, initialEntry = '/') => render(<MemoryRouter initialEntries={[initialEntry]}><App client={api} /></MemoryRouter>)
 
 describe('administrator route guard', () => {
   it('renders an explicit loading state while profile bootstrap is pending', () => {
@@ -96,6 +96,28 @@ describe('administrator route guard', () => {
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
     await waitFor(() => expect(logout).toHaveBeenCalledOnce())
     expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
+  })
+
+  it('returns to login immediately after resetting the current administrator password', async () => {
+    const current = { id: 'a1', displayName: '管理员', phone: '+8613800138000', disabledAt: null, createdAt: '2026-08-15T00:00:00.000Z', isCurrent: true }
+    const logout = vi.fn(async () => undefined)
+    const resetAdministratorPassword = vi.fn(async () => ({ data: { administrator: current } }))
+    renderApp(client({
+      logout,
+      listAdministrators: async () => ({ data: { administrators: [current] } }),
+      resetAdministratorPassword,
+    }), '/administrators')
+
+    await screen.findByText('管理员（当前账号）')
+    fireEvent.click(screen.getByRole('button', { name: '重置密码' }))
+    fireEvent.change(screen.getByLabelText('新密码'), { target: { value: 'Replacement!2026' } })
+    fireEvent.change(screen.getByLabelText('再次输入当前密码'), { target: { value: 'Current!2026' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认重置' }))
+
+    await waitFor(() => expect(resetAdministratorPassword).toHaveBeenCalledOnce())
+    await waitFor(() => expect(logout).toHaveBeenCalledOnce())
+    expect(await screen.findByLabelText('手机号')).toBeInTheDocument()
+    expect(screen.queryByText('管理员密码已重置')).not.toBeInTheDocument()
   })
 
   it('mounts the Task 9 dashboard after authentication', async () => {

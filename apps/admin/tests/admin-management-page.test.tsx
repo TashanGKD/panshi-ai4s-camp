@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AdminApp } from '../src/app/AdminApp'
@@ -8,6 +8,12 @@ afterEach(cleanup)
 const administrator = { id: '10000000-0000-4000-8000-000000000001', displayName: '主管理员', phone: '+8613800138000', disabledAt: null, createdAt: '2026-08-15T00:00:00.000Z', isCurrent: true }
 const secondAdministrator = { ...administrator, id: '10000000-0000-4000-8000-000000000002', displayName: '第二管理员', phone: '+8613900139000', isCurrent: false }
 const auditItem = { id: '20000000-0000-4000-8000-000000000001', actor: { id: administrator.id, displayName: administrator.displayName }, action: 'admin.created', entityType: 'user', entityId: secondAdministrator.id, metadata: { result: 'success', password: 'must-not-render', before: { revision: 1, token: 'nested-secret' } }, createdAt: '2026-08-15T00:00:00.000Z' }
+const secondAuditItem = { ...auditItem, id: '20000000-0000-4000-8000-000000000002', action: 'admin.disabled' }
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void; let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+  return { promise, resolve, reject }
+}
 const baseClient = () => ({
   getSummary: vi.fn(async () => ({ apiVersion: 'v1', data: { applications: { total: 0, pendingReview: 0, byStatus: { draft: 0, submitted: 0, reviewing: 0, needs_supplement: 0, admitted: 0, waitlisted: 0, rejected: 0 } }, upcomingDates: [], unpublishedDrafts: [], recentOperations: [] } })),
   listAdministrators: vi.fn(async (signal?: AbortSignal) => { void signal; return { data: { administrators: [administrator, secondAdministrator] } } }),
@@ -85,5 +91,69 @@ describe('administrator and audit pages', () => {
     expect(screen.queryByRole('button', { name: /删除|修改/u })).not.toBeInTheDocument()
     expect(screen.queryByText('must-not-render')).not.toBeInTheDocument()
     expect(document.body.textContent).not.toContain('nested-secret')
+  })
+
+  it.each(['filter', 'pagination'] as const)('invalidates a pending audit detail when %s starts a new list query', async (transition) => {
+    const pending = deferred<{ data: { item: typeof auditItem } }>()
+    const client = baseClient(); client.getAuditLog = vi.fn(() => pending.promise)
+    render(<MemoryRouter initialEntries={['/audit-logs']}><AdminApp client={client as never} publicWebBaseUrl="" /></MemoryRouter>)
+    await screen.findByText('admin.created')
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    if (transition === 'filter') {
+      fireEvent.change(screen.getByLabelText('动作'), { target: { value: 'admin.created' } })
+      fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    }
+    await act(async () => { pending.resolve({ data: { item: auditItem } }); await pending.promise })
+    expect(screen.queryByRole('dialog', { name: '操作日志详情' })).not.toBeInTheDocument()
+  })
+
+  it.each(['filter', 'pagination'] as const)('clears displayed audit detail when %s starts a new list query', async (transition) => {
+    const client = baseClient()
+    render(<MemoryRouter initialEntries={['/audit-logs']}><AdminApp client={client as never} publicWebBaseUrl="" /></MemoryRouter>)
+    await screen.findByText('admin.created')
+    fireEvent.click(screen.getByRole('button', { name: '查看详情' }))
+    expect(await screen.findByRole('dialog', { name: '操作日志详情' })).toBeInTheDocument()
+    if (transition === 'filter') {
+      fireEvent.change(screen.getByLabelText('动作'), { target: { value: 'admin.created' } })
+      fireEvent.click(screen.getByRole('button', { name: '筛选' }))
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    }
+    expect(screen.queryByRole('dialog', { name: '操作日志详情' })).not.toBeInTheDocument()
+  })
+
+  it('clears stale detail while opening another record and keeps it cleared on failure', async () => {
+    const second = deferred<{ data: { item: typeof auditItem } }>()
+    const client = baseClient()
+    client.listAuditLogs = vi.fn(async () => ({ data: { items: [auditItem, secondAuditItem], total: 2, page: 1, pageSize: 20 } }))
+    client.getAuditLog = vi.fn((id: string) => id === auditItem.id ? Promise.resolve({ data: { item: auditItem } }) : second.promise)
+    render(<MemoryRouter initialEntries={['/audit-logs']}><AdminApp client={client as never} publicWebBaseUrl="" /></MemoryRouter>)
+    await screen.findByText('admin.created')
+    const buttons = screen.getAllByRole('button', { name: '查看详情' })
+    fireEvent.click(buttons[0]!)
+    expect(await screen.findByRole('dialog', { name: '操作日志详情' })).toBeInTheDocument()
+    fireEvent.click(buttons[1]!)
+    expect(screen.queryByRole('dialog', { name: '操作日志详情' })).not.toBeInTheDocument()
+    await act(async () => { second.reject(new Error('detail unavailable')); await second.promise.catch(() => undefined) })
+    expect(await screen.findByRole('alert')).toHaveTextContent('日志详情加载失败')
+    expect(screen.queryByRole('dialog', { name: '操作日志详情' })).not.toBeInTheDocument()
+  })
+
+  it('ignores a deferred detail response after another record is opened', async () => {
+    const first = deferred<{ data: { item: typeof auditItem } }>(); const second = deferred<{ data: { item: typeof auditItem } }>()
+    const client = baseClient()
+    client.listAuditLogs = vi.fn(async () => ({ data: { items: [auditItem, secondAuditItem], total: 2, page: 1, pageSize: 20 } }))
+    client.getAuditLog = vi.fn((id: string) => id === auditItem.id ? first.promise : second.promise)
+    render(<MemoryRouter initialEntries={['/audit-logs']}><AdminApp client={client as never} publicWebBaseUrl="" /></MemoryRouter>)
+    await screen.findByText('admin.created')
+    const buttons = screen.getAllByRole('button', { name: '查看详情' })
+    fireEvent.click(buttons[0]!); fireEvent.click(buttons[1]!)
+    await act(async () => { first.resolve({ data: { item: auditItem } }); await first.promise })
+    expect(screen.queryByRole('dialog', { name: '操作日志详情' })).not.toBeInTheDocument()
+    await act(async () => { second.resolve({ data: { item: secondAuditItem } }); await second.promise })
+    expect(await screen.findByRole('dialog', { name: '操作日志详情' })).toHaveTextContent('admin.disabled')
+    expect(screen.getByRole('dialog', { name: '操作日志详情' })).not.toHaveTextContent('admin.created')
   })
 })

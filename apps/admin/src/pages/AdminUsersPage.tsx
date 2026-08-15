@@ -3,7 +3,7 @@ import type { AdminClient, Administrator } from '../api/admin-client'
 
 type Confirmation = { kind: 'disable' | 'reset', administrator: Administrator }
 
-export function AdminUsersPage({ client }: { client: AdminClient }) {
+export function AdminUsersPage({ client, onLogout }: { client: AdminClient, onLogout?: () => Promise<void> }) {
   const generation = useRef(0); const operation = useRef(0); const loadController = useRef<AbortController | null>(null)
   const [items, setItems] = useState<Administrator[]>([]); const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(false)
   const [message, setMessage] = useState(''); const [pending, setPending] = useState(false)
@@ -43,7 +43,13 @@ export function AdminUsersPage({ client }: { client: AdminClient }) {
     closeConfirmation(); setPending(true); setMessage('')
     try {
       if (target.kind === 'disable') await client.disableAdministrator(target.administrator.id, { currentPassword })
-      else await client.resetAdministratorPassword(target.administrator.id, { currentPassword, newPassword: replacement })
+      else {
+        const response = await client.resetAdministratorPassword(target.administrator.id, { currentPassword, newPassword: replacement })
+        if (response.data.administrator.isCurrent && onLogout) {
+          if (operation.current === current) await onLogout()
+          return
+        }
+      }
       if (operation.current !== current) return
       await load(); if (operation.current === current) setMessage(target.kind === 'disable' ? '管理员已禁用' : '管理员密码已重置')
     } catch (error) { if (operation.current === current) setMessage(error instanceof Error ? error.message : target.kind === 'disable' ? '禁用失败' : '重置失败') }

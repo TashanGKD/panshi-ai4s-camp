@@ -79,11 +79,20 @@ export type IdentityRepository = {
 export type AuthTransactionRepository = {
   rotateSessionAndAudit: (rotation: {
     userId: string
+    expectedPasswordHash: string
+    requiredRole: UserRole
     tokenHash: string
     expiresAt: Date
     revokedAt: Date
     audit: AuditEntry
   }) => Promise<void>
+}
+
+export class SessionRotationRejectedError extends Error {
+  constructor(readonly reason: 'credentials_changed' | 'inactive') {
+    super(reason)
+    this.name = 'SessionRotationRejectedError'
+  }
 }
 
 export type AdminCreationRepository = {
@@ -107,9 +116,16 @@ export const createIdentityRepository = (
     return user ?? null
   },
 
-  rotateSessionAndAudit: async ({ userId, tokenHash, expiresAt, revokedAt, audit }) => {
+  rotateSessionAndAudit: async ({ userId, expectedPasswordHash, requiredRole, tokenHash, expiresAt, revokedAt, audit }) => {
     await db.transaction(async (transaction) => {
-      await transaction.execute(sql`select ${users.id} from ${users} where ${users.id} = ${userId} for update`)
+      const [lockedUser] = await transaction.select({ passwordHash: users.passwordHash, role: users.role, disabledAt: users.disabledAt })
+        .from(users).where(eq(users.id, userId)).for('update')
+      if (!lockedUser || lockedUser.role !== requiredRole || lockedUser.disabledAt !== null) {
+        throw new SessionRotationRejectedError('inactive')
+      }
+      if (lockedUser.passwordHash !== expectedPasswordHash) {
+        throw new SessionRotationRejectedError('credentials_changed')
+      }
       await transaction.update(sessions).set({ revokedAt })
         .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
       await transaction.insert(sessions).values({ tokenHash, userId, expiresAt })

@@ -26,6 +26,7 @@ export function AuditLogsPage({ client }: { client: AdminClient }) {
 
   const load = useCallback(async (targetPage: number, values: typeof filters) => {
     const current = ++sequence.current; controller.current?.abort(); const requestController = new AbortController(); controller.current = requestController
+    detailSequence.current += 1; detailController.current?.abort(); detailController.current = null; setDetail(null); setDetailError(false)
     const query = new URLSearchParams({ page: String(targetPage), pageSize: String(pageSize) }); Object.entries(values).forEach(([key, value]) => { if (value) query.set(key, value) })
     setLoading(true); setError(false)
     try {
@@ -39,9 +40,9 @@ export function AuditLogsPage({ client }: { client: AdminClient }) {
   useEffect(() => { sequence.current += 1; detailSequence.current += 1; setItems([]); setDetail(null); void load(1, appliedFilters); return () => { sequence.current += 1; detailSequence.current += 1; controller.current?.abort(); detailController.current?.abort() } }, [client])
   const submit = (event: FormEvent) => { event.preventDefault(); setAppliedFilters(filters); void load(1, filters) }
   const openDetail = async (id: string) => {
-    const current = ++detailSequence.current; detailController.current?.abort(); const requestController = new AbortController(); detailController.current = requestController; setDetailError(false)
+    const current = ++detailSequence.current; detailController.current?.abort(); const requestController = new AbortController(); detailController.current = requestController; setDetail(null); setDetailError(false)
     try { const response = await client.getAuditLog(id, requestController.signal); if (detailSequence.current === current) setDetail(response.data.item) }
-    catch (candidate) { if (detailSequence.current === current && !(candidate instanceof DOMException && candidate.name === 'AbortError')) setDetailError(true) }
+    catch (candidate) { if (detailSequence.current === current && !(candidate instanceof DOMException && candidate.name === 'AbortError')) { setDetail(null); setDetailError(true) } }
   }
   const lastPage = Math.max(1, Math.ceil(total / pageSize))
 

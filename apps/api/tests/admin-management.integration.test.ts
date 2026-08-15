@@ -18,6 +18,12 @@ const password = 'CurrentAdmin!2026'
 const ids = ['10000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000003'] as const
 const phones = ['+8613800138001', '+8613800138002', '+8613800138003'] as const
 
+const deferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
 const readActor = async (id: string) => {
   const [record] = await database.db.select().from(users).where(eq(users.id, id)).limit(1)
   if (!record) throw new Error('Missing test administrator')
@@ -98,6 +104,59 @@ describe('administrator management PostgreSQL truth', () => {
     const actions = (await database.db.select({ action: auditLogs.action, metadata: auditLogs.metadata }).from(auditLogs)).filter((row) => row.action.startsWith('admin.'))
     expect(actions).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'admin.password_reset' }), expect.objectContaining({ action: 'admin.disabled' })]))
     expect(JSON.stringify(actions.map((entry) => entry.metadata))).not.toMatch(/password|hash|token|phone|CurrentAdmin|Replacement/iu)
+  })
+
+  it('rejects a login that read the account before a concurrent disable committed', async () => {
+    const identity = createIdentityRepository(database.db)
+    const userRead = deferred<void>(); const resumeLogin = deferred<void>()
+    const pausedIdentity = {
+      ...identity,
+      findUserByPhoneNormalized: async (phone: string) => {
+        const user = await identity.findUserByPhoneNormalized(phone)
+        userRead.resolve(); await resumeLogin.promise
+        return user
+      },
+    }
+    const sessionsService = createSessionService(pausedIdentity, identity, { sessionTtlSeconds: 60, createToken: () => Buffer.alloc(32, 1) })
+    const login = sessionsService.loginAdmin(phones[1], password)
+    await userRead.promise
+    await createAdminManagementService(createAdminManagementRepository(database.db)).disable(await readActor(ids[0]), ids[1], { currentPassword: password })
+    resumeLogin.resolve()
+
+    await expect(login).rejects.toMatchObject({ name: 'AuthenticationError' })
+    expect(await database.db.select().from(sessions).where(eq(sessions.userId, ids[1]))).toHaveLength(0)
+  })
+
+  it('rejects a login that verified the previous hash during a concurrent password reset', async () => {
+    const identity = createIdentityRepository(database.db)
+    const userRead = deferred<void>(); const resumeLogin = deferred<void>()
+    const pausedIdentity = {
+      ...identity,
+      findUserByPhoneNormalized: async (phone: string) => {
+        const user = await identity.findUserByPhoneNormalized(phone)
+        userRead.resolve(); await resumeLogin.promise
+        return user
+      },
+    }
+    const sessionsService = createSessionService(pausedIdentity, identity, { sessionTtlSeconds: 60, createToken: () => Buffer.alloc(32, 2) })
+    const login = sessionsService.loginAdmin(phones[1], password)
+    await userRead.promise
+    await createAdminManagementService(createAdminManagementRepository(database.db)).resetPassword(await readActor(ids[0]), ids[1], { currentPassword: password, newPassword: 'Replacement!2026' })
+    resumeLogin.resolve()
+
+    await expect(login).rejects.toMatchObject({ name: 'AuthenticationError' })
+    expect(await database.db.select().from(sessions).where(eq(sessions.userId, ids[1]))).toHaveLength(0)
+  })
+
+  it('defensively revokes and rejects a session whose user became disabled', async () => {
+    const identity = createIdentityRepository(database.db)
+    const token = 'disabled-user-session'
+    await database.db.insert(sessions).values({ tokenHash: hashSessionToken(token), userId: ids[1], expiresAt: new Date(Date.now() + 60_000) })
+    await database.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, ids[1]))
+
+    await expect(createSessionService(identity, identity, { sessionTtlSeconds: 60 }).resolve(token)).rejects.toMatchObject({ kind: 'unauthorized' })
+    const [record] = await database.db.select().from(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)))
+    expect(record?.revokedAt).toBeInstanceOf(Date)
   })
 
   it('does not persist body text or path-like values through the real audit service and repository', async () => {

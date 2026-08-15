@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { normalizeMainlandChinaMobile, type AuthenticatedUser } from '@panshi/contracts'
-import type { AuthTransactionRepository, IdentityRepository, IdentityUser } from './identity.repository.js'
+import { SessionRotationRejectedError, type AuthTransactionRepository, type IdentityRepository, type IdentityUser } from './identity.repository.js'
 import { DUMMY_PASSWORD_HASH, verifyPassword } from './password.js'
 
 export const SESSION_COOKIE_NAME = 'panshi_session'
@@ -46,18 +46,27 @@ export const createSessionService = (
       const issuedAt = now()
       const token = createToken().toString('hex')
       const expiresAt = new Date(issuedAt.getTime() + options.sessionTtlSeconds * 1_000)
-      await transactions.rotateSessionAndAudit({
-        userId: user.id,
-        tokenHash: hashSessionToken(token),
-        expiresAt,
-        revokedAt: issuedAt,
-        audit: {
-          actorUserId: user.id,
-          action: 'auth.login_succeeded',
-          entityType: 'session',
-          metadata: { authenticationMethod: 'password' },
-        },
-      })
+      try {
+        await transactions.rotateSessionAndAudit({
+          userId: user.id,
+          expectedPasswordHash: user.passwordHash,
+          requiredRole,
+          tokenHash: hashSessionToken(token),
+          expiresAt,
+          revokedAt: issuedAt,
+          audit: {
+            actorUserId: user.id,
+            action: 'auth.login_succeeded',
+            entityType: 'session',
+            metadata: { authenticationMethod: 'password' },
+          },
+        })
+      } catch (error) {
+        if (error instanceof SessionRotationRejectedError) {
+          throw new AuthenticationError(error.reason === 'inactive' && requiredRole === 'admin' ? 'forbidden' : 'invalid_credentials')
+        }
+        throw error
+      }
 
       const publicUser: AuthenticatedUser = {
         id: user.id,
@@ -76,6 +85,10 @@ export const createSessionService = (
       if (!token) throw new AuthenticationError('unauthorized')
       const session = await repository.findSessionByTokenHash(hashSessionToken(token))
       if (!session || session.revokedAt !== null || session.expiresAt.getTime() <= now().getTime()) {
+        throw new AuthenticationError('unauthorized')
+      }
+      if (session.user.disabledAt !== null || !['user', 'admin'].includes(session.user.role)) {
+        await repository.revokeSessionByTokenHash(session.tokenHash, now())
         throw new AuthenticationError('unauthorized')
       }
       return session.user

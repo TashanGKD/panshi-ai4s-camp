@@ -20,7 +20,7 @@ COPY --from=api-build /app/packages/contracts/package.json ./packages/contracts/
 COPY --from=api-build /app/packages/contracts/dist ./packages/contracts/dist
 COPY --from=api-build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=api-build /app/apps/api/dist ./apps/api/dist
-RUN mkdir -p /app/var/uploads && chown -R node:node /app/var
+RUN mkdir -p /app/var/uploads /app/var/backups && chown -R node:node /app/var
 USER node
 EXPOSE 3001
 CMD ["node", "apps/api/dist/src/server.js"]

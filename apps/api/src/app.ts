@@ -31,6 +31,7 @@ import type { StatisticsService } from './modules/statistics/statistics.service.
 import { createAdminUsersRouter } from './modules/identity/admin-users.routes.js'
 import { createAuditRouter } from './modules/audit/audit.routes.js'
 import type { AdminManagementService } from './modules/identity/admin-management.service.js'
+import { createAdminHealthRouter, type AdminHealthService } from './modules/health/admin-health.routes.js'
 
 export type ApiRuntimeConfig = {
   allowedOrigins: readonly string[]
@@ -65,6 +66,7 @@ export type AppDependencies = {
   statisticsService?: StatisticsService
   adminManagementService?: AdminManagementService
   auditQueryService?: Pick<AdminManagementService, 'auditLogs' | 'auditLog'>
+  adminHealthService?: AdminHealthService
   config: ApiRuntimeConfig
 }
 
@@ -135,6 +137,7 @@ export const createApp = ({
   statisticsService,
   adminManagementService,
   auditQueryService,
+  adminHealthService,
   config,
 }: AppDependencies) => {
   const app = express()
@@ -177,6 +180,7 @@ export const createApp = ({
     if (resourceService) app.use('/api/v1/admin/resources', createAdminResourceRouter(sessions, resourceService))
     if (adminManagementService) app.use('/api/v1/admin/users', createAdminUsersRouter(sessions, adminManagementService))
     if (auditQueryService) app.use('/api/v1/admin/audit-logs', createAuditRouter(sessions, auditQueryService))
+    if (adminHealthService) app.use('/api/v1/admin/system-health', createAdminHealthRouter(sessions, adminHealthService))
   }
   if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {

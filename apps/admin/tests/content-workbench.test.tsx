@@ -30,6 +30,7 @@ const summary = {
 }
 
 const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
+  getSystemHealth: async () => ({ apiVersion: 'v1', data: { status: 'healthy', checkedAt: '2026-08-15T02:03:04.000Z', version: 'test', database: { connected: true }, uploads: { writable: true, freeBytes: 1_048_576 }, backup: { available: true, lastSuccessfulAt: '2026-08-15T01:02:03.000Z' } } }),
   getProfile: async () => ({ apiVersion: 'v1', data: { user: { id: 'a1', displayName: '管理员', phoneNormalized: '+8613800138000', role: 'admin' } } }),
   login: async () => ({ apiVersion: 'v1', data: { user: { id: 'a1', displayName: '管理员', role: 'admin' } } }),
   logout: async () => undefined,

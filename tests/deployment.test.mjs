@@ -32,14 +32,14 @@ const localOverride = await parseYaml('compose.override.yaml')
 const productionOverride = await parseYaml('compose.prod.yaml')
 const localModel = mergeCompose(baseCompose, localOverride)
 const productionModel = mergeCompose(baseCompose, productionOverride)
-const { postgres, migration, api, frontend } = productionModel.services
+const { postgres, migration, api, frontend, operations: operationsService } = productionModel.services
 
 assert.ok(!('name' in baseCompose), 'Compose must not fix a shared project name')
 assert.deepEqual(localModel.services.postgres.ports, ['127.0.0.1:5433:5432'])
 assert.ok(!postgres.ports?.length, 'effective production PostgreSQL must not publish a host port')
 assert.equal(postgres.image, 'postgres:16.12-alpine3.23')
 assert.equal(postgres.environment.POSTGRES_PASSWORD, '${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}')
-assert.deepEqual(new Set(postgres.volumes), new Set(['database-data:/var/lib/postgresql/data', 'backups-data:/backups']))
+assert.deepEqual(postgres.volumes, ['database-data:/var/lib/postgresql/data'])
 assert.ok(postgres.healthcheck?.test, 'effective production database needs a healthcheck')
 
 assert.deepEqual(migration.command, ['node', 'apps/api/dist/src/db/migrate.js'])
@@ -55,10 +55,12 @@ assert.equal(migration.environment.DATABASE_URL, '${DATABASE_URL:?set DATABASE_U
 assert.equal(api.image, migration.image)
 assert.equal(api.build.dockerfile, 'apps/api/Dockerfile')
 assert.equal(api.build.target, 'production')
-assert.deepEqual(api.volumes, ['uploads-data:/app/var/uploads'])
+assert.deepEqual(new Set(api.volumes), new Set(['uploads-data:/app/var/uploads', 'backups-data:/app/var/backups:ro']))
 assert.ok(api.healthcheck?.test, 'effective production API needs a healthcheck')
 assert.equal(api.environment.DATABASE_URL, '${DATABASE_URL:?set DATABASE_URL}')
 assert.equal(api.environment.CORS_ORIGINS, '${CORS_ORIGINS:?set CORS_ORIGINS}')
+assert.equal(api.environment.BACKUP_ROOT, '/app/var/backups')
+assert.equal(api.environment.APP_VERSION, '${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}')
 assert.ok(!('command' in api), 'API must retain its production image entrypoint')
 assert.equal(frontend.image, 'panshi-ai4s-camp-frontend:${IMAGE_TAG:-local}')
 assert.equal(frontend.build.dockerfile, 'apps/web/Dockerfile')
@@ -67,6 +69,16 @@ assert.deepEqual(frontend.ports, ['${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-
 assert.ok(frontend.healthcheck?.test, 'effective production frontend needs a healthcheck')
 assert.ok(!('command' in frontend), 'frontend must retain its unprivileged Nginx entrypoint')
 assert.ok(!frontend.volumes?.some((volume) => String(volume).startsWith('uploads-data:')), 'frontend must not mount private uploads')
+assert.equal(operationsService.image, 'postgres:16.12-bookworm')
+assert.deepEqual(operationsService.profiles, ['operations'])
+assert.equal(operationsService.user, '1000:1000')
+assert.deepEqual(new Set(operationsService.volumes), new Set(['uploads-data:/uploads', 'backups-data:/backups', './deploy:/workspace/deploy:ro']))
+assert.equal(operationsService.environment.BACKUP_DATABASE_URL, '${BACKUP_DATABASE_URL:?set BACKUP_DATABASE_URL}')
+assert.equal(operationsService.environment.RESTORE_DATABASE_URL, '${RESTORE_DATABASE_URL:-}')
+assert.equal(operationsService.environment.RESTORE_ACKNOWLEDGE, '${RESTORE_ACKNOWLEDGE:-}')
+assert.deepEqual(operationsService.security_opt, ['no-new-privileges:true'])
+assert.deepEqual(operationsService.cap_drop, ['ALL'])
+assert.equal(operationsService.read_only, true)
 assert.deepEqual(new Set(Object.keys(productionModel.volumes)), new Set(['database-data', 'uploads-data', 'backups-data']))
 
 const resolvedVolume = (project, volume) => `${project}_${volume}`
@@ -76,10 +88,10 @@ assert.deepEqual([...localVolumes], ['panshi-ai4s-camp-local_database-data'])
 assert.ok([...productionVolumes].every((volume) => volume.startsWith('panshi-ai4s-camp-prod_')))
 assert.ok([...productionVolumes].every((volume) => !localVolumes.has(volume)), 'local and production named volumes must be isolated')
 
-for (const [name, service] of Object.entries({ postgres, migration, api, frontend })) {
+for (const [name, service] of Object.entries({ postgres, migration, api, frontend, operations: operationsService })) {
   assert.deepEqual(service.security_opt, ['no-new-privileges:true'], `${name} must prohibit privilege escalation`)
 }
-for (const [name, service] of Object.entries({ migration, api, frontend })) {
+for (const [name, service] of Object.entries({ migration, api, frontend, operations: operationsService })) {
   assert.deepEqual(service.cap_drop, ['ALL'], `${name} must drop Linux capabilities`)
   assert.equal(service.read_only, true, `${name} root filesystem must be read-only`)
 }
@@ -126,7 +138,7 @@ assert.match(packageJson.scripts.test, /npm run test:deployment/u)
 assert.doesNotMatch(packageJson.scripts.test, /test:deployment:build/u, 'normal tests must not perform clean installs or Docker checks')
 
 const operations = await readProjectFile('docs/operations.md')
-for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS']) {
+for (const variable of ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'DATABASE_URL', 'CORS_ORIGINS', 'BACKUP_ROOT', 'BACKUP_RETENTION_DAYS', 'BACKUP_DATABASE_URL', 'BACKUP_UPLOAD_DIR', 'BACKUP_APP_VERSION', 'RESTORE_DATABASE_URL', 'RESTORE_UPLOAD_DIR']) {
   assert.match(operations, new RegExp(variable, 'u'), `operations guide must document ${variable}`)
 }
 const productionPrefix = 'docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-camp-prod -f compose.yaml -f compose.prod.yaml'
@@ -148,5 +160,10 @@ assert.match(operations, /VERIFICATION_PROVIDER[^\n]+disabled[^\n]+SMS/iu)
 assert.match(operations, /test:deployment:build/u)
 assert.match(operations, /Docker engine[^\n]+unavailable/iu)
 assert.match(operations, /digest/iu)
+assert.match(operations, /deploy\/backup\.sh/u)
+assert.match(operations, /RESTORE_ACKNOWLEDGE=RESTORE/iu)
+assert.match(operations, /deploy\/restore\.sh --yes/u)
+assert.match(operations, /SHA-256/iu)
+assert.match(operations, /cron|systemd timer/iu)
 
 console.log('deployment static configuration checks passed')

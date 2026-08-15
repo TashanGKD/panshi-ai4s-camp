@@ -112,6 +112,18 @@ describe('administrator API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/summary', expect.objectContaining({ credentials: 'same-origin' }))
   })
 
+  it('loads and strictly validates the no-store system health endpoint', async () => {
+    const response = { apiVersion: 'v1', data: { status: 'healthy', checkedAt: '2026-08-15T02:03:04.000Z', version: '6c444d0', database: { connected: true }, uploads: { writable: true, freeBytes: 1_048_576 }, backup: { available: true, lastSuccessfulAt: '2026-08-15T01:02:03.000Z' } } }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = createAdminClient(undefined, { production: true })
+    await expect(client.getSystemHealth()).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/system-health', expect.objectContaining({ cache: 'no-store' }))
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...response, secretPath: '/private/backups' }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    await expect(client.getSystemHealth()).rejects.toThrow()
+  })
+
   it('sends the exact resource revision with create, save, publish and unpublish', async () => {
     const resource = { id: '20000000-0000-4000-8000-000000000001', key: 'guide', title: '指南', description: null, fileId: '30000000-0000-4000-8000-000000000001', accessScope: 'public' as const, sortOrder: 0, active: false, revision: 0 }
     const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {

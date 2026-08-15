@@ -5,6 +5,7 @@ import { FILE_UPLOAD_HARD_MAX_BYTES } from '../modules/files/file-storage.js'
 
 const projectRoot = fileURLToPath(new URL('../../../../', import.meta.url))
 const defaultFileStorageRoot = resolve(projectRoot, 'var/uploads')
+const defaultBackupRoot = resolve(projectRoot, 'var/backups')
 
 const postgresUrl = z.string().min(1).refine((value) => {
   try {
@@ -71,6 +72,8 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   FILE_UPLOAD_PER_USER_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
   FILE_UPLOAD_PER_USER_WINDOW_MAX: z.coerce.number().int().min(1).max(30).default(5),
   FILE_UPLOAD_PER_USER_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
+  BACKUP_ROOT: z.string().min(1).default(defaultBackupRoot).transform((value) => resolve(projectRoot, value)),
+  APP_VERSION: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u).default('development'),
 }).superRefine((env, context) => {
   if (env.NODE_ENV === 'production' && env.VERIFICATION_PROVIDER === 'mock') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_PROVIDER'], message: 'mock provider is forbidden in production' })

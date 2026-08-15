@@ -14,7 +14,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - database-data:/var/lib/postgresql/data
-      - backups-data:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
@@ -48,9 +47,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
       FILE_STORAGE_ROOT: /app/var/uploads
+      BACKUP_ROOT: /app/var/backups
+      APP_VERSION: ${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}
       VERIFICATION_PROVIDER: disabled
     volumes:
       - uploads-data:/app/var/uploads
+      - backups-data:/app/var/backups:ro
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -66,6 +68,37 @@ services:
       - ALL
     read_only: true
     restart: unless-stopped
+
+  operations:
+    image: postgres:16.12-bookworm
+    profiles: ["operations"]
+    user: "1000:1000"
+    entrypoint: ["/bin/bash"]
+    working_dir: /workspace
+    environment:
+      BACKUP_ROOT: ${BACKUP_ROOT:?set BACKUP_ROOT}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:?set BACKUP_RETENTION_DAYS}
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:?set BACKUP_DATABASE_URL}
+      BACKUP_UPLOAD_DIR: ${BACKUP_UPLOAD_DIR:?set BACKUP_UPLOAD_DIR}
+      BACKUP_APP_VERSION: ${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}
+      RESTORE_DATABASE_URL: ${RESTORE_DATABASE_URL:-}
+      RESTORE_UPLOAD_DIR: ${RESTORE_UPLOAD_DIR:?set RESTORE_UPLOAD_DIR}
+      RESTORE_ACKNOWLEDGE: ${RESTORE_ACKNOWLEDGE:-}
+    volumes:
+      - uploads-data:/uploads
+      - backups-data:/backups
+      - ./deploy:/workspace/deploy:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    restart: "no"
 
   frontend:
     image: panshi-ai4s-camp-frontend:${IMAGE_TAG:-local}

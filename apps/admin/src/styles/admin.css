@@ -57,6 +57,11 @@ button:disabled { opacity: .65; cursor: wait; }
 .panel li div { display: grid; }
 .panel time, .panel small, .empty-state { color: #687783; }
 .dashboard-grid .panel:last-child { grid-column: 1 / -1; }
+.system-status-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: .65rem; background: #e7f4ea; color: #245b31; }
+.system-status-banner.degraded { background: #fff0df; color: #7a4910; }
+.system-status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.system-status-grid .panel { display: grid; gap: .6rem; }
+.system-status-grid .panel h2, .system-status-grid .panel p { margin: 0; }
 .structured-editor { min-width: 0; }
 .structured-form { display: grid; gap: 1rem; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
@@ -92,4 +97,4 @@ button:disabled { opacity: .65; cursor: wait; }
 .choice-options { display: grid; gap: .5rem; margin-top: 1rem; }
 .dirty-hint { align-self: center; color: #8a5d18; }
 @media (max-width: 900px) { .registration-form-tools { grid-template-columns: 1fr; } }
-@media (max-width: 900px) { .admin-layout { grid-template-columns: 1fr; } .admin-sidebar { position: static; } .dashboard-grid, .form-grid { grid-template-columns: 1fr; } .admin-main main { padding: 1rem; } }
+@media (max-width: 900px) { .admin-layout { grid-template-columns: 1fr; } .admin-sidebar { position: static; } .dashboard-grid, .form-grid, .system-status-grid { grid-template-columns: 1fr; } .admin-main main { padding: 1rem; } }

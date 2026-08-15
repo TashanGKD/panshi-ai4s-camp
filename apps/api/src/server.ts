@@ -25,6 +25,7 @@ import { createStatisticsRepository } from './modules/statistics/statistics.repo
 import { createStatisticsService } from './modules/statistics/statistics.service.js'
 import { createAdminManagementRepository } from './modules/identity/admin-management.repository.js'
 import { createAdminManagementService } from './modules/identity/admin-management.service.js'
+import { createAdminHealthFileChecks, createAdminHealthService } from './modules/health/admin-health.routes.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -252,6 +253,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     })
     : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
+  const adminHealthFileChecks = createAdminHealthFileChecks(env.FILE_STORAGE_ROOT, env.BACKUP_ROOT)
   const adminManagementService = createAdminManagementService(createAdminManagementRepository(database.db))
   const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
   const applicationService = createApplicationService(createApplicationRepository(database.db))
@@ -276,6 +278,12 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     adminSummaryService: createAdminSummaryService(createAdminSummaryRepository(database.db)),
     adminManagementService,
     auditQueryService: adminManagementService,
+    adminHealthService: createAdminHealthService({
+      checkDatabase: database.checkHealth,
+      ...adminHealthFileChecks,
+      timeoutMs: env.HEALTHCHECK_TIMEOUT_MS,
+      appVersion: env.APP_VERSION,
+    }),
     config: {
       allowedOrigins: env.CORS_ORIGINS,
       healthcheckTimeoutMs: env.HEALTHCHECK_TIMEOUT_MS,

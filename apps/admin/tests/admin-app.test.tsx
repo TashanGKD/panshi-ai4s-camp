@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { DEFAULT_REGISTRATION_FORM, ProfileResponseSchema } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, ProfileResponseSchema, type AdminSystemHealthResponse } from '@panshi/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 import { AdminApiError, type AdminClient } from '../src/api/admin-client'
@@ -24,6 +24,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   login: async () => ({ apiVersion: 'v1', data: { user: { id: 'a1', displayName: '管理员', role: 'admin' } } }),
   logout: async () => undefined,
   getSummary: async () => ({ apiVersion: 'v1', data: { applications: { total: 0, pendingReview: 0, byStatus: { draft: 0, submitted: 0, reviewing: 0, needs_supplement: 0, admitted: 0, waitlisted: 0, rejected: 0 } }, upcomingDates: [], unpublishedDrafts: [], recentOperations: [] } }),
+  getSystemHealth: async () => health(),
   getDraft: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' }, publishedVersion: null } }),
   saveDraft: async (_key, payload) => ({ apiVersion: 'v1', data: { key: 'basic', revision: 2, payload, publishedVersion: null } }),
   getPreview: async () => ({ apiVersion: 'v1', data: { key: 'basic', revision: 1, payload: { title: '草稿标题' } } }),
@@ -43,6 +44,8 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   listAdministrators: async () => ({ data: { administrators: [] } }), createAdministrator: async () => { throw new Error('unused') }, disableAdministrator: async () => { throw new Error('unused') }, resetAdministratorPassword: async () => { throw new Error('unused') }, listAuditLogs: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }), getAuditLog: async () => { throw new Error('unused') },
   ...overrides,
 })
+
+const health = (): AdminSystemHealthResponse => ({ apiVersion: 'v1', data: { status: 'healthy', checkedAt: '2026-08-15T02:03:04.000Z', version: 'test', database: { connected: true }, uploads: { writable: true, freeBytes: 1_048_576 }, backup: { available: true, lastSuccessfulAt: '2026-08-15T01:02:03.000Z' } } })
 
 const renderApp = (api: AdminClient, initialEntry = '/') => render(<MemoryRouter initialEntries={[initialEntry]}><App client={api} /></MemoryRouter>)
 
@@ -128,5 +131,14 @@ describe('administrator route guard', () => {
     expect(getDraft).not.toHaveBeenCalled()
     expect(getHistory).not.toHaveBeenCalled()
     expect(screen.getByRole('link', { name: '基本信息' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '系统状态' })).toBeInTheDocument()
+  })
+
+  it('reaches the system status page from the protected router', async () => {
+    const getSystemHealth = vi.fn(async () => health())
+    renderApp(client({ getSystemHealth }), '/system-status')
+    expect(await screen.findByRole('heading', { name: '系统状态' })).toBeInTheDocument()
+    expect(await screen.findByText('运行正常')).toBeInTheDocument()
+    expect(getSystemHealth).toHaveBeenCalledOnce()
   })
 })

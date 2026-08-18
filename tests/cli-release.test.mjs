@@ -49,8 +49,8 @@ test('default release build is local-only and does not modify the tracked Skill 
   const trustedManifest = JSON.parse(before)
   const result = await buildCliRelease({ repoRoot })
   assert.equal(await readFile(skillManifestPath, 'utf8'), before)
-  assert.equal(result.manifest.version, '0.1.11')
-  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.11.tgz')
+  assert.equal(result.manifest.version, '0.1.12')
+  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.12.tgz')
   assert.equal((await stat(result.archivePath)).size, result.manifest.sizeBytes)
   // npm's tar metadata is platform-specific, so Windows may produce different archive bytes.
   // The extracted package tree is the cross-platform trust boundary; the Linux publisher

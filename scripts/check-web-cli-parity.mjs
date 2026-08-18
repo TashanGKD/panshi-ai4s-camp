@@ -34,14 +34,21 @@ export const checkParity = ({ canonical, web, cli, skill }) => {
 
 const commandJson = (command, args) => {
   const result = spawnSync(command, args, { cwd: process.cwd(), encoding: 'utf8', env: process.env })
+  if (result.error) throw new Error(`${command} ${args.join(' ')} failed to start\n${result.error.message}`)
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed\n${result.stderr}`)
   try { return JSON.parse(result.stdout) } catch { throw new Error(`Invalid JSON from ${command} ${args.join(' ')}\n${result.stdout}`) }
+}
+
+export const npmInvocation = ({ execPath = process.execPath, npmExecPath = process.env.npm_execpath } = {}) => {
+  if (!npmExecPath) throw new Error('npm_execpath is required; run parity through npm run test:parity')
+  return [execPath, [npmExecPath, 'run', 'capabilities:json', '-w', '@panshi/web', '--silent']]
 }
 
 export const loadRepositoryParityInputs = async () => {
   const { learnerCapabilities } = await import('../packages/contracts/dist/index.js')
   const canonical = learnerCapabilities.map(({ id, roles, phase, effect, confirmation }) => ({ id, roles, phase, effect, confirmation }))
-  const web = commandJson(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'capabilities:json', '-w', '@panshi/web', '--silent'])
+  const [npmCommand, npmArgs] = npmInvocation()
+  const web = commandJson(npmCommand, npmArgs)
   const cli = commandJson(process.execPath, ['apps/cli/dist/main.js', '--json', 'internal', 'capabilities'])
   const skill = JSON.parse(await readFile(new URL('../skills/panshi-camp/capabilities.json', import.meta.url), 'utf8'))
   return { canonical, web, cli, skill }

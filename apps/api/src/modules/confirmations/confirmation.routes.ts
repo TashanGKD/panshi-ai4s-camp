@@ -15,7 +15,7 @@ const resolveActor = async (sessions: SessionService, request: Request): Promise
   const credential = getRequestSessionCredential(request)
   if (!credential) return { userId: null, role: 'anonymous' }
   const user = await sessions.resolve(credential.token, credential.source === 'bearer' ? ['cli', 'admin_cli'] : ['web', 'admin_web'])
-  return { userId: user.id, role: user.role }
+  return { userId: user.id, role: user.role, user, credential }
 }
 
 export const createConfirmationRouter = (sessions: SessionService, service: ConfirmationService) => {

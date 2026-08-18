@@ -96,9 +96,10 @@ describe('canonical confirmation payloads', () => {
 describe('confirmation intent security', () => {
   it('rejects execution by another user', async () => {
     const { service } = createHarness()
-    const prepared = await service.prepare(actor(USER_A), request())
+    const input = request()
+    const prepared = await service.prepare(actor(USER_A), input)
     await expect(service.execute(actor(USER_B), prepared.confirmationId, {
-      clientBinding: BINDING_A, idempotencyKey: prepared.idempotencyKey, payload: { targetId: 'app-1', revision: 3 },
+      clientBinding: BINDING_A, idempotencyKey: input.idempotencyKey, payload: { targetId: 'app-1', revision: 3 },
     })).rejects.toMatchObject({ code: 'CONFIRMATION_MISMATCH' })
   })
 
@@ -115,9 +116,10 @@ describe('confirmation intent security', () => {
     { payload: { targetId: 'app-1', revision: 4 } },
   ])('rejects target or revision mutation %#', async ({ payload }) => {
     const { service } = createHarness()
-    const prepared = await service.prepare(actor(USER_A), request())
+    const input = request()
+    const prepared = await service.prepare(actor(USER_A), input)
     await expect(service.execute(actor(USER_A), prepared.confirmationId, {
-      clientBinding: BINDING_A, idempotencyKey: prepared.idempotencyKey, payload,
+      clientBinding: BINDING_A, idempotencyKey: input.idempotencyKey, payload,
     })).rejects.toMatchObject({ code: 'CONFIRMATION_MISMATCH' })
   })
 
@@ -128,17 +130,19 @@ describe('confirmation intent security', () => {
       capabilityId: 'application.submit', prepare: () => ({ preview: { action: '提交报名' } }), execute: async () => ({ ok: true }),
     }])
     const service = createConfirmationService(repository, handlers, { now: () => clock })
-    const prepared = await service.prepare(actor(USER_A), request())
+    const input = request()
+    const prepared = await service.prepare(actor(USER_A), input)
     clock = new Date('2026-08-18T00:05:01.000Z')
     await expect(service.execute(actor(USER_A), prepared.confirmationId, {
-      clientBinding: BINDING_A, idempotencyKey: prepared.idempotencyKey, payload: { targetId: 'app-1', revision: 3 },
+      clientBinding: BINDING_A, idempotencyKey: input.idempotencyKey, payload: { targetId: 'app-1', revision: 3 },
     })).rejects.toMatchObject({ code: 'CONFIRMATION_EXPIRED' })
   })
 
   it('returns the stored safe result on an exact consumed replay without invoking the handler twice', async () => {
     const { service, execute } = createHarness()
-    const prepared = await service.prepare(actor(USER_A), request())
-    const execution = { clientBinding: BINDING_A, idempotencyKey: prepared.idempotencyKey, payload: { targetId: 'app-1', revision: 3 } }
+    const input = request()
+    const prepared = await service.prepare(actor(USER_A), input)
+    const execution = { clientBinding: BINDING_A, idempotencyKey: input.idempotencyKey, payload: { targetId: 'app-1', revision: 3 } }
     const first = await service.execute(actor(USER_A), prepared.confirmationId, execution)
     const replay = await service.execute(actor(USER_A), prepared.confirmationId, execution)
     expect(replay).toEqual(first)
@@ -153,8 +157,9 @@ describe('confirmation intent security', () => {
     const service = createConfirmationService(repository, createConfirmationHandlerRegistry([{
       capabilityId: 'application.submit', prepare: () => ({ preview: { action: '提交报名' } }), execute,
     }]), { now: () => new Date('2026-08-18T00:00:00.000Z') })
-    const prepared = await service.prepare(actor(USER_A), request())
-    const input = { clientBinding: BINDING_A, idempotencyKey: prepared.idempotencyKey, payload: { targetId: 'app-1', revision: 3 } }
+    const requestInput = request()
+    const prepared = await service.prepare(actor(USER_A), requestInput)
+    const input = { clientBinding: BINDING_A, idempotencyKey: requestInput.idempotencyKey, payload: { targetId: 'app-1', revision: 3 } }
     const first = service.execute(actor(USER_A), prepared.confirmationId, input)
     await Promise.resolve()
     await expect(service.execute(actor(USER_A), prepared.confirmationId, input))
@@ -177,9 +182,10 @@ describe('confirmation intent security', () => {
     const service = createConfirmationService(repository, createConfirmationHandlerRegistry([{
       capabilityId: 'auth.verification.send', prepare: () => ({ preview: { purpose: 'register', phone: '+8613******000' } }), execute: async () => ({ accepted: true }),
     }]), { now: () => new Date('2026-08-18T00:00:00.000Z') })
-    const prepared = await service.prepare(actor(null), { ...request({ payload: { phoneMasked: '+8613******000', purpose: 'register' } }), capabilityId: 'auth.verification.send' })
+    const input = { ...request({ payload: { phoneMasked: '+8613******000', purpose: 'register' } }), capabilityId: 'auth.verification.send' as const }
+    const prepared = await service.prepare(actor(null), input)
     await expect(service.execute(actor(null), prepared.confirmationId, {
-      clientBinding: BINDING_B, idempotencyKey: prepared.idempotencyKey, payload: { phoneMasked: '+8613******000', purpose: 'register' },
+      clientBinding: BINDING_B, idempotencyKey: input.idempotencyKey, payload: { phoneMasked: '+8613******000', purpose: 'register' },
     })).rejects.toMatchObject({ code: 'CONFIRMATION_MISMATCH' })
   })
 })

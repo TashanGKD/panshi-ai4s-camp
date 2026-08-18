@@ -6,6 +6,7 @@ import { createDatabaseClient } from './db/client.js'
 import { createContentPublishingRepository, createContentRepository } from './modules/content/content.repository.js'
 import { createContentPublishingService } from './modules/content/publish.service.js'
 import { createIdentityRepository } from './modules/identity/identity.repository.js'
+import { createSessionService } from './modules/identity/session.service.js'
 import { createAdminSummaryRepository } from './modules/admin-summary/admin-summary.repository.js'
 import { createAdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 import { createMockVerificationProvider } from './modules/identity/mock-verification-provider.js'
@@ -32,7 +33,7 @@ import { createCheckInRepository } from './modules/check-in/check-in.repository.
 import { createCheckInService } from './modules/check-in/check-in.service.js'
 import { createConfirmationRepository } from './modules/confirmations/confirmation.repository.js'
 import { createConfirmationService } from './modules/confirmations/confirmation.service.js'
-import { createConfirmationHandlerRegistry } from './modules/confirmations/confirmation-handlers.js'
+import { createLearnerConfirmationHandlers } from './modules/confirmations/confirmation-handlers.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -278,13 +279,19 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     isUcasTrainingUnit: institutionDirectoryService.isUcasTrainingUnit,
   })
   const checkInService = createCheckInService(createCheckInRepository(database.db), { tokenSecret: env.CHECK_IN_TOKEN_SECRET })
-  const confirmationService = createConfirmationService(
-    createConfirmationRepository(database.db),
-    createConfirmationHandlerRegistry([]),
-  )
   const fileService = createFileService(
     createFileRepository(database.db),
     createLocalFileStorage({ root: env.FILE_STORAGE_ROOT, maxBytes: env.FILE_UPLOAD_MAX_BYTES }),
+  )
+  const confirmationService = createConfirmationService(
+    createConfirmationRepository(database.db),
+    createLearnerConfirmationHandlers({
+      sessions: createSessionService(identityRepository, identityRepository, { sessionTtlSeconds: env.SESSION_TTL_SECONDS }),
+      verificationService,
+      applicationService,
+      fileService,
+      accountService: adminManagementService,
+    }),
   )
   const app = createApp({
     checkDatabase: database.checkHealth,

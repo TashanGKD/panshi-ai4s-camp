@@ -9,11 +9,16 @@ import {
   type JsonValue,
   type LearnerCapabilityId,
 } from '@panshi/contracts'
-import type { ConfirmationHandlerRegistry } from './confirmation-handlers.js'
+import { ConfirmationHandlerInputError, isConfirmationHandlerResult, type ConfirmationHandlerRegistry } from './confirmation-handlers.js'
 
 export type ConfirmationStatus = 'pending' | 'executing' | 'consumed' | 'expired' | 'failed'
 export type ConfirmationRole = 'anonymous' | 'user' | 'admin'
-export type ConfirmationActor = { userId: string | null, role: ConfirmationRole }
+export type ConfirmationActor = {
+  userId: string | null
+  role: ConfirmationRole
+  user?: { id: string, displayName: string, phoneNormalized: string, passwordHash: string, role: 'user' | 'admin', disabledAt: Date | null, passwordResetRequiredAt?: Date | null }
+  credential?: { token: string, source: 'cookie' | 'bearer' }
+}
 
 export type ConfirmationIntent = {
   id: string
@@ -141,7 +146,6 @@ export const createConfirmationService = (
     }
     return {
       confirmationId: intent.id,
-      idempotencyKey: intent.idempotencyKey,
       expiresAt: intent.expiresAt.toISOString(),
       preview: intent.preview,
       payloadSha256: intent.payloadSha256,
@@ -149,12 +153,13 @@ export const createConfirmationService = (
     }
   }
 
-  const execute = async (actor: ConfirmationActor, confirmationId: string, rawInput: unknown) => {
+  const execute = async (actor: ConfirmationActor, confirmationId: string, rawInput: unknown, expectedCapabilityId?: LearnerCapabilityId, serverContext?: unknown) => {
     const input = parseExecute(rawInput)
     const intent = await repository.findById(confirmationId)
     if (!intent) throw new ConfirmationError('RESOURCE_NOT_FOUND', '确认意图不存在', 404)
     const handler = handlers.get(intent.capabilityId)
     if (!handler) throw new ConfirmationError('STATE_NOT_ALLOWED', '确认操作未配置')
+    if (expectedCapabilityId && intent.capabilityId !== expectedCapabilityId) throw new ConfirmationError('CONFIRMATION_MISMATCH', '确认能力与操作不一致')
     const bindingPayload = handler.executionBindingPayload?.(intent.payload, input.payload) ?? input.payload
     if (intent.actorUserId !== actor.userId
       || intent.clientBindingDigest !== input.clientBinding
@@ -176,11 +181,16 @@ export const createConfirmationService = (
       throw new ConfirmationError('CONFIRMATION_EXECUTION_INDETERMINATE', '操作可能正在执行，请重新读取业务状态', 409)
     }
     try {
-      const safeResult = canonicalValue(await handler.execute({ actorUserId: actor.userId, preparedPayload: intent.payload, executionPayload: input.payload })) as JsonObject
+      const handlerResult = await handler.execute({ actor, actorUserId: actor.userId, preparedPayload: intent.payload, executionPayload: input.payload, serverContext })
+      const safeResult = canonicalValue(isConfirmationHandlerResult(handlerResult) ? handlerResult.safeResult : handlerResult) as JsonObject
+      const responseResult = canonicalValue(isConfirmationHandlerResult(handlerResult) ? handlerResult.responseResult : handlerResult) as JsonObject
       await repository.consume(intent.id, safeResult, now())
-      return safeResult
+      return responseResult
     } catch (error) {
       await repository.reject(intent.id, 'failed', 'HANDLER_FAILED')
+      if (error instanceof ConfirmationHandlerInputError) {
+        throw new ConfirmationError('INPUT_INVALID', '确认执行内容无效')
+      }
       throw error
     }
   }

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../src/app/App'
 
 const siteResponse = {
@@ -24,10 +24,15 @@ const json = (body: unknown, status = 200) => ({
 
 const pathOf = (input: RequestInfo | URL) => typeof input === 'string' ? new URL(input, 'http://localhost').pathname : input instanceof URL ? input.pathname : new URL(input.url).pathname
 const renderRoute = (path: string) => render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>)
+const confirmationResponse = () => json({ apiVersion: 'v1', data: {
+  confirmationId: crypto.randomUUID(), expiresAt: '2026-08-18T00:05:00.000Z', preview: { action: '测试确认' },
+  payloadSha256: 'a'.repeat(64), confirmation: 'single',
+} }, 201)
 
 const installFetch = () => vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
   const path = pathOf(input)
   if (path === '/api/v1/public/site') return json(siteResponse)
+  if (path === '/api/v1/confirmations/prepare') return confirmationResponse()
   if (path === '/api/v1/auth/verification/send') return json(undefined, 204)
   if (path === '/api/v1/auth/register') return json({
     apiVersion: 'v1', data: { user: { id: 'u1', displayName: '实训营学员', role: 'user' } },
@@ -40,6 +45,7 @@ const installFetch = () => vi.spyOn(globalThis, 'fetch').mockImplementation(asyn
 })
 
 afterEach(() => vi.restoreAllMocks())
+beforeEach(() => vi.spyOn(window, 'confirm').mockReturnValue(true))
 
 describe('student auth pages', () => {
   it('completes the accessible three-step registration flow', async () => {
@@ -76,6 +82,7 @@ describe('student auth pages', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const path = pathOf(input)
       if (path === '/api/v1/public/site') return json(siteResponse)
+      if (path === '/api/v1/confirmations/prepare') return confirmationResponse()
       if (path === '/api/v1/auth/verification/send') return new Promise<Response>((resolve) => { resolveSend = resolve })
       throw new Error(`Unexpected ${path}`)
     })
@@ -89,7 +96,7 @@ describe('student auth pages', () => {
     fireEvent.click(screen.getByRole('button', { name: '获取验证码' }))
     expect(screen.getByRole('button', { name: '正在发送' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '正在发送' }))
-    expect(fetchSpy.mock.calls.filter(([input]) => pathOf(input) === '/api/v1/auth/verification/send')).toHaveLength(1)
+    await waitFor(() => expect(fetchSpy.mock.calls.filter(([input]) => pathOf(input) === '/api/v1/auth/verification/send')).toHaveLength(1))
     resolveSend?.(json(undefined, 204))
     expect(await screen.findByText('步骤 2 / 3')).toBeVisible()
   })
@@ -113,6 +120,7 @@ describe('student auth pages', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const path = pathOf(input)
       if (path === '/api/v1/public/site') return json(siteResponse)
+      if (path === '/api/v1/confirmations/prepare') return confirmationResponse()
       if (path === '/api/v1/auth/login') return json({
         error: { code: 'INVALID_CREDENTIALS', message: '手机号或密码错误', requestId: 'r1' },
       }, 401)

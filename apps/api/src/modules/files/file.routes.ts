@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream, createWriteStream, openSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { Transform } from 'node:stream'
@@ -13,6 +13,8 @@ import { buildContentDisposition, FileValidationError, normalizeMultipartOrigina
 import { FileStorageError, preparePrivateDirectory } from './local-file-storage.js'
 import { FileServiceError, type FileService } from './file.service.js'
 import { FILE_UPLOAD_HARD_MAX_BYTES } from './file-storage.js'
+import type { ConfirmationService } from '../confirmations/confirmation.service.js'
+import { executeConfirmedRequest, requireConfirmationHeaders } from '../confirmations/confirmed-request.js'
 
 const FileIdSchema = z.string().uuid()
 const MULTIPART_OVERHEAD_BYTES = 64 * 1_024
@@ -181,6 +183,7 @@ export const createFileRouter = (
     perUserWindowMax?: number
     perUserWindowMs?: number
   },
+  confirmations?: ConfirmationService,
 ) => {
   if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1_024 || options.maxBytes > FILE_UPLOAD_HARD_MAX_BYTES) {
     throw new Error('Invalid file upload size limit')
@@ -210,6 +213,9 @@ export const createFileRouter = (
   }).single('file')
 
   const receiveUpload: RequestHandler = (request, response, next) => {
+    if (confirmations) {
+      try { requireConfirmationHeaders(request) } catch (error) { next(error); return }
+    }
     const declaredLength = Number(request.get('Content-Length'))
     if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes + MULTIPART_OVERHEAD_BYTES) {
       next(new HttpError(413, 'FILE_TOO_LARGE', '文件超过大小限制'))
@@ -246,19 +252,34 @@ export const createFileRouter = (
           const visibility = typeof request.body.visibility === 'string' && ['public', 'authenticated', 'admitted'].includes(request.body.visibility)
             ? request.body.visibility as 'public' | 'authenticated' | 'admitted'
             : undefined
-          source = createReadStream(request.file.path)
-          // A service may reject metadata before consuming the stream; keep its asynchronous open error observed.
-          source.on('error', () => undefined)
-          const file = await service.upload({
-            stream: source,
-            originalName: normalizeMultipartOriginalName(request.file.originalname),
-            mimeType: request.file.mimetype,
-            sizeBytes: request.file.size,
-            purpose,
-            ...(attachmentSlot ? { attachmentSlot } : {}),
-            ...(visibility ? { visibility } : {}),
-          }, actor)
-          response.status(201).json({ apiVersion: 'v1', data: { file } })
+          const originalName = normalizeMultipartOriginalName(request.file.originalname)
+          if (confirmations) {
+            const hash = createHash('sha256')
+            const hashingStream = createReadStream(request.file.path)
+            for await (const chunk of hashingStream) hash.update(chunk as Buffer)
+            const payload = {
+              sha256: hash.digest('hex'), sizeBytes: request.file.size, originalName,
+              mimeType: request.file.mimetype, purpose,
+              attachmentSlot: attachmentSlot ?? null,
+            }
+            source = createReadStream(request.file.path)
+            source.on('error', () => undefined)
+            const result = await executeConfirmedRequest(
+              confirmations,
+              { userId: actor.id, role: actor.role, user: actor },
+              'file.upload', request, payload,
+              { uploadInput: { stream: source, originalName, mimeType: request.file.mimetype, sizeBytes: request.file.size, purpose, ...(attachmentSlot ? { attachmentSlot } : {}), ...(visibility ? { visibility } : {}) } },
+            )
+            response.status(201).json(result)
+          } else {
+            source = createReadStream(request.file.path)
+            source.on('error', () => undefined)
+            const file = await service.upload({
+              stream: source, originalName, mimeType: request.file.mimetype, sizeBytes: request.file.size, purpose,
+              ...(attachmentSlot ? { attachmentSlot } : {}), ...(visibility ? { visibility } : {}),
+            }, actor)
+            response.status(201).json({ apiVersion: 'v1', data: { file } })
+          }
         } catch (error) {
           next(toHttpError(error))
         } finally {
@@ -306,7 +327,10 @@ export const createFileRouter = (
   })
   router.patch('/:id/hide', async (request, response, next) => {
     try {
-      await service.hide(parseId(request.params.id ?? ''), (response.locals as AuthenticatedLocals).authenticatedUser)
+      const fileId = parseId(request.params.id ?? '')
+      const actor = (response.locals as AuthenticatedLocals).authenticatedUser
+      if (!confirmations) await service.hide(fileId, actor)
+      else await executeConfirmedRequest(confirmations, { userId: actor.id, role: actor.role, user: actor }, 'file.hide', request, { fileId })
       response.sendStatus(204)
     } catch (error) {
       next(toHttpError(error))
@@ -314,7 +338,10 @@ export const createFileRouter = (
   })
   router.delete('/:id', async (request, response, next) => {
     try {
-      await service.remove(parseId(request.params.id ?? ''), (response.locals as AuthenticatedLocals).authenticatedUser)
+      const fileId = parseId(request.params.id ?? '')
+      const actor = (response.locals as AuthenticatedLocals).authenticatedUser
+      if (!confirmations) await service.remove(fileId, actor)
+      else await executeConfirmedRequest(confirmations, { userId: actor.id, role: actor.role, user: actor }, 'file.delete', request, { fileId })
       response.sendStatus(204)
     } catch (error) {
       next(toHttpError(error))

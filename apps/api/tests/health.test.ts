@@ -223,6 +223,7 @@ describe('API health', () => {
       .options('/api/v1/not-implemented')
       .set('Origin', 'https://camp.example')
       .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type,x-confirmation-id,x-confirmation-binding,x-idempotency-key')
     const denied = await request(createTestApp())
       .options('/api/v1/not-implemented')
       .set('Origin', 'https://evil.example')
@@ -230,6 +231,9 @@ describe('API health', () => {
 
     expect(allowed.status).toBe(204)
     expect(allowed.headers['access-control-allow-origin']).toBe('https://camp.example')
+    expect(allowed.headers['access-control-allow-headers']).toContain('X-Confirmation-Id')
+    expect(allowed.headers['access-control-allow-headers']).toContain('X-Confirmation-Binding')
+    expect(allowed.headers['access-control-allow-headers']).toContain('X-Idempotency-Key')
     expect(denied.headers['access-control-allow-origin']).toBeUndefined()
   })
 })

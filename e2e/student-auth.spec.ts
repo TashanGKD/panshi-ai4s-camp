@@ -12,6 +12,7 @@ if (!verificationCode || !registerPhone || !registerPassword || !resetPhone || !
 }
 
 test('student can register, log in, reset a password, and log in with the new password', async ({ page }) => {
+  page.on('dialog', (dialog) => dialog.accept())
   await page.goto('/register')
   await page.getByLabel('手机号').fill(registerPhone)
   await page.getByRole('button', { name: '获取验证码' }).click()

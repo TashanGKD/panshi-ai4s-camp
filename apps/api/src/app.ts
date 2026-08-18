@@ -115,7 +115,7 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
     if (request.method === 'OPTIONS') {
       if (originAllowed) {
         response.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS')
-        response.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Request-Id')
+        response.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Request-Id,X-Confirmation-Id,X-Confirmation-Binding,X-Idempotency-Key')
       }
       response.sendStatus(204)
       return
@@ -195,6 +195,7 @@ export const createApp = ({
       ...(studentIdentityRepository && verificationService ? { verificationService } : {}),
       rateLimiter,
       loginFailurePolicy: rateLimits.login_failure,
+      confirmationService,
     }))
     if (confirmationService) app.use('/api/v1', createConfirmationRouter(sessions, confirmationService))
     if (contentPublishingService) {
@@ -202,7 +203,7 @@ export const createApp = ({
     }
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
     if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
-    if (applicationService) app.use('/api/v1/me/application', createApplicationRouter(sessions, applicationService))
+    if (applicationService) app.use('/api/v1/me/application', createApplicationRouter(sessions, applicationService, confirmationService))
     if (checkInService) app.use('/api/v1/me/check-in', createStudentCheckInRouter(sessions, checkInService))
     if (reviewService) app.use('/api/v1/admin/applications', createAdminApplicationRouter(sessions, reviewService))
     if (checkInService) app.use('/api/v1/admin/check-in', createAdminCheckInRouter(sessions, checkInService))
@@ -217,12 +218,12 @@ export const createApp = ({
         perUserConcurrency: config.fileUploadPerUserConcurrency,
         perUserWindowMax: config.fileUploadPerUserWindowMax,
         perUserWindowMs: config.fileUploadPerUserWindowMs,
-      }))
+      }, confirmationService))
     }
     if (resourceService) app.use('/api/v1/resources', createResourceRouter(sessions, resourceService))
     if (resourceService) app.use('/api/v1/admin/resources', createAdminResourceRouter(sessions, resourceService))
     if (adminManagementService) app.use('/api/v1/admin/users', createAdminUsersRouter(sessions, adminManagementService))
-    if (adminManagementService) app.use('/api/v1/me/account', createMyAccountRouter(sessions, adminManagementService))
+    if (adminManagementService) app.use('/api/v1/me/account', createMyAccountRouter(sessions, adminManagementService, confirmationService))
     if (auditQueryService) app.use('/api/v1/admin/audit-logs', createAuditRouter(sessions, auditQueryService))
     if (adminHealthService) app.use('/api/v1/admin/system-health', createAdminHealthRouter(sessions, adminHealthService))
   }

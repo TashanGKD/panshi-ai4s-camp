@@ -5,6 +5,8 @@ import { createRequireUser } from '../../middleware/require-user.js'
 import { HttpError } from '../../middleware/error-handler.js'
 import type { SessionService } from './session.service.js'
 import { AdminManagementError, type AdminManagementService } from './admin-management.service.js'
+import type { ConfirmationService } from '../confirmations/confirmation.service.js'
+import { executeConfirmedRequest } from '../confirmations/confirmed-request.js'
 
 const CreateInput = z.object({ displayName: z.string().trim().min(1).max(100), phone: z.string().trim().min(1).max(30), password: z.string().min(1).max(128), currentPassword: z.string().min(1).max(128) }).strict()
 const PasswordInput = z.object({ currentPassword: z.string().min(1).max(128) }).strict()
@@ -29,8 +31,11 @@ export const createAdminUsersRouter = (sessions: SessionService, service: AdminM
   return router
 }
 
-export const createMyAccountRouter = (sessions: SessionService, service: AdminManagementService) => {
+export const createMyAccountRouter = (sessions: SessionService, service: AdminManagementService, confirmations?: ConfirmationService) => {
   const router = Router(); router.use(createRequireUser(sessions))
-  router.post('/password', async (request, response, next) => { try { response.json(await service.changeOwnPassword(response.locals.authenticatedUser, parse(ResetPasswordInput, request.body))) } catch (error) { next(http(error)) } })
+  router.post('/password', async (request, response, next) => { try {
+    if (!confirmations) response.json(await service.changeOwnPassword(response.locals.authenticatedUser, parse(ResetPasswordInput, request.body)))
+    else response.json(await executeConfirmedRequest(confirmations, { userId: response.locals.authenticatedUser.id, role: response.locals.authenticatedUser.role, user: response.locals.authenticatedUser }, 'account.password_change', request))
+  } catch (error) { next(http(error)) } })
   return router
 }

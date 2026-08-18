@@ -58,7 +58,7 @@ test('default release build is local-only and does not modify the tracked Skill 
   assert.equal(result.manifest.packageTreeSha256, trustedManifest.packageTreeSha256)
   await checkCliRelease({ repoRoot, skillManifestPath: result.manifestPath })
   if (process.platform !== 'win32') await checkCliRelease({ repoRoot })
-  await assert.rejects(checkCliRelease({ repoRoot, skillManifestPath: result.manifestPath, expectedTag: 'cli-v0.1.12' }), /CLI_RELEASE_TAG_DRIFT/u)
+  await assert.rejects(checkCliRelease({ repoRoot, skillManifestPath: result.manifestPath, expectedTag: 'cli-v0.1.13' }), /CLI_RELEASE_TAG_DRIFT/u)
 })
 
 test('release path gate rejects traversal, absolute paths, and Windows drive paths', () => {

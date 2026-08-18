@@ -16,6 +16,7 @@ import type * as schema from '../../db/schema.js'
 import { shanghaiBusinessDate } from '../../lib/business-date.js'
 import { DOCX_MIME, PDF_MIME, type AllowedFileExtension } from '../files/file-validation.js'
 import { appendAuditLog } from '../audit/audit.repository.js'
+import { enqueueSmsNotification } from '../sms/notification.repository.js'
 import { ApplicationSubmissionError, type ApplicationFile, type ApplicationRecord, type ApplicationRepository } from './application.service.js'
 
 const DRAFT_ID = '00000000-0000-4000-8000-000000000010'
@@ -277,6 +278,13 @@ export const createApplicationRepository = (
       const nextStatus = isSupplement ? 'reviewing' : 'submitted'
       await transaction.update(applications).set({ status: nextStatus, revision: locked.revision + 1, submittedAt, updatedAt: submittedAt, supplementPublicMessage: null, supplementDeadline: null, supplementEditableFieldIds: [], supplementEditableAttachmentIds: [] }).where(eq(applications.id, record.id))
       await transaction.insert(applicationStatusHistory).values({ applicationId: record.id, fromStatus: locked.status, toStatus: nextStatus, changedBy: input.user.id })
+      await enqueueSmsNotification(transaction as NodePgDatabase<typeof schema>, {
+        eventKey: `application-submitted:${version.id}`,
+        eventType: 'application_submitted',
+        applicationId: record.id,
+        userId: input.user.id,
+        phoneNormalized: input.user.phoneNormalized,
+      })
       await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.user.id, action: isSupplement ? 'application.supplement_resubmitted' : 'application.submitted', entityType: 'application', entityId: record.id, metadata: { formVersionId: record.formVersionId, answerCount: Object.keys(activeAnswers).length, retiredAnswerCount: retiredAnswerIds.length, attachmentCount: lockedFiles.length } })
       return { applicationId: record.id, versionId: version.id, submittedAt }
     }),

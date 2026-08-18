@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { DEFAULT_REGISTRATION_FORM, type ApplicationCoreFields, type JsonObject, type RegistrationForm } from '@panshi/contracts'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { applications, applicationFiles, applicationVersions, auditLogs, contentModules, contentVersions, files, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
+import { applications, applicationFiles, applicationVersions, auditLogs, contentModules, contentVersions, files, registrationFormDrafts, registrationFormVersions, smsNotificationOutbox, users } from '../src/db/schema.js'
 import { createApplicationRepository } from '../src/modules/registration/application.repository.js'
 import { createApplicationService } from '../src/modules/registration/application.service.js'
 import { createFileRepository } from '../src/modules/files/file.repository.js'
@@ -192,6 +192,16 @@ describe('application PostgreSQL workflow', () => {
     expect(versions.map(({ reason }) => reason)).toEqual(['initial_submission', 'resubmission'])
     expect(versions[0]?.snapshot).toMatchObject({ answers: { [questionId]: '并发研究问题' } })
     expect(versions[1]?.snapshot).toMatchObject({ answers: { [questionId]: '修改后的研究问题' } })
+
+    const notifications = await database.db.select().from(smsNotificationOutbox)
+      .where(eq(smsNotificationOutbox.applicationId, resubmitted.data.application.id))
+      .orderBy(smsNotificationOutbox.createdAt)
+    expect(notifications).toHaveLength(2)
+    expect(notifications.map(({ eventType }) => eventType)).toEqual([
+      'application_submitted',
+      'application_submitted',
+    ])
+    expect(new Set(notifications.map(({ eventKey }) => eventKey)).size).toBe(2)
   })
 
   it('rejects closed windows and disabled accounts', async () => {

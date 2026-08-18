@@ -4,11 +4,20 @@ import { RegistrationFormSchema, type ApplicationStatus } from '@panshi/contract
 import { applicationFiles, applications, applicationStatusHistory, applicationVersions, files, registrationFormVersions, users } from '../../db/schema.js'
 import type * as schema from '../../db/schema.js'
 import { appendAuditLog } from '../audit/audit.repository.js'
+import { enqueueSmsNotification } from '../sms/notification.repository.js'
+import type { SmsNotificationEventType } from '../sms/notification.types.js'
 import { ReviewError, type ReviewListQuery, type ReviewRepository, type ReviewTransitionInput } from './review.service.js'
 
 const allowedTransitions: Readonly<Record<ApplicationStatus, readonly ApplicationStatus[]>> = {
   draft: [], submitted: ['reviewing'], reviewing: ['needs_supplement', 'admitted', 'waitlisted', 'rejected'],
   needs_supplement: ['reviewing'], admitted: [], waitlisted: [], rejected: [],
+}
+
+const notificationEventByStatus: Readonly<Partial<Record<ApplicationStatus, SmsNotificationEventType>>> = {
+  needs_supplement: 'needs_supplement',
+  admitted: 'admitted',
+  waitlisted: 'waitlisted',
+  rejected: 'rejected',
 }
 
 const filtersFor = (query: ReviewListQuery): SQL[] => {
@@ -68,14 +77,28 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
       supplementEditableAttachmentIds: input.targetStatus === 'needs_supplement' ? input.editableAttachmentIds : [],
       internalReviewNote: input.internalNote ?? locked.internalReviewNote,
     }).where(and(eq(applications.id, locked.id), eq(applications.revision, locked.revision)))
-    await transaction.insert(applicationStatusHistory).values({
+    const [history] = await transaction.insert(applicationStatusHistory).values({
       applicationId: locked.id,
       fromStatus: locked.status,
       toStatus: input.targetStatus,
       changedBy: input.adminId,
       reason: input.targetStatus === 'needs_supplement' ? input.publicMessage : null,
       internalNote: input.internalNote ?? null,
-    })
+    }).returning({ id: applicationStatusHistory.id })
+    if (!history) throw new Error('Application status history creation failed')
+    const notificationEvent = notificationEventByStatus[input.targetStatus]
+    if (notificationEvent) {
+      const [recipient] = await transaction.select({ phoneNormalized: users.phoneNormalized })
+        .from(users).where(eq(users.id, locked.userId)).limit(1)
+      if (!recipient) throw new Error('Application recipient is missing')
+      await enqueueSmsNotification(transaction as NodePgDatabase<typeof schema>, {
+        eventKey: `application-status:${history.id}`,
+        eventType: notificationEvent,
+        applicationId: locked.id,
+        userId: locked.userId,
+        phoneNormalized: recipient.phoneNormalized,
+      })
+    }
     await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.adminId, action: 'application.status_changed', entityType: 'application', entityId: locked.id, metadata: { fromStatus: locked.status, toStatus: input.targetStatus, revision: nextRevision, editableFieldCount: input.editableFieldIds.length, editableAttachmentCount: input.editableAttachmentIds.length } })
     return { id: locked.id, revision: nextRevision, status: input.targetStatus }
   }

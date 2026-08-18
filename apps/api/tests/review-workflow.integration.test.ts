@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { DEFAULT_REGISTRATION_FORM, type ApplicationCoreFields, type JsonObject, type RegistrationForm } from '@panshi/contracts'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
-import { applications, applicationStatusHistory, applicationVersions, auditLogs, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
+import { applications, applicationStatusHistory, applicationVersions, auditLogs, registrationFormDrafts, registrationFormVersions, smsNotificationOutbox, users } from '../src/db/schema.js'
 import { createReviewRepository } from '../src/modules/registration/review.repository.js'
 import { createReviewService } from '../src/modules/registration/review.service.js'
 import { createApplicationRepository } from '../src/modules/registration/application.repository.js'
@@ -43,7 +43,39 @@ describe('review workflow PostgreSQL', () => {
     await expect(service.transition(admin, '30000000-0000-4000-8000-000000000001', { expectedRevision: reviewing.data.revision, targetStatus: 'needs_supplement', publicMessage: '请补充研究计划', editableFieldIds: [questionId], editableAttachmentIds: [slotId] })).resolves.toMatchObject({ data: { status: 'needs_supplement' } })
     const history = await database.db.select().from(applicationStatusHistory); expect(history.map((row) => row.toStatus)).toEqual(['submitted', 'reviewing', 'needs_supplement'])
     const audit = JSON.stringify(await database.db.select().from(auditLogs)); expect(audit).not.toContain('不可导出的内部备注'); expect(audit).not.toContain('请补充研究计划'); expect(audit).not.toContain('内部答案')
+
+    const notifications = await database.db.select().from(smsNotificationOutbox)
+    expect(notifications).toHaveLength(1)
+    expect(notifications[0]).toMatchObject({
+      eventType: 'needs_supplement',
+      applicationId: '30000000-0000-4000-8000-000000000001',
+      userId: student.id,
+      phoneNormalized: '13900139000',
+    })
   })
+
+  it.each(['admitted', 'waitlisted', 'rejected'] as const)(
+    'enqueues the %s notification but never a reviewing notification',
+    async (targetStatus) => {
+      const service = createReviewService(createReviewRepository(database.db))
+      const reviewing = await service.transition(admin, '30000000-0000-4000-8000-000000000001', {
+        expectedRevision: 2,
+        targetStatus: 'reviewing',
+        editableFieldIds: [],
+        editableAttachmentIds: [],
+      })
+      await service.transition(admin, '30000000-0000-4000-8000-000000000001', {
+        expectedRevision: reviewing.data.revision,
+        targetStatus,
+        editableFieldIds: [],
+        editableAttachmentIds: [],
+      })
+
+      const notifications = await database.db.select().from(smsNotificationOutbox)
+      expect(notifications).toHaveLength(1)
+      expect(notifications[0]).toMatchObject({ eventType: targetStatus })
+    },
+  )
 
   it('preserves every administrator reason as immutable private status history', async () => {
     const service = createReviewService(createReviewRepository(database.db))
@@ -120,6 +152,11 @@ describe('review workflow PostgreSQL', () => {
     await expect(applicationsService.submit(student, { expectedRevision: saved.data.application.revision })).resolves.toMatchObject({ data: { status: 'reviewing' } })
     const versions = await database.db.select().from(applicationVersions).where(eq(applicationVersions.applicationId, '30000000-0000-4000-8000-000000000001'))
     expect(versions).toHaveLength(2); expect(versions[0]?.snapshot).toMatchObject({ answers: { [questionId]: '内部答案' } }); expect(versions[1]?.snapshot).toMatchObject({ answers: { [questionId]: '补充后的研究计划' } })
+    const notifications = await database.db.select().from(smsNotificationOutbox)
+    expect(notifications.map(({ eventType }) => eventType)).toEqual([
+      'needs_supplement',
+      'application_submitted',
+    ])
   })
 
   it('allows only one concurrent transition for the same revision', async () => {

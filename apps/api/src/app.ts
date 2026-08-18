@@ -36,6 +36,8 @@ import { createInstitutionRouter } from './modules/institutions/institution.rout
 import type { InstitutionDirectoryService } from './modules/institutions/institution.service.js'
 import { createAdminCheckInRouter, createStudentCheckInRouter } from './modules/check-in/check-in.routes.js'
 import type { CheckInService } from './modules/check-in/check-in.service.js'
+import { createConfirmationRouter } from './modules/confirmations/confirmation.routes.js'
+import type { ConfirmationService } from './modules/confirmations/confirmation.service.js'
 import { createRateLimiter, createRateLimitMiddleware, defaultRateLimits, InMemoryRateLimitStore, type RateLimiter, type RateLimitCategory, type RateLimitPolicy, type RateLimitStore } from './middleware/rate-limit.js'
 
 export type ApiRuntimeConfig = {
@@ -78,6 +80,7 @@ export type AppDependencies = {
   adminHealthService?: AdminHealthService
   institutionDirectoryService?: Pick<InstitutionDirectoryService, 'getDirectory'>
   checkInService?: CheckInService
+  confirmationService?: ConfirmationService
   rateLimitStore?: RateLimitStore
   rateLimitNow?: () => number
   config: ApiRuntimeConfig
@@ -124,8 +127,11 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
       const cliLoginWithoutBrowserState = request.path === '/api/v1/auth/cli/login'
         && request.get('Authorization') === undefined
         && typeof request.cookies?.panshi_session !== 'string'
+      const anonymousConfirmationWithoutBrowserState = /^\/api\/v1\/confirmations\/(?:prepare|[0-9a-f-]+\/execute)$/u.test(request.path)
+        && request.get('Authorization') === undefined
+        && typeof request.cookies?.panshi_session !== 'string'
       if (origin === undefined) {
-        if (bearerOnly || cliLoginWithoutBrowserState) {
+        if (bearerOnly || cliLoginWithoutBrowserState || anonymousConfirmationWithoutBrowserState) {
           next()
           return
         }
@@ -162,6 +168,7 @@ export const createApp = ({
   adminHealthService,
   institutionDirectoryService,
   checkInService,
+  confirmationService,
   rateLimitStore,
   rateLimitNow,
   config,
@@ -174,7 +181,7 @@ export const createApp = ({
 
   app.set('trust proxy', config.trustProxyHops && config.trustProxyHops > 0 ? config.trustProxyHops : false)
   app.use(requestId)
-  app.use(['/api/v1/me', '/api/v1/files', '/api/v1/auth', '/api/v1/admin'], privateNoStore)
+  app.use(['/api/v1/me', '/api/v1/files', '/api/v1/auth', '/api/v1/admin', '/api/v1/confirmations'], privateNoStore)
   app.use(express.json({ limit: config.jsonLimitBytes, strict: true }))
   app.use(cookieParser())
   app.use(createRateLimitMiddleware(rateLimiter, rateLimits))
@@ -189,6 +196,7 @@ export const createApp = ({
       rateLimiter,
       loginFailurePolicy: rateLimits.login_failure,
     }))
+    if (confirmationService) app.use('/api/v1', createConfirmationRouter(sessions, confirmationService))
     if (contentPublishingService) {
       app.use('/api/v1/admin/content', createAdminContentRouter(sessions, contentPublishingService))
     }

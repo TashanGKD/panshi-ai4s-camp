@@ -76,6 +76,7 @@ export const defaultRateLimits: Record<RateLimitCategory, RateLimitPolicy> = {
 const categoryForPath = (path: string): Exclude<RateLimitCategory, 'login_failure'> | undefined => {
   if (path.startsWith('/api/v1/admin')) return 'admin'
   if (path.startsWith('/api/v1/auth')) return 'auth_verification'
+  if (path.startsWith('/api/v1/confirmations')) return 'authenticated'
   if (path.startsWith('/api/v1/public')) return 'public'
   if (path.startsWith('/api/v1/me') || path.startsWith('/api/v1/files') || path.startsWith('/api/v1/resources')) return 'authenticated'
   return undefined

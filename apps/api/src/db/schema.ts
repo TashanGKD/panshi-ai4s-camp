@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
@@ -34,6 +35,7 @@ type FileStorageRecoveryState = 'pending' | 'delete_failed'
 type VerificationPurpose = 'register' | 'reset_password'
 type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 type SessionKind = 'web' | 'cli' | 'admin_web' | 'admin_cli'
+type ConfirmationStatus = 'pending' | 'executing' | 'consumed' | 'expired' | 'failed'
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
@@ -77,6 +79,38 @@ export const sessions = pgTable('sessions', {
   index('sessions_expires_at_idx').on(table.expiresAt),
   index('sessions_user_kind_active_idx').on(table.userId, table.kind).where(sql`${table.revokedAt} is null`),
   check('sessions_kind_check', sql`${table.kind} in ('web', 'cli', 'admin_web', 'admin_cli')`),
+])
+
+export const confirmationIntents = pgTable('confirmation_intents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'restrict' }),
+  siteId: text('site_id').notNull().default('panshi-ai4s-camp'),
+  capabilityId: text('capability_id').notNull(),
+  payloadSha256: text('payload_sha256').notNull(),
+  payload: jsonb('payload').$type<JsonObject>().notNull(),
+  preview: jsonb('preview').$type<JsonObject>().notNull(),
+  targetType: text('target_type'),
+  targetId: text('target_id'),
+  expectedRevision: integer('expected_revision'),
+  clientBindingDigest: text('client_binding_digest').notNull(),
+  idempotencyKey: uuid('idempotency_key').notNull(),
+  status: text('status').$type<ConfirmationStatus>().notNull().default('pending'),
+  safeResult: jsonb('safe_result').$type<JsonObject>(),
+  resultCode: text('result_code'),
+  createdAt: createdAt(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('confirmation_intents_actor_idempotency_unique').on(table.actorUserId, table.idempotencyKey).where(sql`${table.actorUserId} is not null`),
+  uniqueIndex('confirmation_intents_anonymous_idempotency_unique').on(table.clientBindingDigest, table.idempotencyKey).where(sql`${table.actorUserId} is null`),
+  index('confirmation_intents_actor_status_idx').on(table.actorUserId, table.status),
+  index('confirmation_intents_status_expiry_idx').on(table.status, table.expiresAt),
+  check('confirmation_intents_site_id_check', sql`${table.siteId} = 'panshi-ai4s-camp'`),
+  check('confirmation_intents_payload_sha256_check', sql`${table.payloadSha256} ~ '^[a-f0-9]{64}$'`),
+  check('confirmation_intents_client_binding_check', sql`${table.clientBindingDigest} ~ '^[a-f0-9]{64}$'`),
+  check('confirmation_intents_revision_check', sql`${table.expectedRevision} is null or ${table.expectedRevision} >= 0`),
+  check('confirmation_intents_status_check', sql`${table.status} in ('pending', 'executing', 'consumed', 'expired', 'failed')`),
+  check('confirmation_intents_consumed_state_check', sql`(${table.status} = 'consumed') = (${table.consumedAt} is not null and ${table.safeResult} is not null)`),
 ])
 
 export const verificationCodes = pgTable('verification_codes', {

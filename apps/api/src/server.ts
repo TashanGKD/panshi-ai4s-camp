@@ -30,6 +30,9 @@ import { createAdminHealthFileChecks, createAdminHealthService } from './modules
 import { createInstitutionDirectoryService } from './modules/institutions/institution.service.js'
 import { createCheckInRepository } from './modules/check-in/check-in.repository.js'
 import { createCheckInService } from './modules/check-in/check-in.service.js'
+import { createConfirmationRepository } from './modules/confirmations/confirmation.repository.js'
+import { createConfirmationService } from './modules/confirmations/confirmation.service.js'
+import { createConfirmationHandlerRegistry } from './modules/confirmations/confirmation-handlers.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -275,6 +278,10 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     isUcasTrainingUnit: institutionDirectoryService.isUcasTrainingUnit,
   })
   const checkInService = createCheckInService(createCheckInRepository(database.db), { tokenSecret: env.CHECK_IN_TOKEN_SECRET })
+  const confirmationService = createConfirmationService(
+    createConfirmationRepository(database.db),
+    createConfirmationHandlerRegistry([]),
+  )
   const fileService = createFileService(
     createFileRepository(database.db),
     createLocalFileStorage({ root: env.FILE_STORAGE_ROOT, maxBytes: env.FILE_UPLOAD_MAX_BYTES }),
@@ -291,6 +298,7 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     institutionDirectoryService,
     applicationService,
     checkInService,
+    confirmationService,
     reviewService: createReviewService(createReviewRepository(database.db)),
     fileService,
     resourceService: createResourceService(createResourceRepository(database.db), fileService),

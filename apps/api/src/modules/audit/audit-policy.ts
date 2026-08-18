@@ -1,4 +1,4 @@
-import { ApplicationStatusSchema, ContentModuleKeySchema, ResourceAccessSchema, type JsonObject } from '@panshi/contracts'
+import { ApplicationStatusSchema, ContentModuleKeySchema, LearnerCapabilityIdSchema, ResourceAccessSchema, type JsonObject } from '@panshi/contracts'
 import { z } from 'zod'
 
 const Count = z.number().int().nonnegative()
@@ -25,6 +25,11 @@ const RevokedSessions = z.object({ revokedSessionCount: Count }).strict()
 const SeedSource = z.enum(['initial_content_seed', 'authoritative_v2_1_1_seed'])
 const CheckInMetadata = z.object({ applicationId: Uuid, credentialId: Uuid, revision: Revision }).strict()
 const CheckInCredentialMetadata = z.object({ applicationId: Uuid, revision: Revision }).strict()
+const ConfirmationMetadata = z.object({
+  capabilityId: LearnerCapabilityIdSchema,
+  resultCode: z.string().regex(/^[A-Z0-9_]+$/u),
+  targetType: z.string().min(1).max(100).nullable(),
+}).strict()
 
 const definitions = {
   'admin.created': { entityType: 'user', metadata: AdminResult },
@@ -70,6 +75,9 @@ const definitions = {
   'resource.draft_saved': { entityType: 'resource', metadata: ResourceMetadata },
   'resource.published': { entityType: 'resource', metadata: ResourceMetadata },
   'resource.unpublished': { entityType: 'resource', metadata: ResourceMetadata },
+  'confirmation.prepared': { entityType: 'confirmation_intent', metadata: ConfirmationMetadata },
+  'confirmation.consumed': { entityType: 'confirmation_intent', metadata: ConfirmationMetadata },
+  'confirmation.rejected': { entityType: 'confirmation_intent', metadata: ConfirmationMetadata },
 } as const
 const nullEntityActions = new Set<AuditAction>(['auth.login_succeeded', 'auth.cli_login_succeeded', 'auth.cli_logout', 'application.bulk_status_changed', 'application.exported'])
 const contentModuleEntityActions = new Set<AuditAction>(['content.version_published', 'content.draft_saved', 'content.published', 'content.rolled_back'])

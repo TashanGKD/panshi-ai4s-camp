@@ -12,5 +12,14 @@ for target in /data /backups; do
   [[ "$(cd "$target" && pwd -P)" == "$target" ]] || { printf 'Volume target resolves unexpectedly\n' >&2; exit 1; }
 done
 
+if [[ -e /data/uploads && ! -e /data/uploads/.panshi-storage-root ]]; then
+  [[ -d /data/uploads && ! -L /data/uploads ]] || { printf 'Invalid unmarked upload root\n' >&2; exit 1; }
+  [[ -z "$(find /data/uploads -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+    printf 'Refusing to remove a non-empty unmarked upload root\n' >&2
+    exit 1
+  }
+  rmdir /data/uploads
+fi
+
 chown -R "$OPERATIONS_UID:$OPERATIONS_GID" /data /backups
 chmod 700 /data /backups

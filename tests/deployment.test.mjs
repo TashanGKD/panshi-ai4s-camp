@@ -135,6 +135,8 @@ assert.match(volumeInit, /OPERATIONS_UID/u)
 assert.match(volumeInit, /OPERATIONS_GID/u)
 assert.match(volumeInit, /chown[^\n]+\/data[^\n]+\/backups/u)
 assert.doesNotMatch(volumeInit, /mkdir[^\n]+\/data\/uploads/u, 'the API must create and mark the private upload root itself')
+assert.match(volumeInit, /Refusing to remove a non-empty unmarked upload root/u)
+assert.match(volumeInit, /rmdir \/data\/uploads/u)
 assert.doesNotMatch(volumeInit, /chown[^\n]+(?:^|\s)\/(?:\s|$)/u, 'volume init must never chown the filesystem root')
 
 const webDockerfile = await readProjectFile('apps/web/Dockerfile')

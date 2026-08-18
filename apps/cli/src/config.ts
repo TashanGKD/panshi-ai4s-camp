@@ -41,7 +41,7 @@ export const loadConfig = async (path: string): Promise<CliConfig> => {
   if (metadata.isSymbolicLink()) throw new CliRuntimeError('CONFIG_SYMLINK_FORBIDDEN')
   if (!metadata.isFile()) throw new CliRuntimeError('CONFIG_INVALID')
   if (typeof process.getuid === 'function' && metadata.uid !== process.getuid()) throw new CliRuntimeError('CONFIG_NOT_OWNED')
-  if ((metadata.mode & 0o077) !== 0) throw new CliRuntimeError('CONFIG_PERMISSIONS_UNSAFE')
+  if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) throw new CliRuntimeError('CONFIG_PERMISSIONS_UNSAFE')
   try { return parseConfig(JSON.parse(await readFile(path, 'utf8'))) } catch (error) {
     if (error instanceof CliRuntimeError) throw error
     throw new CliRuntimeError('CONFIG_INVALID')

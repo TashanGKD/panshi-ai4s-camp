@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { link, lstat, open, unlink } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, parse, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { CliRuntimeError } from '../errors.js'
@@ -30,7 +30,7 @@ const assertServerFilenameSafe = (headers: Headers) => {
 export const resolveSafeOutputPath = async (raw: string, workspaceRoot: string, homeDirectory: string) => {
   if (!raw.trim() || unresolvedVariable.test(raw)) throw new CliRuntimeError('INPUT_INVALID', '输出路径无效')
   const target = resolve(raw)
-  const protectedPaths = ['/', resolve(workspaceRoot), resolve(homeDirectory)]
+  const protectedPaths = [parse(target).root, resolve(workspaceRoot), resolve(homeDirectory)]
   if (protectedPaths.includes(target)) throw new CliRuntimeError('INPUT_INVALID', '不能写入受保护路径')
   const parent = dirname(target)
   const parentMetadata = await lstat(parent).catch(() => { throw new CliRuntimeError('INPUT_INVALID', '输出目录不存在') })

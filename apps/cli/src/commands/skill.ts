@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, readdir, readFile, rename, rm } from 'node:fs/promises'
-import { dirname, join, parse, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CliRuntimeError } from '../errors.js'
 import { parseOptions, requiredString } from './options.js'
@@ -25,11 +25,12 @@ const digestInventory = (entries: Entry[]) => createHash('sha256').update(JSON.s
 
 const assertSafeTarget = async (homeDirectory: string, target: string) => {
   const home = resolve(homeDirectory); const resolvedTarget = resolve(target)
-  if (resolvedTarget === parse(resolvedTarget).root || resolvedTarget === home || !resolvedTarget.startsWith(`${home}/`)) {
+  const homeRelation = relative(home, resolvedTarget)
+  if (resolvedTarget === parse(resolvedTarget).root || homeRelation === '' || homeRelation.startsWith('..') || isAbsolute(homeRelation)) {
     throw new CliRuntimeError('INPUT_INVALID', 'Skill 安装目标过于宽泛')
   }
   let cursor = home
-  for (const segment of relative(home, dirname(resolvedTarget)).split('/').filter(Boolean)) {
+  for (const segment of relative(home, dirname(resolvedTarget)).split(sep).filter(Boolean)) {
     cursor = join(cursor, segment)
     const metadata = await lstat(cursor).catch(() => null)
     if (metadata?.isSymbolicLink()) throw new CliRuntimeError('INPUT_INVALID', 'Skill 安装路径不得经过符号链接')
@@ -47,7 +48,7 @@ export const runSkillCommand = async (args: string[], options: {
   onPreview?: (preview: unknown) => unknown
 }) => {
   const source = resolve(options.sourceDirectory ?? defaultSource)
-  if (source === parse(source).root || source === resolve(options.homeDirectory) || !source.endsWith('/panshi-camp')) throw new CliRuntimeError('INPUT_INVALID', 'Skill 来源路径无效')
+  if (source === parse(source).root || source === resolve(options.homeDirectory) || basename(source) !== 'panshi-camp') throw new CliRuntimeError('INPUT_INVALID', 'Skill 来源路径无效')
   if (args[0] === 'path' && args.length === 1) { await inventory(source); return { path: source } }
   if (args[0] !== 'install') throw new CliRuntimeError('INPUT_INVALID', 'skill 仅支持 path 或 install')
   const { positionals, values } = parseOptions(args.slice(1), { '--agent': 'string', '--confirm': 'string' })

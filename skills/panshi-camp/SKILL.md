@@ -10,7 +10,7 @@ description: 通过 panshi-camp CLI 查询实训营公开信息、管理个人�
 ## 准备
 
 1. 先把 `<PANSHI_CAMP_CLI>` 解析成当前平台稳定入口的绝对路径：Unix 为当前用户主目录下 `.local/bin/panshi-camp`，Windows 为 `LOCALAPPDATA` 绝对目录下 `panshi-camp-cli\\bin\\panshi-camp.cmd`。后续始终直接调用该绝对路径，不依赖 `PATH`。
-2. 如果稳定入口不存在或版本不匹配，按 [安装与安全自举](references/installation.md) 操作：用当前 Skill 目录的绝对路径无参数运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs"`，向用户完整展示预览并停止询问；只有用户看过本次预览并明确同意，才运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs" --yes`。不得代替用户确认，也不得添加其他参数。
+2. 每次自举都按 [安装与安全自举](references/installation.md) 的固定顺序操作：先无参数运行安装器取得 `requiredVersion`；再检查稳定入口，存在时运行其 `--version` 比较。入口存在且版本一致就直接继续；只有入口不存在或版本不一致，才向用户完整展示本次预览并询问是否安装。用户明确同意后才运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs" --yes`。不得代替用户确认，也不得添加其他参数。
 3. 如果安装器报告 `INSTALLER_NOT_PUBLISHED`，说明 CLI 尚未发布；停止，不自行寻找下载地址，不联网安装其他包。
 4. 运行 `"<PANSHI_CAMP_CLI>" skill path` 检查 Skill 来源，运行 `"<PANSHI_CAMP_CLI>" --help` 检查 CLI。
 5. 所有生产业务调用显式带上 `--profile panshi --environment production`。公开查询使用 `"<PANSHI_CAMP_CLI>" --profile panshi --environment production --json <命令>`；个人操作先运行 `"<PANSHI_CAMP_CLI>" --profile panshi --environment production --json auth status`。

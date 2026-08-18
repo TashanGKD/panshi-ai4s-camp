@@ -2,10 +2,11 @@
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import { createCampClient } from '@panshi/camp-client'
 import { learnerCapabilities } from '@panshi/contracts'
+import cliPackage from '../package.json' with { type: 'json' }
 import { parseCliArgv } from './argv.js'
 import { CliRuntimeError, safeError } from './errors.js'
 import { createOutput } from './output.js'
@@ -63,6 +64,10 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
     const parsed = parseCliArgv(argv)
     json = parsed.json
     const output = createOutput({ json, stdout: dependencies.stdout, stderr: dependencies.stderr })
+    if (parsed.command.length === 1 && parsed.command[0] === '--version') {
+      output.text(cliPackage.version)
+      return 0
+    }
     if (parsed.help || parsed.command.length === 0 || parsed.command[0] === 'help') {
       if (json) {
         output.success({ ok: true, apiVersion: 'v1', capabilityId: 'public.site.show', data: { help: HELP }, requestId: 'local' })
@@ -128,4 +133,6 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) process.exitCode = await runCli(process.argv.slice(2))
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]))) {
+  process.exitCode = await runCli(process.argv.slice(2))
+}

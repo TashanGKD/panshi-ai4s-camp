@@ -17,9 +17,9 @@
 - `packages/contracts`：跨应用共享的 Zod 数据契约与类型。
 - `packages/ui`：`web` 与 `admin` 共用的 React UI 组件。
 
-## CLI / Agent Skill 公开安装（0.1.0）
+## CLI / Agent Skill 公开安装
 
-前置环境为 Node.js 24 与 npm 11。直接从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
+所需 CLI 版本：`0.1.0`。前置环境为 Node.js 24 与 npm 11。直接从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
 
 ```bash
 npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes

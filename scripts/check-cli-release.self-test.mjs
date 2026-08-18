@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 
 import { buildCliRelease } from './build-cli-release.mjs'
-import { checkCliRelease } from './check-cli-release.mjs'
+import { checkCliRelease, validateReleaseVersion } from './check-cli-release.mjs'
 import { computePackageTreeSha256 } from '../skills/panshi-camp/scripts/install-cli.mjs'
 import { extractPackageEntries, parseTarGz, sha256 } from './cli-release-lib.mjs'
 
@@ -88,18 +88,35 @@ const expectGateFailure = async (label, fixture, pattern) => {
   process.stdout.write(`PASS: ${label}\n`)
 }
 
+const requireVersionDriftRejection = (validator, input) => {
+  try {
+    validator(input)
+  } catch (error) {
+    assert.match(String(error), /CLI_RELEASE_VERSION_DRIFT/u)
+    return
+  }
+  throw new Error('SELF_TEST_VERSION_CHECK_BYPASSED')
+}
+
 try {
   const goodRelease = join(temporaryRoot, 'good-release')
   await buildCliRelease({ repoRoot, outputDirectory: goodRelease })
 
   const versionFixture = await createFixture('version-drift', goodRelease)
-  const versionManifestPath = join(versionFixture, 'skills/panshi-camp/release-manifest.json')
+  const versionManifestPath = join(versionFixture, 'dist-release/release-manifest.json')
   const versionManifest = JSON.parse(await readFile(versionManifestPath, 'utf8'))
-  versionManifest.version = '0.1.1'
-  versionManifest.assetName = 'panshi-camp-cli-0.1.1.tgz'
-  versionManifest.url = 'https://github.com/TashanGKD/panshi-ai4s-camp/releases/download/cli-v0.1.1/panshi-camp-cli-0.1.1.tgz'
+  const fixturePackage = JSON.parse(await readFile(join(versionFixture, 'apps/cli/package.json'), 'utf8'))
+  const driftVersion = fixturePackage.version === '0.1.1' ? '0.1.2' : '0.1.1'
+  versionManifest.version = driftVersion
+  versionManifest.assetName = `panshi-camp-cli-${driftVersion}.tgz`
+  versionManifest.url = `https://github.com/TashanGKD/panshi-ai4s-camp/releases/download/cli-v${driftVersion}/panshi-camp-cli-${driftVersion}.tgz`
   await writeFile(versionManifestPath, canonical(versionManifest))
-  await expectGateFailure('version drift', versionFixture, /CLI_RELEASE_MANIFEST_DRIFT/u)
+  await writeFile(join(versionFixture, 'skills/panshi-camp/release-manifest.json'), canonical(versionManifest))
+  const versionInput = { packageVersion: fixturePackage.version, manifest: versionManifest }
+  requireVersionDriftRejection(validateReleaseVersion, versionInput)
+  assert.throws(() => requireVersionDriftRejection(() => {}, versionInput), /SELF_TEST_VERSION_CHECK_BYPASSED/u)
+  process.stdout.write('PASS: version check mutation guard\n')
+  await expectGateFailure('version drift', versionFixture, /CLI_RELEASE_VERSION_DRIFT/u)
 
   const dependencyFixture = await createFixture('dependency-leak', goodRelease)
   const dependencyManifest = JSON.parse(await readFile(join(dependencyFixture, 'dist-release/release-manifest.json'), 'utf8'))

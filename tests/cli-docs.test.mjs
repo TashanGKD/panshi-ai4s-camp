@@ -7,6 +7,18 @@ const cliPackage = JSON.parse(await readFile(new URL('../apps/cli/package.json',
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
 const installCommand = 'npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes'
 const productionFlags = '--profile panshi --environment production'
+const releaseDocuments = [
+  ['README.md', new URL('../README.md', import.meta.url)],
+  ['docs/cli.md', new URL('../docs/cli.md', import.meta.url)],
+  ['SKILL.md', new URL('../skills/panshi-camp/SKILL.md', import.meta.url)],
+  ['register example', new URL('../skills/panshi-camp/examples/register-and-apply.md', import.meta.url)],
+  ['status example', new URL('../skills/panshi-camp/examples/check-status-and-check-in.md', import.meta.url)],
+]
+
+const verifyDocumentVersion = (contents, version, name) => {
+  const declarations = [...contents.matchAll(/所需 CLI 版本：`([^`]+)`/gu)].map((match) => match[1])
+  assert.deepEqual(declarations, [version], `${name} required CLI version drifted from package.version`)
+}
 
 const extractReference = (document) => {
   const match = document.match(/<!-- CLI_COMMAND_REFERENCE_START -->([\s\S]*?)<!-- CLI_COMMAND_REFERENCE_END -->/u)
@@ -62,17 +74,10 @@ test('CLI workspace commands match the package name in docs and root scripts', a
   }
 })
 
-test('public CLI release docs share the 0.1.0 install and production contracts', async () => {
-  assert.equal(cliPackage.version, '0.1.0')
-  const documents = [
-    ['README.md', new URL('../README.md', import.meta.url)],
-    ['docs/cli.md', new URL('../docs/cli.md', import.meta.url)],
-    ['register example', new URL('../skills/panshi-camp/examples/register-and-apply.md', import.meta.url)],
-    ['status example', new URL('../skills/panshi-camp/examples/check-status-and-check-in.md', import.meta.url)],
-  ]
-
-  for (const [name, url] of documents) {
+test('public CLI release docs derive their version, install, and production contracts from the package', async () => {
+  for (const [name, url] of releaseDocuments) {
     const contents = await readFile(url, 'utf8')
+    verifyDocumentVersion(contents, cliPackage.version, name)
     assert.ok(contents.includes(installCommand), `${name} must use the canonical public Skill install command`)
     assert.ok(contents.includes(productionFlags), `${name} must require the canonical production profile and environment`)
   }
@@ -86,5 +91,15 @@ test('public CLI release docs share the 0.1.0 install and production contracts',
     assert.match(contents, /预览[\s\S]{0,120}明确同意/u)
     assert.match(contents, /CLI 包内[\s\S]{0,160}不携带[\s\S]{0,80}信任根/u)
     assert.match(contents, /GitHub Skill/u)
+  }
+})
+
+test('CLI documentation version gate catches a wrong version in every release document', async () => {
+  const expected = `所需 CLI 版本：\`${cliPackage.version}\``
+  for (const [name, url] of releaseDocuments) {
+    const contents = await readFile(url, 'utf8')
+    assert.ok(contents.includes(expected), `${name} must start as a valid mutation fixture`)
+    const damaged = contents.replace(expected, '所需 CLI 版本：`9.9.9`')
+    assert.throws(() => verifyDocumentVersion(damaged, cliPackage.version, name), /required CLI version drifted/u)
   }
 })

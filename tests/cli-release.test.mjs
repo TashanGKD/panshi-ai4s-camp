@@ -7,10 +7,11 @@ import test from 'node:test'
 import { promisify } from 'node:util'
 
 import { buildCliRelease } from '../scripts/build-cli-release.mjs'
-import { checkCliRelease } from '../scripts/check-cli-release.mjs'
+import * as releaseGate from '../scripts/check-cli-release.mjs'
 import { assertSafeArchivePath } from '../scripts/cli-release-lib.mjs'
 
 const execFileAsync = promisify(execFile)
+const { checkCliRelease } = releaseGate
 const repoRoot = resolve(import.meta.dirname, '..')
 const skillManifestPath = join(repoRoot, 'skills/panshi-camp/release-manifest.json')
 
@@ -29,6 +30,21 @@ test('release path gate rejects traversal, absolute paths, and Windows drive pat
   for (const candidate of ['package/../escape', '/absolute/escape', 'C:\\escape']) {
     assert.throws(() => assertSafeArchivePath(candidate), /CLI_RELEASE_PATH_UNSAFE/u)
   }
+})
+
+test('exported release version validator rejects only package-manifest version drift', () => {
+  assert.equal(typeof releaseGate.validateReleaseVersion, 'function')
+  assert.equal(releaseGate.validateReleaseVersion({
+    packageVersion: '0.1.0',
+    manifest: { version: '0.1.0', assetName: 'panshi-camp-cli-0.1.0.tgz' },
+  }), 'panshi-camp-cli-0.1.0.tgz')
+  assert.throws(() => releaseGate.validateReleaseVersion({
+    packageVersion: '0.1.0',
+    manifest: {
+      version: '0.1.1',
+      assetName: 'panshi-camp-cli-0.1.1.tgz',
+    },
+  }), /CLI_RELEASE_VERSION_DRIFT/u)
 })
 
 test('updating the Skill manifest cannot change the reproducible tarball digests', async () => {
@@ -59,7 +75,7 @@ test('release gate self-test constructs and catches all required bad artifacts',
     maxBuffer: 20 * 1024 * 1024,
   })
   assert.equal(stderr, '')
-  for (const label of ['version drift', 'internal dependency leak', 'dangerous path or link', 'wrong package tree digest']) {
+  for (const label of ['version drift', 'version check mutation guard', 'internal dependency leak', 'dangerous path or link', 'wrong package tree digest']) {
     assert.match(stdout, new RegExp(`PASS: ${label}`, 'u'))
   }
 })

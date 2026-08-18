@@ -60,6 +60,13 @@ const verifyPackageJson = (packageJson, version) => {
   }
 }
 
+// Target bug: a valid, internally consistent release manifest describes a different version than apps/cli/package.json.
+export const validateReleaseVersion = ({ packageVersion, manifest }) => {
+  const expectedAsset = `${PACKAGE_NAME}-${packageVersion}.tgz`
+  if (manifest.version !== packageVersion || manifest.assetName !== expectedAsset) throw new Error('CLI_RELEASE_VERSION_DRIFT: package, manifest, and asset versions differ')
+  return expectedAsset
+}
+
 export const checkCliRelease = async ({
   repoRoot = resolve(import.meta.dirname, '..'),
   releaseDirectory = join(repoRoot, 'dist-release'),
@@ -68,7 +75,6 @@ export const checkCliRelease = async ({
 } = {}) => {
   const cliPackagePath = join(repoRoot, 'apps/cli/package.json')
   const cliPackage = await readJson(cliPackagePath, 'CLI package.json')
-  const expectedAsset = `${PACKAGE_NAME}-${cliPackage.version}.tgz`
   const releaseManifestPath = join(releaseDirectory, 'release-manifest.json')
   const releaseManifestSource = await readFile(releaseManifestPath, 'utf8')
   const skillManifestSource = await readFile(skillManifestPath, 'utf8')
@@ -76,7 +82,7 @@ export const checkCliRelease = async ({
   const skillManifest = validateManifest(JSON.parse(skillManifestSource))
   if (releaseManifestSource !== canonical(releaseManifest) || skillManifestSource !== canonical(skillManifest)) throw new Error('CLI_RELEASE_MANIFEST_FORMAT: manifests must use canonical JSON formatting')
   if (JSON.stringify(releaseManifest) !== JSON.stringify(skillManifest)) throw new Error('CLI_RELEASE_MANIFEST_DRIFT: dist and Skill manifests differ')
-  if (releaseManifest.version !== cliPackage.version || releaseManifest.assetName !== expectedAsset) throw new Error('CLI_RELEASE_VERSION_DRIFT: package, manifest, and asset versions differ')
+  const expectedAsset = validateReleaseVersion({ packageVersion: cliPackage.version, manifest: releaseManifest })
   const expectedUrl = `${RELEASE_REPOSITORY}/releases/download/cli-v${cliPackage.version}/${expectedAsset}`
   if (releaseManifest.url !== expectedUrl) throw new Error('CLI_RELEASE_URL_DRIFT: release URL or tag drifted')
   if (expectedTag !== undefined && expectedTag !== `cli-v${cliPackage.version}`) throw new Error(`CLI_RELEASE_TAG_DRIFT: expected cli-v${cliPackage.version}, received ${expectedTag}`)

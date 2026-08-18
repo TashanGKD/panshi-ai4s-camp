@@ -10,6 +10,8 @@ COPY apps/api ./apps/api
 RUN npm run build -w @panshi/api \
   && npm exec -- tsc --project apps/api/tsconfig.json --noEmit false --outDir apps/api/dist --rootDir apps/api \
   && cp -R apps/api/drizzle apps/api/dist/drizzle \
+  && mkdir -p apps/api/dist/src/data \
+  && cp -R apps/api/src/data/. apps/api/dist/src/data/ \
   && npm prune --omit=dev --ignore-scripts
 
 FROM node:24.14.0-alpine3.23 AS production

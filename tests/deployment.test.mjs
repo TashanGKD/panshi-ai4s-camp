@@ -63,6 +63,7 @@ for (const key of ['TRUST_PROXY_HOPS', 'RATE_LIMIT_STORE_MAX_BUCKETS', 'RATE_LIM
   assert.equal(api.environment[key], `\${${key}:?set ${key}}`, `production API must receive ${key}`)
 }
 assert.equal(api.environment.FILE_STORAGE_ROOT, '/data/uploads')
+assert.equal(api.environment.FILE_UPLOAD_TEMP_ROOT, '/data/uploads/.incoming')
 assert.equal(api.environment.BACKUP_ROOT, '/backups')
 assert.equal(api.environment.APP_VERSION, '${BACKUP_APP_VERSION:?set BACKUP_APP_VERSION}')
 assert.equal(api.environment.VERIFICATION_PROVIDER, '${VERIFICATION_PROVIDER:?set VERIFICATION_PROVIDER}')
@@ -149,6 +150,7 @@ for (const [path, dockerfile] of Object.entries({
   assert.match(dockerfile, /^FROM node:24\.14\.0-alpine3\.23\b/mu, `${path} must use the release-pinned Node base`)
 }
 assert.match(operationsDockerfile, /^FROM postgres:16\.12-alpine3\.23$/mu)
+assert.match(apiDockerfile, /cp -R apps\/api\/src\/data\/\. apps\/api\/dist\/src\/data\//u)
 for (const tool of ['bash', 'coreutils', 'curl', 'findutils', 'python3', 'tar', 'util-linux']) assert.match(operationsDockerfile, new RegExp(`\\b${tool}\\b`, 'u'))
 assert.match(operationsCommon, /command -v flock[^\n]+flock is required/u)
 assert.match(operationsCommon, /flock -n 9/u)

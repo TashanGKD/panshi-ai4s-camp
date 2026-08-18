@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { execFile as execFileCallback } from 'node:child_process'
 import {
   chmod,
   lstat,
+  link,
   mkdir,
   mkdtemp,
   open,
@@ -267,44 +268,63 @@ const readConfigForMerge = async ({ layout, homeDirectory, windowsPathInspector,
   return mergePanshiProfile(parsed)
 }
 
-const writeConfigAtomically = async ({ config, layout, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, directoryState }) => {
+const writeConfigAtomically = async ({ config, layout, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename, directoryState }) => {
   directoryState.created = await ensureDirectory({ directory: layout.configDirectory, mode: 0o700, layout, homeDirectory, windowsPathInspector, currentUid })
   await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [layout.configDirectory, layout.configPath] })
   const temporary = `${layout.configPath}.tmp-${process.pid}-${Date.now()}`
   const backup = `${layout.configPath}.backup-${process.pid}-${Date.now()}`
   let backedUp = false
   let swapped = false
+  let temporaryIdentity = null
+  let backupIdentity = null
+  let swappedIdentity = null
+  let committed = false
+  const rollback = async () => {
+    if (committed) return
+    const removal = swapped
+      ? await quarantineAndRemoveNode({ candidate: layout.configPath, expectedIdentity: swappedIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+      : 'missing'
+    if (backedUp && removal !== 'preserved') {
+      await restoreBackupWithoutOverwrite({ backup, backupIdentity, destination: layout.configPath, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+    }
+  }
   try {
     await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
     if (layout.platform !== 'win32') await chmod(temporary, 0o600)
+    temporaryIdentity = await readNodeIdentity(temporary, currentUid, 'file')
     await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [layout.configDirectory, layout.configPath, temporary] })
     await failpoint('config-before-swap')
     const existing = await lstat(layout.configPath).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error))
-    if (existing) { await rename(layout.configPath, backup); backedUp = true }
+    if (existing) {
+      backupIdentity = await readNodeIdentity(layout.configPath, currentUid, 'file')
+      await rename(layout.configPath, backup)
+      backedUp = true
+    }
     await rename(temporary, layout.configPath)
     swapped = true
+    swappedIdentity = temporaryIdentity
     await checkAfterSwap('config', [layout.configDirectory, layout.configPath])
     await failpoint('config-after-swap')
     return {
-      commit: async () => {
+      markCommitted: () => { committed = true },
+      cleanupBackup: async () => {
         if (backedUp) {
-          try { await backupCleanup(backup) } catch {
+          try {
+            const removed = await backupCleanup(backup, backupIdentity)
+            if (removed === false) throw new Error('backup identity changed')
+          } catch {
             return { code: 'INSTALLER_BACKUP_CLEANUP_FAILED', path: backup, message: '安装已完成，但备份清理失败；备份已保留' }
           }
         }
         return null
       },
-      rollback: async () => {
-        if (swapped) await rm(layout.configPath, { force: true })
-        if (backedUp) await rename(backup, layout.configPath)
-      },
+      rollback,
     }
   } catch (error) {
-    if (swapped) await rm(layout.configPath, { force: true })
-    if (backedUp) await rename(backup, layout.configPath)
+    await rollback().catch(() => {})
     throw error
   } finally {
-    await rm(temporary, { force: true })
+    await quarantineAndRemoveNode({ candidate: temporary, expectedIdentity: temporaryIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename }).catch(() => {})
   }
 }
 
@@ -499,45 +519,64 @@ const downloadAsset = async ({ manifest, destination, fetchImplementation }) => 
   if (hash.digest('hex') !== manifest.sha256) return fail('INSTALLER_SHA256_MISMATCH', '下载内容 SHA-256 与内嵌 manifest 不一致')
 }
 
-const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup }) => {
+const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename }) => {
   const temporary = `${layout.stableEntry}.tmp-${process.pid}-${Date.now()}`
   const backup = `${layout.stableEntry}.backup-${process.pid}-${Date.now()}`
   let backedUp = false
   let swapped = false
+  let temporaryIdentity = null
+  let backupIdentity = null
+  let swappedIdentity = null
+  let committed = false
+  const rollback = async () => {
+    if (committed) return
+    const removal = swapped
+      ? await quarantineAndRemoveNode({ candidate: layout.stableEntry, expectedIdentity: swappedIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+      : 'missing'
+    if (backedUp && removal !== 'preserved') {
+      await restoreBackupWithoutOverwrite({ backup, backupIdentity, destination: layout.stableEntry, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+    }
+  }
   try {
     if (layout.platform === 'win32') {
       await writeFile(temporary, windowsStableContents(manifest.version), { flag: 'wx', mode: 0o600 })
     } else {
       await symlink(unixStableTarget(manifest.version), temporary)
     }
+    temporaryIdentity = await readNodeIdentity(temporary, currentUid, layout.platform === 'win32' ? 'file' : 'symlink')
     await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [layout.binDirectory] })
     const existing = await lstat(layout.stableEntry).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error))
-    if (existing) { await rename(layout.stableEntry, backup); backedUp = true }
+    if (existing) {
+      backupIdentity = await readNodeIdentity(layout.stableEntry, currentUid)
+      await rename(layout.stableEntry, backup)
+      backedUp = true
+    }
     await rename(temporary, layout.stableEntry)
     swapped = true
+    swappedIdentity = temporaryIdentity
     await checkAfterSwap('stable-entry', [layout.binDirectory])
     await failpoint('stable-entry-after-swap')
     if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) return fail('INSTALLER_STABLE_ENTRY_INVALID', '稳定入口最终目标无效')
     return {
-      commit: async () => {
+      markCommitted: () => { committed = true },
+      cleanupBackup: async () => {
         if (backedUp) {
-          try { await backupCleanup(backup) } catch {
+          try {
+            const removed = await backupCleanup(backup, backupIdentity)
+            if (removed === false) throw new Error('backup identity changed')
+          } catch {
             return { code: 'INSTALLER_BACKUP_CLEANUP_FAILED', path: backup, message: '安装已完成，但备份清理失败；备份已保留' }
           }
         }
         return null
       },
-      rollback: async () => {
-        if (swapped) await rm(layout.stableEntry, { force: true })
-        if (backedUp) await rename(backup, layout.stableEntry)
-      },
+      rollback,
     }
   } catch (error) {
-    if (swapped) await rm(layout.stableEntry, { force: true })
-    if (backedUp) await rename(backup, layout.stableEntry)
+    await rollback().catch(() => {})
     throw error
   } finally {
-    await rm(temporary, { force: true })
+    await quarantineAndRemoveNode({ candidate: temporary, expectedIdentity: temporaryIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename }).catch(() => {})
   }
 }
 
@@ -582,35 +621,102 @@ const removeCreatedEmptyDirectory = async ({ created, directory, layout, homeDir
   }
 }
 
-const readDirectoryIdentity = async (directory, currentUid) => {
-  const metadata = await lstat(directory, { bigint: true }).catch(() => null)
-  if (!metadata?.isDirectory() || metadata.isSymbolicLink()) return fail('INSTALLER_DIRECTORY_IDENTITY_UNAVAILABLE', '安装事务目录缺失或不安全')
-  if (currentUid !== undefined && metadata.uid !== BigInt(currentUid)) return fail('INSTALLER_PATH_NOT_OWNED', '安装事务目录必须由当前 uid 所有')
-  if (typeof metadata.dev !== 'bigint' || typeof metadata.ino !== 'bigint' || metadata.ino <= 0n) {
-    return fail('INSTALLER_DIRECTORY_IDENTITY_UNAVAILABLE', '当前平台无法提供安全的安装事务目录身份')
-  }
-  return Object.freeze({ dev: metadata.dev, ino: metadata.ino })
+const nodeKind = (metadata) => {
+  if (metadata.isDirectory() && !metadata.isSymbolicLink()) return 'directory'
+  if (metadata.isFile() && !metadata.isSymbolicLink()) return 'file'
+  if (metadata.isSymbolicLink()) return 'symlink'
+  return null
 }
 
-const sameDirectoryIdentity = (left, right) => left?.dev === right?.dev && left?.ino === right?.ino
+const readNodeIdentity = async (candidate, currentUid, expectedKind) => {
+  const metadata = await lstat(candidate, { bigint: true }).catch(() => null)
+  const kind = metadata && nodeKind(metadata)
+  if (!kind || (expectedKind && kind !== expectedKind)) return fail('INSTALLER_NODE_IDENTITY_UNAVAILABLE', '安装事务节点缺失、类型变化或不安全')
+  if (currentUid !== undefined && metadata.uid !== BigInt(currentUid)) return fail('INSTALLER_PATH_NOT_OWNED', '安装事务节点必须由当前 uid 所有')
+  if (typeof metadata.dev !== 'bigint' || typeof metadata.ino !== 'bigint' || metadata.ino <= 0n) {
+    return fail('INSTALLER_NODE_IDENTITY_UNAVAILABLE', '当前平台无法提供安全的安装事务节点身份')
+  }
+  return Object.freeze({ dev: metadata.dev, ino: metadata.ino, kind })
+}
+
+const readDirectoryIdentity = (directory, currentUid) => readNodeIdentity(directory, currentUid, 'directory')
+
+const sameNodeIdentity = (left, right) => left?.dev === right?.dev && left?.ino === right?.ino && left?.kind === right?.kind
 
 const assertDirectoryIdentity = async (directory, expectedIdentity, currentUid) => {
   const actualIdentity = await readDirectoryIdentity(directory, currentUid)
-  if (!sameDirectoryIdentity(actualIdentity, expectedIdentity)) return fail('INSTALLER_DIRECTORY_IDENTITY_CHANGED', '安装事务目录身份在切换前发生变化')
+  if (!sameNodeIdentity(actualIdentity, expectedIdentity)) return fail('INSTALLER_DIRECTORY_IDENTITY_CHANGED', '安装事务目录身份在切换前发生变化')
 }
 
-const removeDirectoryIfIdentityMatches = async ({ directory, expectedIdentity, currentUid }) => {
+const restoreQuarantinedNode = async ({ quarantine, candidate }) => {
+  const destination = await lstat(candidate).catch((error) => error.code === 'ENOENT' ? null : Promise.reject(error))
+  if (destination) return false
+  await rename(quarantine, candidate)
+  return true
+}
+
+const quarantinePathFor = (candidate, pathApi) => (
+  pathApi.join(pathApi.dirname(candidate), `.${pathApi.basename(candidate)}.quarantine-${process.pid}-${randomBytes(16).toString('hex')}`)
+)
+
+const quarantineAndRemoveNode = async ({ candidate, expectedIdentity, currentUid, pathApi = path, beforeQuarantineRename }) => {
   if (!expectedIdentity) return false
+  const quarantine = quarantinePathFor(candidate, pathApi)
   try {
-    const actualIdentity = await readDirectoryIdentity(directory, currentUid)
-    if (!sameDirectoryIdentity(actualIdentity, expectedIdentity)) return false
-    await rm(directory, { recursive: true, force: true })
+    const initialIdentity = await readNodeIdentity(candidate, currentUid)
+    if (!sameNodeIdentity(initialIdentity, expectedIdentity)) return 'preserved'
+    await (beforeQuarantineRename ?? (async () => {}))({ candidate, quarantine, kind: expectedIdentity.kind })
+    await rename(candidate, quarantine)
+    const quarantinedIdentity = await readNodeIdentity(quarantine, currentUid)
+    if (!sameNodeIdentity(quarantinedIdentity, expectedIdentity)) {
+      await restoreQuarantinedNode({ quarantine, candidate }).catch(() => {})
+      return 'preserved'
+    }
+    await rm(quarantine, { recursive: expectedIdentity.kind === 'directory', force: true })
+    return 'removed'
+  } catch {
+    // Missing identities, unsupported platform semantics, and cleanup races fail closed.
+    return 'preserved'
+  }
+}
+
+const restoreBackupWithoutOverwrite = async ({ backup, backupIdentity, destination, currentUid, pathApi, beforeQuarantineRename }) => {
+  if (!backupIdentity) return false
+  const quarantine = quarantinePathFor(backup, pathApi)
+  try {
+    const actualBackupIdentity = await readNodeIdentity(backup, currentUid)
+    if (!sameNodeIdentity(actualBackupIdentity, backupIdentity)) return false
+    await (beforeQuarantineRename ?? (async () => {}))({ candidate: backup, quarantine, kind: backupIdentity.kind })
+    await rename(backup, quarantine)
+    const quarantinedIdentity = await readNodeIdentity(quarantine, currentUid)
+    if (!sameNodeIdentity(quarantinedIdentity, backupIdentity)) {
+      await restoreQuarantinedNode({ quarantine, candidate: backup }).catch(() => {})
+      return false
+    }
+    if (backupIdentity.kind === 'symlink') {
+      const target = await readlink(quarantine)
+      await symlink(target, destination)
+      if (await readlink(destination) !== target) return false
+    } else if (backupIdentity.kind === 'file') {
+      await link(quarantine, destination)
+      const restoredIdentity = await readNodeIdentity(destination, currentUid, 'file')
+      if (!sameNodeIdentity(restoredIdentity, backupIdentity)) return false
+    } else {
+      await restoreQuarantinedNode({ quarantine, candidate: backup }).catch(() => {})
+      return false
+    }
+    await rm(quarantine, { force: true })
     return true
   } catch {
-    // Identity mismatch and cleanup failures must preserve replacement paths and the primary error.
+    await restoreQuarantinedNode({ quarantine, candidate: backup }).catch(() => {})
+    // Exclusive destination creation fails closed when a replacement exists or restoration cannot be proven.
     return false
   }
 }
+
+const removeDirectoryIfIdentityMatches = ({ directory, expectedIdentity, currentUid, pathApi, beforeQuarantineRename }) => (
+  quarantineAndRemoveNode({ candidate: directory, expectedIdentity, currentUid, pathApi, beforeQuarantineRename })
+)
 
 const previewFor = ({ manifest, layout }) => ({
   action: 'preview-only',
@@ -635,7 +741,11 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   const layout = resolveLayout({ platform, homeDirectory, localAppData, xdgConfigHome })
   const currentUid = platform === 'win32' ? undefined : (dependencies.currentUid ?? (typeof process.getuid === 'function' ? process.getuid() : undefined))
   const failpoint = dependencies.failpoint ?? (async () => {})
-  const backupCleanup = dependencies.backupCleanup ?? (async (candidate) => rm(candidate, { force: true }))
+  const beforeQuarantineRename = dependencies.beforeQuarantineRename ?? (async () => {})
+  const backupCleanup = dependencies.backupCleanup ?? (async (candidate, expectedIdentity) => {
+    const result = await quarantineAndRemoveNode({ candidate, expectedIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+    if (result !== 'removed') throw new Error('backup cleanup could not prove node identity')
+  })
   const checkAfterSwap = async (name, targets) => {
     await assertSafePaths({ layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, targets })
     await (dependencies.afterSwapCheck ?? (async () => {}))(name)
@@ -670,6 +780,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   let entryTransaction = null
   let configTransaction = null
   let succeeded = false
+  let durableCommitted = false
   try {
     installRootCreated = await ensureDirectory({ directory: layout.installRoot, mode: 0o700, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
     stagingRoot = alreadyInstalled ? null : await mkdtemp(layout.pathApi.join(layout.installRoot, '.install-'))
@@ -700,29 +811,38 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
     await failpoint('bin-ready')
     await preflightStableEntry(layout, manifest.version, currentUid)
     if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) {
-      entryTransaction = await switchStableEntry({ layout, manifest, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup })
+      entryTransaction = await switchStableEntry({ layout, manifest, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename })
     }
     await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid)
-    configTransaction = await writeConfigAtomically({ config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, directoryState: configDirectoryState })
+    configTransaction = await writeConfigAtomically({ config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename, directoryState: configDirectoryState })
     await verifyFinalState({ versionRoot, manifest, config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+    for (const transaction of [configTransaction, entryTransaction]) transaction?.markCommitted()
+    durableCommitted = true
+    succeeded = true
     const warnings = []
     for (const transaction of [configTransaction, entryTransaction]) {
       if (!transaction) continue
-      const warning = await transaction.commit()
+      const warning = await transaction.cleanupBackup().catch(() => ({
+        code: 'INSTALLER_BACKUP_CLEANUP_FAILED',
+        message: '安装已完成，但备份清理失败；备份已保留',
+      }))
       if (warning) {
         warnings.push(warning)
-        stderr(`${warning.code}: 安装状态已确认；安全备份保留，未触发 rollback\n`)
+        try { stderr(`${warning.code}: 安装状态已确认；安全备份保留，未触发 rollback\n`) } catch {
+          // Reporting is best effort after the durable commit boundary.
+        }
       }
     }
-    succeeded = true
     return { status: alreadyInstalled ? 'already-installed' : 'installed', version: manifest.version, stableEntry: layout.stableEntry, warnings }
   } catch (error) {
-    await configTransaction?.rollback().catch(() => {})
-    await entryTransaction?.rollback().catch(() => {})
-    if (installedFresh) await removeDirectoryIfIdentityMatches({ directory: versionRoot, expectedIdentity: transactionDirectoryIdentity, currentUid })
+    if (!durableCommitted) {
+      await configTransaction?.rollback().catch(() => {})
+      await entryTransaction?.rollback().catch(() => {})
+      if (installedFresh) await removeDirectoryIfIdentityMatches({ directory: versionRoot, expectedIdentity: transactionDirectoryIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
+    }
     throw error
   } finally {
-    if (stagingRoot) await removeDirectoryIfIdentityMatches({ directory: stagingRoot, expectedIdentity: transactionDirectoryIdentity, currentUid })
+    if (stagingRoot) await removeDirectoryIfIdentityMatches({ directory: stagingRoot, expectedIdentity: transactionDirectoryIdentity, currentUid, pathApi: layout.pathApi, beforeQuarantineRename })
     if (!succeeded) {
       await removeCreatedEmptyDirectory({ created: configDirectoryState.created, directory: layout.configDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
       await removeCreatedEmptyDirectory({ created: binDirectoryCreated, directory: layout.binDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })

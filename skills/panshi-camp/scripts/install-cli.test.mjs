@@ -616,7 +616,8 @@ test('final verification rejects a config-after-swap config symlink without touc
   await assert.rejects(fixture.run(), /INSTALLER_PATH_UNSAFE/u)
 
   assert.equal(await readFile(outside, 'utf8'), 'outside must survive\n')
-  await assert.rejects(lstat(layout.configPath), { code: 'ENOENT' })
+  assert.equal((await lstat(layout.configPath)).isSymbolicLink(), true)
+  assert.equal(await readlink(layout.configPath), outside)
   await assert.rejects(lstat(join(layout.installRoot, manifest.version)), { code: 'ENOENT' })
 })
 
@@ -664,6 +665,109 @@ test('backup cleanup failure is best effort after final state confirmation', asy
   assert.ok(result.warnings.every(({ path, message }) => path.includes('.backup-') && message.includes('备份已保留')))
   assert.equal(fixture.stderr.length, 2)
   assert.ok(fixture.stderr.every((line) => line.includes('INSTALLER_BACKUP_CLEANUP_FAILED')))
+})
+
+test('durable commit survives a later backup warning whose stderr sink throws', async (t) => {
+  let cleanupCalls = 0
+  const fixture = await install(t, {
+    backupCleanup: async (candidate) => {
+      cleanupCalls += 1
+      if (cleanupCalls === 1) return rm(candidate, { force: true })
+      throw new Error('entry backup cleanup failed after config backup was removed')
+    },
+    stderr: () => { throw new Error('warning sink failed') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  await mkdir(layout.binDirectory, { recursive: true, mode: 0o755 })
+  await symlink('../share/panshi-camp-cli/1.2.2/node_modules/panshi-camp-cli/dist/main.js', layout.stableEntry)
+  await mkdir(layout.configDirectory, { recursive: true, mode: 0o700 })
+  await writeFile(layout.configPath, '{"profiles":{"local":{"baseUrl":"http://127.0.0.1:3001"}}}\n', { mode: 0o600 })
+
+  const result = await fixture.run()
+
+  assert.equal(result.status, 'installed')
+  assert.equal(cleanupCalls, 2)
+  assert.deepEqual(result.warnings.map(({ code }) => code), ['INSTALLER_BACKUP_CLEANUP_FAILED'])
+  assert.equal(await readlink(layout.stableEntry), '../share/panshi-camp-cli/1.2.3/node_modules/panshi-camp-cli/dist/main.js')
+  assert.deepEqual(JSON.parse(await readFile(layout.configPath, 'utf8')), {
+    profiles: {
+      local: { baseUrl: 'http://127.0.0.1:3001' },
+      panshi: { baseUrl: 'https://panshi-ai4s.tashan.chat' },
+    },
+  })
+})
+
+test('quarantine preserves a real directory swapped into the version cleanup window', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => { if (name === 'config-after-swap') throw new Error('primary finalization failure') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  const versionRoot = join(layout.installRoot, manifest.version)
+  const movedTransaction = join(fixture.root, 'moved-version-transaction')
+  const sentinel = join(versionRoot, 'replacement-sentinel')
+  let injected = false
+  fixture.dependencies.beforeQuarantineRename = async ({ candidate, kind }) => {
+    if (candidate !== versionRoot || kind !== 'directory') return
+    injected = true
+    await rename(versionRoot, movedTransaction)
+    await mkdir(versionRoot)
+    await writeFile(sentinel, 'directory replacement survives\n')
+  }
+
+  await assert.rejects(fixture.run(), /primary finalization failure/u)
+
+  assert.equal(injected, true)
+  assert.equal(await readFile(sentinel, 'utf8'), 'directory replacement survives\n')
+  assert.equal((await lstat(movedTransaction)).isDirectory(), true)
+})
+
+test('quarantine preserves a symlink swapped into the stable-entry rollback window', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => { if (name === 'stable-entry-after-swap') throw new Error('primary stable failure') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  await mkdir(layout.binDirectory, { recursive: true, mode: 0o755 })
+  const oldTarget = '../share/panshi-camp-cli/1.2.2/node_modules/panshi-camp-cli/dist/main.js'
+  const replacementTarget = '../replacement-must-survive'
+  const movedTransaction = join(fixture.root, 'moved-stable-transaction')
+  await symlink(oldTarget, layout.stableEntry)
+  let injected = false
+  fixture.dependencies.beforeQuarantineRename = async ({ candidate, kind }) => {
+    if (candidate !== layout.stableEntry || kind !== 'symlink') return
+    injected = true
+    await rename(layout.stableEntry, movedTransaction)
+    await symlink(replacementTarget, layout.stableEntry)
+  }
+
+  await assert.rejects(fixture.run(), /primary stable failure/u)
+
+  assert.equal(injected, true)
+  assert.equal(await readlink(layout.stableEntry), replacementTarget)
+  assert.equal((await lstat(movedTransaction)).isSymbolicLink(), true)
+})
+
+test('quarantine preserves a regular file swapped into the config rollback window', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => { if (name === 'config-after-swap') throw new Error('primary config failure') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  await mkdir(layout.configDirectory, { recursive: true, mode: 0o700 })
+  await writeFile(layout.configPath, '{"profiles":{"old":{"baseUrl":"http://localhost:3001"}}}\n', { mode: 0o600 })
+  const movedTransaction = join(fixture.root, 'moved-config-transaction')
+  const replacement = 'replacement config must survive\n'
+  let injected = false
+  fixture.dependencies.beforeQuarantineRename = async ({ candidate, kind }) => {
+    if (candidate !== layout.configPath || kind !== 'file') return
+    injected = true
+    await rename(layout.configPath, movedTransaction)
+    await writeFile(layout.configPath, replacement, { mode: 0o600 })
+  }
+
+  await assert.rejects(fixture.run(), /primary config failure/u)
+
+  assert.equal(injected, true)
+  assert.equal(await readFile(layout.configPath, 'utf8'), replacement)
+  assert.equal((await lstat(movedTransaction)).isFile(), true)
 })
 
 test('later failure removes only installer-created empty roots', async (t) => {

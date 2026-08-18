@@ -9,16 +9,19 @@ description: 通过 panshi-camp CLI 查询实训营公开信息、管理个人�
 
 ## 准备
 
-1. 运行 `panshi-camp skill path` 检查 Skill 来源，运行 `panshi-camp --help` 检查 CLI。
-2. 公开查询直接使用 `panshi-camp --json <命令>`；个人操作先运行 `panshi-camp --json auth status`。
-3. 只把 CLI 的单个 JSON 文档作为结果；进度信息不能当作业务结果。
+1. 先把 `<PANSHI_CAMP_CLI>` 解析成当前平台稳定入口的绝对路径：Unix 为当前用户主目录下 `.local/bin/panshi-camp`，Windows 为 `LOCALAPPDATA` 绝对目录下 `panshi-camp-cli\\bin\\panshi-camp.cmd`。后续始终直接调用该绝对路径，不依赖 `PATH`。
+2. 如果稳定入口不存在或版本不匹配，按 [安装与安全自举](references/installation.md) 操作：用当前 Skill 目录的绝对路径无参数运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs"`，向用户完整展示预览并停止询问；只有用户看过本次预览并明确同意，才运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs" --yes`。不得代替用户确认，也不得添加其他参数。
+3. 如果安装器报告 `INSTALLER_NOT_PUBLISHED`，说明 CLI 尚未发布；停止，不自行寻找下载地址，不联网安装其他包。
+4. 运行 `"<PANSHI_CAMP_CLI>" skill path` 检查 Skill 来源，运行 `"<PANSHI_CAMP_CLI>" --help` 检查 CLI。
+5. 所有生产业务调用显式带上 `--profile panshi --environment production`。公开查询使用 `"<PANSHI_CAMP_CLI>" --profile panshi --environment production --json <命令>`；个人操作先运行 `"<PANSHI_CAMP_CLI>" --profile panshi --environment production --json auth status`。
+6. 只把 CLI 的单个 JSON 文档作为结果；进度信息不能当作业务结果。
 
 ## 选择命令
 
-- 基本信息、日程、交通、联系人和院校目录：分别使用 `info show`、`schedule list`、`travel show`、`contacts show`、`institutions search`。
-- 动态报名表：先运行 `application form`，根据当前返回字段向用户收集信息，不复用旧字段清单。
-- 报名状态与时间线：运行 `application show`。保留服务端返回的 `expectedRevision`，写入前重新读取。
-- 公开或本人资料：先 `resources list`，再按返回标识下载；本人附件使用 `files` 命令。
+- 基本信息、日程、交通、联系人和院校目录：在统一的绝对入口及生产参数后，分别使用 `info show`、`schedule list`、`travel show`、`contacts show`、`institutions search`。
+- 动态报名表：先用同一调用前缀运行 `application form`，根据当前返回字段向用户收集信息，不复用旧字段清单。
+- 报名状态与时间线：用同一调用前缀运行 `application show`。保留服务端返回的 `expectedRevision`，写入前重新读取。
+- 公开或本人资料：先用同一调用前缀运行 `resources list`，再按返回标识下载；本人附件使用 `files` 命令。
 - 报到信息：使用 `check-in show`；仅在用户给出明确输出路径时使用 `check-in qr export`。
 
 完整能力索引见 [capabilities.json](capabilities.json)。不得自行拼接网络地址或复制服务端数据结构。

@@ -93,6 +93,8 @@ test('packed CLI installs and runs outside the monorepo', async () => {
       'dist/skill/capabilities.json',
       'dist/skill/examples/check-status-and-check-in.md',
       'dist/skill/examples/register-and-apply.md',
+      'dist/skill/references/installation.md',
+      'dist/skill/scripts/install-cli.mjs',
       'package.json',
     ])
 

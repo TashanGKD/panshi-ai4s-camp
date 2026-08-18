@@ -30,4 +30,9 @@ await build({
   sourcemap: false,
 })
 await chmod(outputFile, 0o755)
-await cp(skillSource, skillOutput, { recursive: true, errorOnExist: true, force: false })
+await cp(skillSource, skillOutput, {
+  recursive: true,
+  errorOnExist: true,
+  force: false,
+  filter: (source) => !source.endsWith('.test.mjs') && !source.endsWith('/.npmignore'),
+})

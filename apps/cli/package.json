@@ -1,0 +1,19 @@
+{
+  "name": "@panshi/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "panshi-camp": "./dist/main.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "1.3.0",
+    "@panshi/camp-client": "0.0.0",
+    "@panshi/contracts": "0.0.0",
+    "qr": "0.6.0"
+  }
+}

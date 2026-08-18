@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "packageName": "panshi-camp-cli",
-  "version": "0.1.6",
-  "assetName": "panshi-camp-cli-0.1.6.tgz",
-  "url": "https://github.com/TashanGKD/panshi-ai4s-camp/releases/download/cli-v0.1.6/panshi-camp-cli-0.1.6.tgz",
-  "sha256": "150d26cc23ae6f5967e3ff3ca4fdf3d7f3cbf1e006a60936d5a44966c25b3a04",
+  "version": "0.1.7",
+  "assetName": "panshi-camp-cli-0.1.7.tgz",
+  "url": "https://github.com/TashanGKD/panshi-ai4s-camp/releases/download/cli-v0.1.7/panshi-camp-cli-0.1.7.tgz",
+  "sha256": "26074b9572dee140eab00c8b79c2e25a00b33a3cea5ff2a50cecd9ff34cb26ad",
   "sizeBytes": 137090,
-  "packageTreeSha256": "2e901eddc7a5a104ac7f109dd2627a0ce389feb379764d5840ba9afebf253610"
+  "packageTreeSha256": "9de95c6ed9a1353d3fe8d47eb67056ee0c69018234466950351b6855a05d0a41"
 }

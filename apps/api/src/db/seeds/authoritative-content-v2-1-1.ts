@@ -4,6 +4,7 @@
  *
  * 文案按 Word“最终显示”视图提取。源文中的用词、标点和待定项均不擅自改写。
  * 组织单位名称与分组按 2026-08-17 用户确认内容更新，并以各单位官网全称校准。
+ * 报到安排按 2026-08-18 用户确认内容更新：9月3日全天、9月4日8:00—9:00。
  */
 
 const eveningDetails = [
@@ -80,6 +81,7 @@ export const authoritativeContentV211 = {
     ],
     eventDetails: [
       '举办时间：2026 年9 月 4 日至 9 月 8 日，共 5 天。前 4 天分别围绕科研智能体、AI4S 科研方法论、科学模型和自驱动的端到端科研闭环开展课程教学，第 5 天安排科研机构参访、学习成果交流与结营。',
+      '报到安排：2026年9月3日全天，以及9月4日8:00—9:00。',
       '举办地点：中国科学院物理研究所。',
       '举办规模：线下集中学习规模原则上控制在 80—100 人；学习后纳入实训项目培育计划的学员规模约 30—50 人。',
       '首届实训营拟采取公开报名、材料审核和分类录取的方式组织。',
@@ -130,6 +132,7 @@ export const authoritativeContentV211 = {
   importantDates: {
     items: [
       { label: '报名时间', value: '2026年8月18日—9月1日' },
+      { label: '报到时间', value: '2026年9月3日全天、9月4日8:00—9:00' },
       { label: '实训营时间', value: '2026年9月4日—9月8日' },
       { label: '项目培育', value: '2026年9月4日—10月31日' },
     ],
@@ -141,11 +144,17 @@ export const authoritativeContentV211 = {
     },
   },
   schedule: {
-    introduction: '前四天分别聚焦一个专题，每天灵活组合前沿讲座、理论课程、案例分享与专题实训，晚间安排习题课与选修研讨课；第五天安排科研机构参访、学习成果交流与结营。',
+    introduction: '9月3日全天及9月4日8:00—9:00安排学员报到。前四天分别聚焦一个专题，每天灵活组合前沿讲座、理论课程、案例分享与专题实训，晚间安排习题课与选修研讨课；第五天安排科研机构参访、学习成果交流与结营。',
     speakers,
     days: [
       {
+        date: '2026-09-03', label: '9.3（周四）', theme: '学员报到', sessions: [
+          { title: '学员报到', time: '全天', timeRange: { start: '00:00', end: '23:59' }, speakerIds: ['organizers'] },
+        ],
+      },
+      {
         date: '2026-09-04', label: '9.4（周五）', theme: '专题一\n科研智能体', sessions: [
+          { title: '学员报到', timeRange: { start: '08:00', end: '09:00' }, speakerIds: ['organizers'] },
           { title: '开幕式', timeRange: { start: '09:00', end: '09:20' }, details: ['① 实训营开幕与启动'], speakerIds: ['organizers'] },
           { title: 'AI for Science与\n磐石科学基础大模型', timeRange: { start: '09:30', end: '10:30' }, details: ['① AI4S 发展趋势与科研范式变革', '② AI4S 重大工程与代表性平台', '③ 磐石科学基础大模型的定位与战略布局', '④ 典型应用与产业进展', '▸ 成果：建立对 AI4S 全局与磐石生态的认知框架'], speakerIds: ['zeng-dajun'] },
           { title: '案例分享：\n联通数智与京医大模型', timeRange: { start: '10:50', end: '11:50' }, details: ['待定'], speakerIds: ['ding-ding', 'zhu-yanchun'] },

@@ -60,7 +60,7 @@ export const createContentService = (repository: PublicContentRepository) => ({
         guests: parsedSchedule?.speakers?.flatMap((speaker) => speaker.profile ? [speaker.profile] : []) ?? [],
         homeSectionOrder: parsedDisplay.homeSectionOrder ?? defaultOrder,
         visibleNavigation: fixedNavigation,
-        scheduleOverview: parsedSchedule?.days.slice(0, 5).map(({ date, label, theme }) => ({ date, label, theme })) ?? [],
+        scheduleOverview: parsedSchedule?.days.slice(0, 6).map(({ date, label, theme }) => ({ date, label, theme })) ?? [],
         registrationCta: parsedDisplay.registrationCta ?? { label: '在线注册', to: '/application' },
       },
     })

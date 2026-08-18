@@ -30,7 +30,7 @@ Public routes need no session. Student profile and application routes require an
 
 The first verification delivery contract has `disabled` and development/test-only `mock` adapters. No production SMS adapter exists. A future provider must implement the existing `VerificationProvider` boundary and the operational controls described in `docs/operations.md` before production registration can be enabled.
 
-The public-site aggregator reads published pointers for basic, features, organizations, important dates, schedule, contacts, and display. It emits safe fixed-order navigation, configurable homepage section order, a five-day schedule overview, and a fixed-route registration CTA. Missing fields in older published revisions receive contract defaults; publishing and rollback still move only immutable PostgreSQL revision pointers, so the next public read reflects the selected revision without a duplicate content source.
+The public-site aggregator reads published pointers for basic, features, organizations, important dates, schedule, contacts, and display. It emits safe fixed-order navigation, configurable homepage section order, a schedule overview containing the reporting day and all five camp days, and a fixed-route registration CTA. Missing fields in older published revisions receive contract defaults; publishing and rollback still move only immutable PostgreSQL revision pointers, so the next public read reflects the selected revision without a duplicate content source.
 
 ## Main flows
 

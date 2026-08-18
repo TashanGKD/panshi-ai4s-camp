@@ -45,7 +45,8 @@ const scheduleResponse = {
           theme: '科研智能体',
           sessions: [{
             title: '智能体构建实践',
-            time: '09:00–10:30',
+            time: '全天',
+            timeRange: { start: '00:00', end: '23:59' },
             details: ['从科研问题定义任务', '核验工具调用结果'],
             instructors: ['张老师', '李老师'],
           }],
@@ -144,7 +145,8 @@ describe('API-driven public pages', () => {
     expect(screen.getByRole('columnheader', { name: '内容要点与学员成果' })).toBeVisible()
     expect(screen.getByRole('columnheader', { name: '组织单位/授课师资' })).toBeVisible()
     expect(screen.getByRole('cell', { name: '智能体构建实践' })).toBeVisible()
-    expect(screen.getByText('09:00–10:30')).toBeVisible()
+    expect(screen.getByText('全天')).toBeVisible()
+    expect(screen.queryByText('00:00–23:59')).not.toBeInTheDocument()
     expect(screen.getByText('核验工具调用结果')).toBeVisible()
     expect(screen.getByText('李老师')).toBeVisible()
     expect(fetchSpy.mock.calls.map(([input]) => requestPath(input))).toEqual(expect.arrayContaining([

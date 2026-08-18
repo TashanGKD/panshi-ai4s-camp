@@ -63,6 +63,7 @@ describe('public published content', () => {
     expect(initialPublishedContent.basic.venue).toBe('中国科学院物理研究所')
     expect(initialPublishedContent.basic.eventDetails).toEqual([
       '举办时间：2026 年9 月 4 日至 9 月 8 日，共 5 天。前 4 天分别围绕科研智能体、AI4S 科研方法论、科学模型和自驱动的端到端科研闭环开展课程教学，第 5 天安排科研机构参访、学习成果交流与结营。',
+      '报到安排：2026年9月3日全天，以及9月4日8:00—9:00。',
       '举办地点：中国科学院物理研究所。',
       '举办规模：线下集中学习规模原则上控制在 80—100 人；学习后纳入实训项目培育计划的学员规模约 30—50 人。',
       '首届实训营拟采取公开报名、材料审核和分类录取的方式组织。',
@@ -75,13 +76,22 @@ describe('public published content', () => {
       date: '2026年8月18日',
     })
     expect(initialPublishedContent.schedule.days.map((day) => day.theme)).toEqual([
+      '学员报到',
       '专题一\n科研智能体',
       '专题二\nAI4S 科研方法论',
       '专题三\n科学模型',
       '专题四\n自驱动的端到端科研闭环',
       '参访交流与结营',
     ])
-    expect(initialPublishedContent.schedule.days.reduce((total, day) => total + day.sessions.length, 0)).toBe(29)
+    expect(initialPublishedContent.schedule.days.reduce((total, day) => total + day.sessions.length, 0)).toBe(31)
+    expect(initialPublishedContent.schedule.introduction).toContain('9月3日全天及9月4日8:00—9:00安排学员报到')
+    expect(initialPublishedContent.schedule.days[0]).toMatchObject({
+      date: '2026-09-03', label: '9.3（周四）', theme: '学员报到',
+      sessions: [{ title: '学员报到', time: '全天' }],
+    })
+    expect(initialPublishedContent.schedule.days[1]?.sessions[0]).toMatchObject({
+      title: '学员报到', timeRange: { start: '08:00', end: '09:00' },
+    })
     expect(initialPublishedContent.organizations.items).toContainEqual({ role: '支持单位', name: '腾讯云计算（北京）有限责任公司' })
     expect(initialPublishedContent.organizations.items).toContainEqual({ role: '协办单位', name: '中国科学院国家天文台' })
     expect(initialPublishedContent.organizations.items).toContainEqual({ role: '协办单位', name: '长三角物理研究中心' })
@@ -90,6 +100,7 @@ describe('public published content', () => {
     expect(initialPublishedContent.organizations.items.map((item) => item.role)).not.toContain('共同举办')
     expect(initialPublishedContent.importantDates.items).toEqual([
       { label: '报名时间', value: '2026年8月18日—9月1日' },
+      { label: '报到时间', value: '2026年9月3日全天、9月4日8:00—9:00' },
       { label: '实训营时间', value: '2026年9月4日—9月8日' },
       { label: '项目培育', value: '2026年9月4日—10月31日' },
     ])
@@ -120,6 +131,29 @@ describe('public published content', () => {
     expect(initialPublishedContent.travel.sections.find(({ title }) => title === '住宿安排')?.body).toContain('住宿费用由学员自行承担')
     expect(initialPublishedContent.travel.sections.find(({ title }) => title === '住宿安排')?.body).toContain('北京物科宾馆')
     expect(JSON.stringify(initialPublishedContent)).not.toMatch(/报名截止|手机号|电子邮箱/u)
+  })
+
+  it('includes a separate reporting day with all five camp days in the homepage overview', async () => {
+    const sixDaySchedule = {
+      days: [
+        { date: '2026-09-03', label: '9.3（周四）', theme: '学员报到', sessions: [] },
+        { date: '2026-09-04', label: '9.4（周五）', theme: '专题一', sessions: [] },
+        { date: '2026-09-05', label: '9.5（周六）', theme: '专题二', sessions: [] },
+        { date: '2026-09-06', label: '9.6（周日）', theme: '专题三', sessions: [] },
+        { date: '2026-09-07', label: '9.7（周一）', theme: '专题四', sessions: [] },
+        { date: '2026-09-08', label: '9.8（周二）', theme: '参访交流与结营', sessions: [] },
+      ],
+    }
+    const app = createPublicApp([
+      ...publishedSiteRows.filter((row) => row.key !== 'schedule'),
+      { key: 'schedule', payload: sixDaySchedule, version: 5 },
+    ])
+
+    const response = await request(app).get('/api/v1/public/site')
+
+    expect(response.status).toBe(200)
+    expect(PublicSiteResponseSchema.parse(response.body).data.scheduleOverview).toHaveLength(6)
+    expect(response.body.data.scheduleOverview.at(-1)).toMatchObject({ date: '2026-09-08' })
   })
 
   it('never exposes drafts from the public site endpoint', async () => {

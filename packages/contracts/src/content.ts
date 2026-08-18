@@ -246,7 +246,7 @@ export const PublicSiteResponseSchema = z.object({
     guests: z.array(GuestProfileSchema).default([]),
     homeSectionOrder: z.array(HomeSectionIdSchema).default(['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation', 'registrationCta', 'registrationCount']),
     visibleNavigation: z.array(PublicNavigationKeySchema).default(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account']),
-    scheduleOverview: z.array(z.object({ date: IsoDateSchema, label: NonEmptyTextSchema, theme: NonEmptyTextSchema }).strict()).max(5).default([]),
+    scheduleOverview: z.array(z.object({ date: IsoDateSchema, label: NonEmptyTextSchema, theme: NonEmptyTextSchema }).strict()).max(6).default([]),
     registrationCta: RegistrationCtaSchema.default({ label: '在线注册', to: '/application' }),
   }).strip(),
 }).strip()

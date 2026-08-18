@@ -37,7 +37,7 @@ export function ScheduleContent({ schedule }: { schedule: ScheduleContentType })
   return <section className="public-page__section">
     <h2>实训日程</h2>
     {schedule.introduction ? <p className="schedule-introduction">{schedule.introduction}</p> : null}
-    <div className="schedule-table-wrap" tabIndex={0} role="region" aria-label="实训营五日日程表">
+    <div className="schedule-table-wrap" tabIndex={0} role="region" aria-label="实训营日程表">
       <table className="schedule-table">
         <colgroup>
           <col className="schedule-table__day" />
@@ -71,7 +71,7 @@ export function ScheduleContent({ schedule }: { schedule: ScheduleContentType })
                 <time dateTime={day.date}>{day.label}</time>
                 <span>{day.theme}</span>
               </th> : null}
-              <td className="schedule-table__time-cell">{session.timeRange ? `${session.timeRange.start}–${session.timeRange.end}` : session.time}</td>
+              <td className="schedule-table__time-cell">{session.time ?? (session.timeRange ? `${session.timeRange.start}–${session.timeRange.end}` : '')}</td>
               <td className="schedule-table__topic-cell">{session.title}</td>
               <td><div className="schedule-table__stack">{session.details?.map((detail) => <span key={detail}>{detail}</span>)}</div></td>
               <td><div className="schedule-table__stack schedule-table__instructor-list">{instructorNames.map((name) => <span key={name}>{name}</span>)}</div></td>

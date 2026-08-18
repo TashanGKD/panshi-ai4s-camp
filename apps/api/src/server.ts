@@ -34,6 +34,9 @@ import { createCheckInService } from './modules/check-in/check-in.service.js'
 import { createConfirmationRepository } from './modules/confirmations/confirmation.repository.js'
 import { createConfirmationService } from './modules/confirmations/confirmation.service.js'
 import { createLearnerConfirmationHandlers } from './modules/confirmations/confirmation-handlers.js'
+import { createAliyunNotificationProvider } from './modules/sms/aliyun-notification-provider.js'
+import { createSmsNotificationRepository } from './modules/sms/notification.repository.js'
+import { createSmsNotificationWorker } from './modules/sms/notification.worker.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -270,6 +273,33 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
       maxAttempts: env.VERIFICATION_MAX_ATTEMPTS,
     })
     : undefined
+  const smsNotificationWorker = env.SMS_NOTIFICATION_PROVIDER === 'aliyun'
+    ? createSmsNotificationWorker(
+      createSmsNotificationRepository(database.db),
+      createAliyunNotificationProvider({
+        accessKeyId: env.ALIBABA_CLOUD_ACCESS_KEY_ID!,
+        accessKeySecret: env.ALIBABA_CLOUD_ACCESS_KEY_SECRET!,
+        signName: env.ALIYUN_NOTIFICATION_SMS_SIGN_NAME!,
+        endpoint: env.ALIYUN_SMS_ENDPOINT,
+        regionId: env.ALIYUN_SMS_REGION_ID,
+        templateCodes: {
+          application_submitted: env.ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED!,
+          needs_supplement: env.ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT!,
+          admitted: env.ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED!,
+          waitlisted: env.ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED!,
+          rejected: env.ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED!,
+        },
+      }),
+      {
+        pollIntervalMs: env.SMS_NOTIFICATION_POLL_INTERVAL_MS,
+        batchSize: env.SMS_NOTIFICATION_BATCH_SIZE,
+        maxAttempts: env.SMS_NOTIFICATION_MAX_ATTEMPTS,
+        retryDelayMs: env.SMS_NOTIFICATION_RETRY_DELAY_MS,
+        staleLockMs: env.SMS_NOTIFICATION_STALE_LOCK_MS,
+        onCycleError: () => console.error('SMS notification worker cycle failed'),
+      },
+    )
+    : undefined
   const contentPublishingService = createContentPublishingService(createContentPublishingRepository(database.db))
   const adminHealthFileChecks = createAdminHealthFileChecks(env.FILE_STORAGE_ROOT, env.BACKUP_ROOT)
   const adminManagementService = createAdminManagementService(createAdminManagementRepository(database.db))
@@ -348,8 +378,14 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
 
   return {
     lifecycle: createServerLifecycle({
-      listen: () => app.listen(env.API_PORT),
-      closeDatabase: database.close,
+      listen: () => {
+        smsNotificationWorker?.start()
+        return app.listen(env.API_PORT)
+      },
+      closeDatabase: async () => {
+        await smsNotificationWorker?.stop()
+        await database.close()
+      },
       onFatal,
     }),
     port: env.API_PORT,

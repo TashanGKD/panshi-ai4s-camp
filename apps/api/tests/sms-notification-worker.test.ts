@@ -113,4 +113,26 @@ describe('SMS notification worker', () => {
     release()
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
   })
+
+  it('starts once and waits for an active drain during shutdown', async () => {
+    const repo = repository()
+    let release!: () => void
+    repo.claimBatch.mockImplementation(() => new Promise<SmsNotificationOutboxRecord[]>((resolve) => {
+      release = () => resolve([])
+    }))
+    const worker = createSmsNotificationWorker(repo, { send: vi.fn() }, {
+      batchSize: 10, maxAttempts: 3, staleLockMs: 60_000, retryDelayMs: 30_000, pollIntervalMs: 60_000,
+    })
+
+    worker.start()
+    worker.start()
+    const stopped = worker.stop()
+    expect(repo.claimBatch).toHaveBeenCalledTimes(1)
+    let stopSettled = false
+    void stopped.finally(() => { stopSettled = true })
+    await Promise.resolve()
+    expect(stopSettled).toBe(false)
+    release()
+    await expect(stopped).resolves.toBeUndefined()
+  })
 })

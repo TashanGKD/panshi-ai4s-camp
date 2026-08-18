@@ -71,6 +71,12 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   RATE_LIMIT_ADMIN_MAX: z.coerce.number().int().min(1).max(10_000).default(180),
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(60_000),
   VERIFICATION_PROVIDER: z.enum(['disabled', 'mock', 'aliyun']).default('disabled'),
+  SMS_NOTIFICATION_PROVIDER: z.enum(['disabled', 'aliyun']).default('disabled'),
+  SMS_NOTIFICATION_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+  SMS_NOTIFICATION_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
+  SMS_NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  SMS_NOTIFICATION_RETRY_DELAY_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
+  SMS_NOTIFICATION_STALE_LOCK_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(300_000),
   VERIFICATION_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   CHECK_IN_TOKEN_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(1_800).default(300),
@@ -81,6 +87,12 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   ALIBABA_CLOUD_ACCESS_KEY_SECRET: z.string().min(1).optional(),
   ALIYUN_SMS_SIGN_NAME: z.string().min(1).optional(),
   ALIYUN_SMS_TEMPLATE_CODE: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_SIGN_NAME: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED: z.string().min(1).optional(),
+  ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED: z.string().min(1).optional(),
   ALIYUN_SMS_TEMPLATE_PARAM_KEY: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u).default('code'),
   ALIYUN_SMS_ENDPOINT: z.string().min(1).default('dysmsapi.aliyuncs.com'),
   ALIYUN_SMS_REGION_ID: z.string().min(1).default('cn-hangzhou'),
@@ -106,6 +118,22 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
     for (const key of ['ALIBABA_CLOUD_ACCESS_KEY_ID', 'ALIBABA_CLOUD_ACCESS_KEY_SECRET', 'ALIYUN_SMS_SIGN_NAME', 'ALIYUN_SMS_TEMPLATE_CODE'] as const) {
       if (env[key] === undefined) {
         context.addIssue({ code: 'custom', path: [key], message: `${key} is required for the Aliyun verification provider` })
+      }
+    }
+  }
+  if (env.SMS_NOTIFICATION_PROVIDER === 'aliyun') {
+    for (const key of [
+      'ALIBABA_CLOUD_ACCESS_KEY_ID',
+      'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+      'ALIYUN_NOTIFICATION_SMS_SIGN_NAME',
+      'ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED',
+      'ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT',
+      'ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED',
+      'ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED',
+      'ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED',
+    ] as const) {
+      if (env[key] === undefined) {
+        context.addIssue({ code: 'custom', path: [key], message: `${key} is required for Aliyun SMS notifications` })
       }
     }
   }

@@ -375,6 +375,12 @@ describe('API runtime configuration', () => {
       RATE_LIMIT_ADMIN_MAX: 180,
       RATE_LIMIT_ADMIN_WINDOW_MS: 60_000,
       VERIFICATION_PROVIDER: 'disabled',
+      SMS_NOTIFICATION_PROVIDER: 'disabled',
+      SMS_NOTIFICATION_POLL_INTERVAL_MS: 5_000,
+      SMS_NOTIFICATION_BATCH_SIZE: 20,
+      SMS_NOTIFICATION_MAX_ATTEMPTS: 3,
+      SMS_NOTIFICATION_RETRY_DELAY_MS: 60_000,
+      SMS_NOTIFICATION_STALE_LOCK_MS: 300_000,
       CHECK_IN_TOKEN_SECRET: '00'.repeat(32),
       VERIFICATION_TTL_SECONDS: 300,
       VERIFICATION_COOLDOWN_SECONDS: 60,
@@ -427,6 +433,61 @@ describe('API runtime configuration', () => {
       ALIYUN_SMS_TEMPLATE_PARAM_KEY: 'code',
       SECURE_COOKIES: true,
     })
+  })
+
+  it('accepts a complete, independently enabled notification provider', () => {
+    expect(getApiEnv({
+      DATABASE_URL: 'postgresql://localhost/panshi',
+      API_PORT: '3001',
+      CORS_ORIGINS: 'https://camp.example',
+      NODE_ENV: 'production',
+      CHECK_IN_TOKEN_SECRET: 'cd'.repeat(32),
+      SMS_NOTIFICATION_PROVIDER: 'aliyun',
+      ALIBABA_CLOUD_ACCESS_KEY_ID: 'access-id',
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: 'access-secret',
+      ALIYUN_NOTIFICATION_SMS_SIGN_NAME: '他山青年',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED: 'SMS_SUBMITTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT: 'SMS_SUPPLEMENT',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED: 'SMS_ADMITTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED: 'SMS_WAITLISTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED: 'SMS_REJECTED',
+    })).toMatchObject({
+      VERIFICATION_PROVIDER: 'disabled',
+      SMS_NOTIFICATION_PROVIDER: 'aliyun',
+      ALIYUN_NOTIFICATION_SMS_SIGN_NAME: '他山青年',
+      SMS_NOTIFICATION_BATCH_SIZE: 20,
+      SMS_NOTIFICATION_MAX_ATTEMPTS: 3,
+    })
+  })
+
+  it.each([
+    'ALIBABA_CLOUD_ACCESS_KEY_ID',
+    'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
+    'ALIYUN_NOTIFICATION_SMS_SIGN_NAME',
+    'ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED',
+    'ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT',
+    'ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED',
+    'ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED',
+    'ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED',
+  ] as const)('rejects notification delivery when %s is missing', (missingKey) => {
+    const complete: NodeJS.ProcessEnv = {
+      DATABASE_URL: 'postgresql://localhost/panshi',
+      API_PORT: '3001',
+      CORS_ORIGINS: '',
+      NODE_ENV: 'production',
+      CHECK_IN_TOKEN_SECRET: 'cd'.repeat(32),
+      SMS_NOTIFICATION_PROVIDER: 'aliyun',
+      ALIBABA_CLOUD_ACCESS_KEY_ID: 'access-id',
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: 'access-secret',
+      ALIYUN_NOTIFICATION_SMS_SIGN_NAME: '他山青年',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUBMITTED: 'SMS_SUBMITTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_SUPPLEMENT: 'SMS_SUPPLEMENT',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_ADMITTED: 'SMS_ADMITTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_WAITLISTED: 'SMS_WAITLISTED',
+      ALIYUN_NOTIFICATION_SMS_TEMPLATE_REJECTED: 'SMS_REJECTED',
+    }
+    delete complete[missingKey]
+    expect(() => getApiEnv(complete)).toThrow('Invalid API environment configuration')
   })
 
   it.each([

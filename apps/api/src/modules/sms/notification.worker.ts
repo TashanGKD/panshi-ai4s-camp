@@ -11,6 +11,7 @@ export type SmsNotificationWorkerOptions = {
   retryDelayMs: number
   pollIntervalMs: number
   now?: () => Date
+  onCycleError?: () => void
 }
 
 export const createSmsNotificationWorker = (
@@ -70,7 +71,7 @@ export const createSmsNotificationWorker = (
   const schedule = () => {
     if (stopped) return
     timer = setTimeout(() => {
-      void drainOnce().finally(schedule)
+      void drainOnce().catch(() => options.onCycleError?.()).finally(schedule)
     }, options.pollIntervalMs)
   }
 
@@ -79,7 +80,7 @@ export const createSmsNotificationWorker = (
     start: () => {
       if (!stopped) return
       stopped = false
-      void drainOnce().finally(schedule)
+      void drainOnce().catch(() => options.onCycleError?.()).finally(schedule)
     },
     stop: async () => {
       stopped = true

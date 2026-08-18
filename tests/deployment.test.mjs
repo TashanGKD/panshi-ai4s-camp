@@ -131,6 +131,7 @@ for (const [name, service] of Object.entries({ migration, api, frontend, operati
 assert.deepEqual(frontend.tmpfs, ['/tmp:rw,noexec,nosuid,size=16m'])
 
 const volumeInit = await readProjectFile('deploy/init-operation-volumes.sh')
+const publicTunnel = await readProjectFile('deploy/start-public-tunnel.sh')
 assert.match(volumeInit, /OPERATIONS_UID/u)
 assert.match(volumeInit, /OPERATIONS_GID/u)
 assert.match(volumeInit, /chown[^\n]+\/data[^\n]+\/backups/u)
@@ -138,6 +139,10 @@ assert.doesNotMatch(volumeInit, /mkdir[^\n]+\/data\/uploads/u, 'the API must cre
 assert.match(volumeInit, /Refusing to remove a non-empty unmarked upload root/u)
 assert.match(volumeInit, /rmdir \/data\/uploads/u)
 assert.doesNotMatch(volumeInit, /chown[^\n]+(?:^|\s)\/(?:\s|$)/u, 'volume init must never chown the filesystem root')
+assert.match(publicTunnel, /-R "127\.0\.0\.1:\$\{ECS_PORT\}:127\.0\.0\.1:\$\{LOCAL_PORT\}"/u)
+assert.match(publicTunnel, /StrictHostKeyChecking=yes/u)
+assert.match(publicTunnel, /ExitOnForwardFailure=yes/u)
+assert.doesNotMatch(publicTunnel, /StrictHostKeyChecking=no/u)
 
 const webDockerfile = await readProjectFile('apps/web/Dockerfile')
 const adminDockerfile = await readProjectFile('apps/admin/Dockerfile')

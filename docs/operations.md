@@ -227,6 +227,8 @@ ssh -N -L 3200:127.0.0.1:3200 aup-server
 
 Then open `http://127.0.0.1:3200`. Public DNS, TLS, and the AUP-to-ECS reverse tunnel are a separate release step.
 
+The reviewed public route uses `https://panshi-ai4s.tashan.chat`, ECS loopback port `13200`, and `deploy/start-public-tunnel.sh`. Run the tunnel under an operator-owned restart mechanism, keep the ECS listener on loopback, terminate TLS at ECS Nginx, and set `CORS_ORIGINS=https://panshi-ai4s.tashan.chat` with `TRUST_PROXY_HOPS=2`. Do not disable secure cookies to make a private HTTP preview accept logins.
+
 ## Deployment verification
 
 Before touching production, run the repository gates from a clean checkout:

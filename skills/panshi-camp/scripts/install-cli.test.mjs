@@ -204,6 +204,17 @@ test('no arguments only print a preview with zero network and zero writes', asyn
   assert.deepEqual(await readdir(fixture.homeDirectory), [])
 })
 
+test('explicit installation prints one completion document instead of the preview', async (t) => {
+  const fixture = await install(t)
+
+  const result = await fixture.run(['--yes'])
+  const output = JSON.parse(fixture.stdout.join(''))
+
+  assert.equal(result.status, 'installed')
+  assert.deepEqual(output, result)
+  assert.doesNotMatch(fixture.stdout.join(''), /preview-only|未传入 --yes/u)
+})
+
 test('only one exact --yes token is accepted', () => {
   assert.equal(parseInstallerArgv([]), 'preview')
   assert.equal(parseInstallerArgv(['--yes']), 'install')

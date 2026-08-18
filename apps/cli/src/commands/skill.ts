@@ -8,8 +8,19 @@ import { parseOptions, requiredString } from './options.js'
 type Agent = 'codex' | 'claude-code'
 type Entry = { path: string, sha256: string }
 
-const defaultSource = resolve(fileURLToPath(new URL('../../../../skills/panshi-camp', import.meta.url)))
+const defaultSourceCandidates = [
+  resolve(fileURLToPath(new URL('./skill', import.meta.url))),
+  resolve(fileURLToPath(new URL('../../../../skills/panshi-camp', import.meta.url))),
+]
 const targetFor = (home: string, agent: Agent) => join(home, agent === 'codex' ? '.codex/skills/panshi-camp' : '.claude/skills/panshi-camp')
+
+const resolveDefaultSource = async () => {
+  for (const candidate of defaultSourceCandidates) {
+    const metadata = await lstat(candidate).catch(() => null)
+    if (metadata) return candidate
+  }
+  throw new CliRuntimeError('RESOURCE_NOT_FOUND', 'Skill 来源不存在')
+}
 
 const inventory = async (root: string, cursor = root): Promise<Entry[]> => {
   const metadata = await lstat(cursor).catch(() => { throw new CliRuntimeError('RESOURCE_NOT_FOUND', 'Skill 来源不存在') })
@@ -47,8 +58,10 @@ export const runSkillCommand = async (args: string[], options: {
   sourceDirectory?: string
   onPreview?: (preview: unknown) => unknown
 }) => {
-  const source = resolve(options.sourceDirectory ?? defaultSource)
-  if (source === parse(source).root || source === resolve(options.homeDirectory) || basename(source) !== 'panshi-camp') throw new CliRuntimeError('INPUT_INVALID', 'Skill 来源路径无效')
+  const explicitSource = options.sourceDirectory
+  const usesDefaultSource = explicitSource === undefined
+  const source = explicitSource === undefined ? await resolveDefaultSource() : resolve(explicitSource)
+  if (source === parse(source).root || source === resolve(options.homeDirectory) || (!usesDefaultSource && basename(source) !== 'panshi-camp')) throw new CliRuntimeError('INPUT_INVALID', 'Skill 来源路径无效')
   if (args[0] === 'path' && args.length === 1) { await inventory(source); return { path: source } }
   if (args[0] !== 'install') throw new CliRuntimeError('INPUT_INVALID', 'skill 仅支持 path 或 install')
   const { positionals, values } = parseOptions(args.slice(1), { '--agent': 'string', '--confirm': 'string' })

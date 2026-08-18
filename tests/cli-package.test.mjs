@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -206,6 +206,12 @@ test('packed CLI installs and runs outside the monorepo', async () => {
     const version = await run(executable, ['--version'], { cwd: temporaryRoot, env: isolatedEnvironment })
     assert.equal(version.stdout, `${cliPackage.version}\n`)
     assert.equal(version.stderr, '')
+
+    const skillPath = await run(executable, ['skill', 'path'], { cwd: temporaryRoot, env: isolatedEnvironment })
+    const skillDocument = JSON.parse(skillPath.stdout)
+    assert.equal(skillPath.stderr, '')
+    assert.equal(await realpath(skillDocument.path), await realpath(join(installationRoot, 'node_modules/panshi-camp-cli/dist/skill')))
+    assert.match(await readFile(join(skillDocument.path, 'SKILL.md'), 'utf8'), /^name: panshi-camp$/mu)
     assert.equal(basename(executable), process.platform === 'win32' ? 'panshi-camp.cmd' : 'panshi-camp')
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })

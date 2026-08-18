@@ -758,8 +758,10 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   const preview = previewFor({ manifest, layout })
   const stdout = dependencies.stdout ?? ((text) => process.stdout.write(text))
   const stderr = dependencies.stderr ?? ((text) => process.stderr.write(text))
-  stdout(`${JSON.stringify(preview, null, 2)}\n`)
-  if (mode === 'preview') return { status: 'preview', preview }
+  if (mode === 'preview') {
+    stdout(`${JSON.stringify(preview, null, 2)}\n`)
+    return { status: 'preview', preview }
+  }
 
   assertLayoutBoundaries({ layout, homeDirectory, localAppData, workspaceRoot: dependencies.workspaceRoot ?? process.cwd() })
   await assertSafePaths({
@@ -836,7 +838,9 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
         }
       }
     }
-    return { status: alreadyInstalled ? 'already-installed' : 'installed', version: manifest.version, stableEntry: layout.stableEntry, warnings }
+    const result = { status: alreadyInstalled ? 'already-installed' : 'installed', version: manifest.version, stableEntry: layout.stableEntry, warnings }
+    stdout(`${JSON.stringify(result, null, 2)}\n`)
+    return result
   } catch (error) {
     if (!durableCommitted) {
       await configTransaction?.rollback().catch(() => {})

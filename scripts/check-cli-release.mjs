@@ -25,6 +25,8 @@ const readJson = async (file, label) => {
 
 const canonical = (value) => `${JSON.stringify(value, null, 2)}\n`
 
+export const isCanonicalManifestSource = (source, value) => source.replace(/\r\n/gu, '\n') === canonical(value)
+
 const inspectReleaseEntries = (entries) => {
   if (entries.length > 10_000) throw new Error('CLI_RELEASE_ENTRY_LIMIT: too many archive entries')
   const seen = new Set()
@@ -80,7 +82,7 @@ export const checkCliRelease = async ({
   const skillManifestSource = await readFile(skillManifestPath, 'utf8')
   const releaseManifest = validateManifest(JSON.parse(releaseManifestSource))
   const skillManifest = validateManifest(JSON.parse(skillManifestSource))
-  if (releaseManifestSource !== canonical(releaseManifest) || skillManifestSource !== canonical(skillManifest)) throw new Error('CLI_RELEASE_MANIFEST_FORMAT: manifests must use canonical JSON formatting')
+  if (!isCanonicalManifestSource(releaseManifestSource, releaseManifest) || !isCanonicalManifestSource(skillManifestSource, skillManifest)) throw new Error('CLI_RELEASE_MANIFEST_FORMAT: manifests must use canonical JSON formatting')
   if (JSON.stringify(releaseManifest) !== JSON.stringify(skillManifest)) throw new Error('CLI_RELEASE_MANIFEST_DRIFT: dist and Skill manifests differ')
   const expectedAsset = validateReleaseVersion({ packageVersion: cliPackage.version, manifest: releaseManifest })
   const expectedUrl = `${RELEASE_REPOSITORY}/releases/download/cli-v${cliPackage.version}/${expectedAsset}`

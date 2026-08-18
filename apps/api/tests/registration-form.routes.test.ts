@@ -41,7 +41,7 @@ const app = (published: boolean) => createApp({
     },
     revokeSessionByTokenHash: async () => undefined,
   },
-  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
   registrationFormService: service(published),
   config: { allowedOrigins: ['https://admin.example'], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576 },
 })

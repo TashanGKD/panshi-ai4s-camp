@@ -119,7 +119,16 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
     }
 
     if (!safeMethods.has(request.method)) {
+      const bearerOnly = /^Bearer [a-f0-9]{64}$/u.test(request.get('Authorization') ?? '')
+        && typeof request.cookies?.panshi_session !== 'string'
+      const cliLoginWithoutBrowserState = request.path === '/api/v1/auth/cli/login'
+        && request.get('Authorization') === undefined
+        && typeof request.cookies?.panshi_session !== 'string'
       if (origin === undefined) {
+        if (bearerOnly || cliLoginWithoutBrowserState) {
+          next()
+          return
+        }
         next(new HttpError(403, 'ORIGIN_REQUIRED', '请求来源不可验证'))
         return
       }

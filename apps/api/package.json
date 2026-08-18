@@ -21,6 +21,7 @@
     "test:integration:auth": "node tests/require-auth-integration-env.mjs && vitest run tests/admin-auth.integration.test.ts",
     "test:integration:migrations": "node tests/require-schema-integration-env.mjs && vitest run tests/user-display-name-migration.integration.test.ts",
     "test:integration:student-auth": "node tests/require-student-auth-integration-env.mjs && vitest run tests/student-auth.integration.test.ts --maxWorkers=1 --no-file-parallelism",
+    "test:integration:cli-auth": "node tests/require-student-auth-integration-env.mjs && vitest run tests/cli-auth.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:registration": "node tests/require-registration-integration-env.mjs && vitest run tests/registration-form.integration.test.ts tests/registration-form-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:files": "node tests/require-files-integration-env.mjs && vitest run tests/files.integration.test.ts tests/files-migration.integration.test.ts --maxWorkers=1 --no-file-parallelism",
     "test:integration:application": "node tests/require-registration-integration-env.mjs && vitest run tests/application.integration.test.ts tests/review-workflow.integration.test.ts --maxWorkers=1 --no-file-parallelism",

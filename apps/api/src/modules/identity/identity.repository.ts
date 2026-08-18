@@ -17,10 +17,13 @@ export type IdentityUser = {
 
 export type ResolvedSession = {
   tokenHash: string
+  kind?: SessionKind
   expiresAt: Date
   revokedAt: Date | null
   user: IdentityUser
 }
+
+export type SessionKind = 'web' | 'cli' | 'admin_web' | 'admin_cli'
 
 export type NewAdmin = {
   displayName: string
@@ -83,7 +86,13 @@ export type AuthTransactionRepository = {
     expectedPasswordHash: string
     requiredRole: UserRole
     tokenHash: string
+    kind: SessionKind
     expiresAt: Date
+    revokedAt: Date
+    audit: AuditEntry
+  }) => Promise<void>
+  revokeSessionAndAudit: (input: {
+    tokenHash: string
     revokedAt: Date
     audit: AuditEntry
   }) => Promise<void>
@@ -118,7 +127,7 @@ export const createIdentityRepository = (
     return user ?? null
   },
 
-  rotateSessionAndAudit: async ({ userId, expectedPasswordHash, requiredRole, tokenHash, expiresAt, revokedAt, audit }) => {
+  rotateSessionAndAudit: async ({ userId, expectedPasswordHash, requiredRole, tokenHash, kind, expiresAt, revokedAt, audit }) => {
     await db.transaction(async (transaction) => {
       const [lockedUser] = await transaction.select({ passwordHash: users.passwordHash, role: users.role, disabledAt: users.disabledAt, passwordResetRequiredAt: users.passwordResetRequiredAt })
         .from(users).where(eq(users.id, userId)).for('update')
@@ -129,8 +138,16 @@ export const createIdentityRepository = (
         throw new SessionRotationRejectedError('credentials_changed')
       }
       await transaction.update(sessions).set({ revokedAt })
-        .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
-      await transaction.insert(sessions).values({ tokenHash, userId, expiresAt })
+        .where(and(eq(sessions.userId, userId), eq(sessions.kind, kind), isNull(sessions.revokedAt)))
+      await transaction.insert(sessions).values({ tokenHash, userId, kind, expiresAt })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, audit)
+    })
+  },
+
+  revokeSessionAndAudit: async ({ tokenHash, revokedAt, audit }) => {
+    await db.transaction(async (transaction) => {
+      await transaction.update(sessions).set({ revokedAt })
+        .where(and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt)))
       await appendAuditLog(transaction as NodePgDatabase<typeof schema>, audit)
     })
   },
@@ -138,6 +155,7 @@ export const createIdentityRepository = (
   findSessionByTokenHash: async (tokenHash) => {
     const [row] = await db.select({
       tokenHash: sessions.tokenHash,
+      kind: sessions.kind,
       expiresAt: sessions.expiresAt,
       revokedAt: sessions.revokedAt,
       ...userSelection,
@@ -146,6 +164,7 @@ export const createIdentityRepository = (
     if (!row) return null
     return {
       tokenHash: row.tokenHash,
+      kind: row.kind,
       expiresAt: row.expiresAt,
       revokedAt: row.revokedAt,
       user: {

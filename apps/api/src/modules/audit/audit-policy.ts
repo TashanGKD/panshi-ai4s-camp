@@ -36,6 +36,8 @@ const definitions = {
   'student.enabled': { entityType: 'user', metadata: AdminResult },
   'student.password_reset_required': { entityType: 'user', metadata: z.object({ revokedSessionCount: Count, resetMethod: z.literal('verification_code') }).strict() },
   'auth.login_succeeded': { entityType: 'session', metadata: z.object({ authenticationMethod: z.literal('password') }).strict() },
+  'auth.cli_login_succeeded': { entityType: 'session', metadata: z.object({ clientKind: z.literal('cli') }).strict() },
+  'auth.cli_logout': { entityType: 'session', metadata: z.object({ clientKind: z.literal('cli') }).strict() },
   'auth.student_registered': { entityType: 'user', metadata: z.object({ authenticationMethod: z.literal('verification_code') }).strict() },
   'auth.password_reset': { entityType: 'user', metadata: z.object({ revokedSessions: z.literal(true) }).strict() },
   'content.version_created': { entityType: 'content_version', metadata: z.object({ moduleKey: ContentModuleKeySchema, source: SeedSource, version: Revision }).strict() },
@@ -69,7 +71,7 @@ const definitions = {
   'resource.published': { entityType: 'resource', metadata: ResourceMetadata },
   'resource.unpublished': { entityType: 'resource', metadata: ResourceMetadata },
 } as const
-const nullEntityActions = new Set<AuditAction>(['auth.login_succeeded', 'application.bulk_status_changed', 'application.exported'])
+const nullEntityActions = new Set<AuditAction>(['auth.login_succeeded', 'auth.cli_login_succeeded', 'auth.cli_logout', 'application.bulk_status_changed', 'application.exported'])
 const contentModuleEntityActions = new Set<AuditAction>(['content.version_published', 'content.draft_saved', 'content.published', 'content.rolled_back'])
 
 export type AuditAction = keyof typeof definitions
@@ -106,4 +108,4 @@ export const sanitizeAuditMetadata = (action: string, metadata: unknown): JsonOb
   return parsed.success ? parsed.data as JsonObject : {}
 }
 
-export const sensitiveAuditText = (value: string) => /password|passwd|secret|token|cookie|verification|验证码|密码|手机号|(?:\+?86)?1[3-9]\d{9}|\$2[aby]\$|(?:^|\s)\/(?:Users|private|home|var)\//iu.test(value)
+export const sensitiveAuditText = (value: string) => /password|passwd|secret|token|cookie|verification|验证码|密码|手机号|(?:\+?86)?1[3-9]\d{9}|\$2[aby]\$|(?<![a-f0-9])[a-f0-9]{64}(?![a-f0-9])|(?:^|\s)\/(?:Users|private|home|var)\//iu.test(value)

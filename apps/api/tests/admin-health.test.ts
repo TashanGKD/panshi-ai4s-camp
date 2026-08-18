@@ -61,7 +61,7 @@ const createTestApp = (service = createService()) => createApp({
   checkDatabase: async () => undefined,
   adminHealthService: service,
   identityRepository,
-  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
   config: { allowedOrigins: [], healthcheckTimeoutMs: 50, jsonLimitBytes: 1_048_576 },
 })
 

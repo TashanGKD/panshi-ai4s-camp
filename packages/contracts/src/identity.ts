@@ -76,6 +76,15 @@ export const LoginResponseSchema = z.object({
   }),
 })
 
+export const CliLoginResponseSchema = z.strictObject({
+  apiVersion: z.literal('v1'),
+  data: z.strictObject({
+    token: z.string().regex(/^[a-f0-9]{64}$/u),
+    expiresAt: z.iso.datetime(),
+    user: AuthenticatedUserSchema,
+  }),
+})
+
 export const RegistrationResponseSchema = z.object({
   apiVersion: z.literal('v1'),
   data: z.object({
@@ -99,9 +108,11 @@ export type SendVerificationCodeRequest = z.infer<typeof SendVerificationCodeReq
 export type StudentRegistrationRequest = z.infer<typeof StudentRegistrationRequestSchema>
 export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
+export type CliLoginResponse = z.infer<typeof CliLoginResponseSchema>
 export type RegistrationResponse = z.infer<typeof RegistrationResponseSchema>
 export type ProfileResponse = z.infer<typeof ProfileResponseSchema>
 
 export const serializeLoginResponse = (input: unknown): LoginResponse => LoginResponseSchema.parse(input)
+export const serializeCliLoginResponse = (input: unknown): CliLoginResponse => CliLoginResponseSchema.parse(input)
 export const serializeRegistrationResponse = (input: unknown): RegistrationResponse => RegistrationResponseSchema.parse(input)
 export const serializeProfileResponse = (input: unknown): ProfileResponse => ProfileResponseSchema.parse(input)

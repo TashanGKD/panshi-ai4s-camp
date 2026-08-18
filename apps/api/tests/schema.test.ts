@@ -154,6 +154,7 @@ const expectedChecks = [
   { constraintName: 'resources_access_level_check', tokens: ['access_level', 'public', 'authenticated', 'admitted'] },
   { constraintName: 'resources_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'resources_sort_order_check', tokens: ['sort_order', '>= 0'] },
+  { constraintName: 'sessions_kind_check', tokens: ['kind', 'web', 'cli', 'admin_web', 'admin_cli'] },
   { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
   { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
   { constraintName: 'users_role_check', tokens: ['role', 'user', 'admin'] },
@@ -369,6 +370,18 @@ describe('initial PostgreSQL schema', () => {
     const sent = indexes.rows.find(({ indexname }) => indexname === 'verification_codes_phone_purpose_sent_created_idx')?.indexdef
     expect(active).toMatch(/phone_normalized, created_at DESC.*delivery_state.*pending.*sent/iu)
     expect(sent).toMatch(/phone_normalized, purpose, created_at DESC.*delivery_state.*sent/iu)
+  })
+
+  it('indexes active sessions by user and credential kind', async () => {
+    const indexes = await pool.query<{ indexname: string, indexdef: string }>(`
+      select indexname, indexdef
+      from pg_indexes
+      where schemaname = 'public'
+        and tablename = 'sessions'
+        and indexname = 'sessions_user_kind_active_idx'
+    `)
+    expect(indexes.rows).toHaveLength(1)
+    expect(indexes.rows[0]?.indexdef).toMatch(/user_id, kind.*revoked_at IS NULL/iu)
   })
 
   it('creates exactly the intended domain immutability triggers', async () => {
@@ -666,6 +679,7 @@ describe('initial PostgreSQL schema', () => {
       '0019_student_forced_password_reset.sql',
       '0020_publish_initial_registration_form.sql',
       '0021_check_in.sql',
+      '0022_cli_sessions.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

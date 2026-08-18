@@ -33,6 +33,7 @@ type FileLifecycleState = 'active' | 'deleting' | 'delete_failed' | 'deleted'
 type FileStorageRecoveryState = 'pending' | 'delete_failed'
 type VerificationPurpose = 'register' | 'reset_password'
 type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
+type SessionKind = 'web' | 'cli' | 'admin_web' | 'admin_cli'
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
@@ -67,12 +68,15 @@ export const sessions = pgTable('sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   tokenHash: text('token_hash').notNull().unique('sessions_token_hash_unique'),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  kind: text('kind').$type<SessionKind>().notNull().default('web'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, (table) => [
   index('sessions_user_id_idx').on(table.userId),
   index('sessions_expires_at_idx').on(table.expiresAt),
+  index('sessions_user_kind_active_idx').on(table.userId, table.kind).where(sql`${table.revokedAt} is null`),
+  check('sessions_kind_check', sql`${table.kind} in ('web', 'cli', 'admin_web', 'admin_cli')`),
 ])
 
 export const verificationCodes = pgTable('verification_codes', {

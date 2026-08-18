@@ -65,7 +65,7 @@ describe('administrator summary route', () => {
       } : null,
       revokeSessionByTokenHash: async () => undefined,
     },
-    authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+    authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
     config: { allowedOrigins: ['https://admin.example'], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576 },
   })
 

@@ -82,6 +82,11 @@ class TestRepository implements IdentityRepository, AuthTransactionRepository, S
     this.audits.push(input.audit)
   }
 
+  revokeSessionAndAudit = async (input: Parameters<AuthTransactionRepository['revokeSessionAndAudit']>[0]) => {
+    await this.revokeSessionByTokenHash(input.tokenHash, input.revokedAt)
+    this.audits.push(input.audit)
+  }
+
   storeVerificationCode = async (input: Parameters<StudentIdentityRepository['storeVerificationCode']>[0]) => {
     const latest = [...this.codes]
       .filter(({ phoneNormalized, deliveryState }) => (

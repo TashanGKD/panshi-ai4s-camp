@@ -36,7 +36,7 @@ const auditQueryService = {
 const makeApp = () => createApp({
   checkDatabase: async () => undefined,
   identityRepository,
-  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
   adminManagementService,
   auditQueryService,
   config: { allowedOrigins: ['https://admin.example'], healthcheckTimeoutMs: 1_000, jsonLimitBytes: 100_000 },

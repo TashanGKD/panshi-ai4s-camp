@@ -2,16 +2,18 @@ import { pipeline } from 'node:stream/promises'
 import { Router, type Response } from 'express'
 import { z } from 'zod'
 import { HttpError } from '../../middleware/error-handler.js'
-import { getSessionToken } from '../../middleware/require-user.js'
-import { createRequireUser, type AuthenticatedLocals } from '../../middleware/require-user.js'
+import { createRequireUser, getRequestSessionCredential, type AuthenticatedLocals } from '../../middleware/require-user.js'
 import { requireAdmin } from '../../middleware/require-admin.js'
 import { AuthenticationError, type AuthenticatedSessionUser, type SessionService } from '../identity/session.service.js'
 import { buildContentDisposition } from '../files/file-validation.js'
 import { ResourceAccessError, ResourceRevisionConflictError, type ResourceService } from './resource.service.js'
 
 const Id = z.string().uuid()
-const resolveOptional = async (sessions: SessionService, cookies: unknown): Promise<AuthenticatedSessionUser | null> => {
-  try { return await sessions.resolve(getSessionToken(cookies)) } catch (error) {
+const resolveOptional = async (sessions: SessionService, request: Parameters<typeof getRequestSessionCredential>[0]): Promise<AuthenticatedSessionUser | null> => {
+  try {
+    const credential = getRequestSessionCredential(request)
+    return await sessions.resolve(credential?.token, credential?.source === 'bearer' ? ['cli', 'admin_cli'] : ['web', 'admin_web'])
+  } catch (error) {
     if (error instanceof AuthenticationError && error.kind === 'unauthorized') return null
     throw error
   }
@@ -28,7 +30,7 @@ export const createResourceRouter = (sessions: SessionService, service: Resource
   const router = Router()
   router.get('/', async (request, response, next) => {
     try {
-      const actor = await resolveOptional(sessions, request.cookies)
+      const actor = await resolveOptional(sessions, request)
       if (actor) privateNoStore(response)
       const resources = await service.list(actor)
       response.setHeader('Cache-Control', actor ? 'private, no-store' : 'public, max-age=30, must-revalidate')
@@ -45,7 +47,7 @@ export const createResourceRouter = (sessions: SessionService, service: Resource
     try {
       const parsed = Id.safeParse(request.params.id)
       if (!parsed.success) throw new HttpError(400, 'RESOURCE_ID_INVALID', '资料标识无效')
-      const actor = await resolveOptional(sessions, request.cookies)
+      const actor = await resolveOptional(sessions, request)
       const opened = await service.open(parsed.data, actor)
       stream = opened.stream
       response.setHeader('Content-Type', opened.record.mimeType)
@@ -82,7 +84,7 @@ export const createAdminResourceRouter = (sessions: SessionService, service: Res
       const id = Id.safeParse(request.params.id)
       if (!id.success) throw new HttpError(404, 'RESOURCE_NOT_AVAILABLE', '资料不存在或不可访问')
       privateNoStore(response)
-      const actor = await resolveOptional(sessions, request.cookies)
+      const actor = await resolveOptional(sessions, request)
       if (!actor || actor.role !== 'admin' || actor.disabledAt !== null) throw new ResourceAccessError(404, 'RESOURCE_NOT_AVAILABLE')
       const opened = await service.preview(id.data, actor)
       stream = opened.stream

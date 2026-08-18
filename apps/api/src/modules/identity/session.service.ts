@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { normalizeMainlandChinaMobile, type AuthenticatedUser } from '@panshi/contracts'
-import { SessionRotationRejectedError, type AuthTransactionRepository, type IdentityRepository, type IdentityUser } from './identity.repository.js'
+import { SessionRotationRejectedError, type AuthTransactionRepository, type IdentityRepository, type IdentityUser, type SessionKind } from './identity.repository.js'
 import { DUMMY_PASSWORD_HASH, verifyPassword } from './password.js'
 
 export const SESSION_COOKIE_NAME = 'panshi_session'
@@ -15,6 +15,7 @@ export class AuthenticationError extends Error {
 export const hashSessionToken = (token: string): string => createHash('sha256').update(token).digest('hex')
 
 export type AuthenticatedSessionUser = IdentityUser
+export type { SessionKind } from './identity.repository.js'
 
 export type SessionService = ReturnType<typeof createSessionService>
 
@@ -26,7 +27,7 @@ export const createSessionService = (
   const now = options.now ?? (() => new Date())
   const createToken = options.createToken ?? (() => randomBytes(32))
 
-  const login = async (phoneInput: string, password: string, requiredRole: 'user' | 'admin') => {
+  const login = async (phoneInput: string, password: string, requiredRole: 'user' | 'admin', kind: SessionKind) => {
       let phoneNormalized: string | undefined
       try {
         phoneNormalized = normalizeMainlandChinaMobile(phoneInput)
@@ -52,13 +53,16 @@ export const createSessionService = (
           expectedPasswordHash: user.passwordHash,
           requiredRole,
           tokenHash: hashSessionToken(token),
+          kind,
           expiresAt,
           revokedAt: issuedAt,
           audit: {
             actorUserId: user.id,
-            action: 'auth.login_succeeded',
+            action: kind === 'cli' || kind === 'admin_cli' ? 'auth.cli_login_succeeded' : 'auth.login_succeeded',
             entityType: 'session',
-            metadata: { authenticationMethod: 'password' },
+            metadata: kind === 'cli' || kind === 'admin_cli'
+              ? { clientKind: 'cli' }
+              : { authenticationMethod: 'password' },
           },
         })
       } catch (error) {
@@ -77,14 +81,23 @@ export const createSessionService = (
   }
 
   return {
-    loginAdmin: (phoneInput: string, password: string) => login(phoneInput, password, 'admin'),
+    loginAdmin: (phoneInput: string, password: string) => login(phoneInput, password, 'admin', 'admin_web'),
 
-    loginStudent: (phoneInput: string, password: string) => login(phoneInput, password, 'user'),
+    loginAdminWeb: (phoneInput: string, password: string) => login(phoneInput, password, 'admin', 'admin_web'),
 
-    resolve: async (token: string | undefined): Promise<AuthenticatedSessionUser> => {
+    loginAdminCli: (phoneInput: string, password: string) => login(phoneInput, password, 'admin', 'admin_cli'),
+
+    loginStudent: (phoneInput: string, password: string) => login(phoneInput, password, 'user', 'web'),
+
+    loginStudentWeb: (phoneInput: string, password: string) => login(phoneInput, password, 'user', 'web'),
+
+    loginStudentCli: (phoneInput: string, password: string) => login(phoneInput, password, 'user', 'cli'),
+
+    resolve: async (token: string | undefined, allowedKinds?: readonly SessionKind[]): Promise<AuthenticatedSessionUser> => {
       if (!token) throw new AuthenticationError('unauthorized')
       const session = await repository.findSessionByTokenHash(hashSessionToken(token))
-      if (!session || session.revokedAt !== null || session.expiresAt.getTime() <= now().getTime()) {
+      const effectiveKind = session?.kind ?? (session?.user.role === 'admin' ? 'admin_web' : 'web')
+      if (!session || session.revokedAt !== null || session.expiresAt.getTime() <= now().getTime() || (allowedKinds && !allowedKinds.includes(effectiveKind))) {
         throw new AuthenticationError('unauthorized')
       }
       if (session.user.disabledAt !== null || !['user', 'admin'].includes(session.user.role)) {
@@ -100,6 +113,20 @@ export const createSessionService = (
 
     logout: async (token: string | undefined) => {
       if (token) await repository.revokeSessionByTokenHash(hashSessionToken(token), now())
+    },
+
+    logoutCli: async (token: string | undefined) => {
+      if (!token) return
+      const tokenHash = hashSessionToken(token)
+      const session = await repository.findSessionByTokenHash(tokenHash)
+      if (!session || !session.kind || !['cli', 'admin_cli'].includes(session.kind)) throw new AuthenticationError('unauthorized')
+      const audit = {
+        actorUserId: session.user.id,
+        action: 'auth.cli_logout',
+        entityType: 'session',
+        metadata: { clientKind: 'cli' },
+      } as const
+      await transactions.revokeSessionAndAudit({ tokenHash, revokedAt: now(), audit })
     },
   }
 }

@@ -8,7 +8,7 @@ const admin = { id: '10000000-0000-4000-8000-000000000001', displayName: '审核
 const student = { ...admin, id: '10000000-0000-4000-8000-000000000002', role: 'user' as const }
 const identityRepository = { findUserByPhoneNormalized: async () => null, findSessionByTokenHash: async (hash: string) => hash === hashSessionToken('admin-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: admin } : hash === hashSessionToken('student-token') ? { tokenHash: hash, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: student } : null, revokeSessionByTokenHash: async () => undefined }
 const service: ReviewService = { list: async () => ({ apiVersion: 'v1', data: { items: [], total: 0, page: 1, pageSize: 20 } }), detail: async () => ({ apiVersion: 'v1', data: { private: true } }), transition: async () => ({ apiVersion: 'v1', data: { id: 'x', revision: 2, status: 'reviewing' } }), bulkTransition: async () => ({ apiVersion: 'v1', data: { results: [] } }), exportCsv: async () => ({ csv: '\uFEFFa\r\n', count: 0, columns: ['a'] }) }
-const app = createApp({ checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined }, reviewService: service, config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 } })
+const app = createApp({ checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined }, reviewService: service, config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 } })
 
 describe('admin application review routes', () => {
   it('rejects anonymous and student access and marks all responses private', async () => {
@@ -41,7 +41,7 @@ describe('admin application review routes', () => {
     const validatingApp = createApp({
       checkDatabase: async () => undefined,
       identityRepository,
-      authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+      authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
       reviewService: createReviewService(repository),
       config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 },
     })

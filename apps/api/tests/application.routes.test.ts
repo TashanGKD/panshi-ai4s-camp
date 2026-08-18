@@ -15,7 +15,7 @@ const identityRepository = {
 const fakeService = (overrides: Partial<ApplicationService> = {}): ApplicationService => ({
   getMine: async () => { throw new Error('unused') }, reopen: async () => { throw new Error('unused') }, saveDraft: async () => { throw new Error('unused') }, submit: async () => { throw new Error('unused') }, ...overrides,
 })
-const app = (service: ApplicationService) => createApp({ checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined }, applicationService: service, config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 } })
+const app = (service: ApplicationService) => createApp({ checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined }, applicationService: service, config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 } })
 
 describe('my application routes', () => {
   it('requires a student session and never accepts a user id in the path', async () => {

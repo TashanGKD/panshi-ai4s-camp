@@ -1,5 +1,6 @@
 import {
   AdminLoginRequestSchema,
+  CliLoginResponseSchema,
   PasswordResetRequestSchema,
   SendVerificationCodeRequestSchema,
   StudentLoginRequestSchema,
@@ -10,7 +11,7 @@ import {
 } from '@panshi/contracts'
 import { Router, type CookieOptions, type Response } from 'express'
 import { HttpError } from '../../middleware/error-handler.js'
-import { createRequireUser, getSessionToken, type AuthenticatedLocals } from '../../middleware/require-user.js'
+import { createRequireUser, getRequestSessionCredential, getSessionToken, type AuthenticatedLocals } from '../../middleware/require-user.js'
 import { AuthenticationError, SESSION_COOKIE_NAME, type SessionService } from './session.service.js'
 import { VerificationError, type VerificationService } from './verification.service.js'
 import { loginRateLimitActor, type RateLimiter, type RateLimitPolicy } from '../../middleware/rate-limit.js'
@@ -118,6 +119,21 @@ export const createAuthRouter = (
     }
   })
 
+  router.post('/auth/cli/login', async (request, response) => {
+    const input = StudentLoginRequestSchema.safeParse(request.body)
+    if (!input.success) throw new HttpError(400, 'INVALID_REQUEST', '登录请求格式错误')
+    try {
+      const result = await loginWithLimit(request, response, input.data.phone, () => sessions.loginStudentCli(input.data.phone, input.data.password))
+      response.setHeader('Cache-Control', 'no-store')
+      response.json(CliLoginResponseSchema.parse({
+        apiVersion: 'v1',
+        data: { token: result.token, expiresAt: result.expiresAt.toISOString(), user: result.user },
+      }))
+    } catch (error) {
+      handleAuthenticationError(error)
+    }
+  })
+
   router.post('/auth/password/reset', async (request, response) => {
     const input = PasswordResetRequestSchema.safeParse(request.body)
     if (!input.success) throw new HttpError(400, 'INVALID_REQUEST', '密码重置请求格式错误')
@@ -156,6 +172,18 @@ export const createAuthRouter = (
     try {
       await sessions.logout(getSessionToken(request.cookies))
       response.clearCookie(SESSION_COOKIE_NAME, cookieOptions(options.secureCookies))
+      response.status(204).send()
+    } catch (error) {
+      handleAuthenticationError(error)
+    }
+  })
+
+  router.post('/auth/cli/logout', async (request, response) => {
+    try {
+      const credential = getRequestSessionCredential(request)
+      if (!credential || credential.source !== 'bearer') throw new AuthenticationError('unauthorized')
+      await sessions.logoutCli(credential.token)
+      response.setHeader('Cache-Control', 'no-store')
       response.status(204).send()
     } catch (error) {
       handleAuthenticationError(error)

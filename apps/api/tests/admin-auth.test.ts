@@ -77,6 +77,11 @@ class TestAuthTransactionRepository implements AuthTransactionRepository {
       release()
     }
   }
+
+  revokeSessionAndAudit = async (input: Parameters<AuthTransactionRepository['revokeSessionAndAudit']>[0]) => {
+    await this.identity.revokeSessionByTokenHash(input.tokenHash, input.revokedAt)
+    this.entries.push(input.audit)
+  }
 }
 
 const allowedOrigin = 'https://admin.example'

@@ -32,7 +32,7 @@ const service = {
   listAdmin: async () => [], createDraft: async () => { throw new Error('unused') }, updateDraft: async () => { throw new Error('unused') }, setPublished: async () => { throw new Error('unused') },
 } as unknown as ResourceService
 const makeApp = (visible = true) => createApp({
-  checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined }, resourceService: service,
+  checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined }, resourceService: service,
   statisticsService: { readPublic: async () => visible ? { visible: true, submittedCount: 7, updatedAt: '2026-08-15T12:00:00.000Z' } : { visible: false } },
   config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 100_000 },
 })
@@ -40,7 +40,7 @@ const makeApp = (visible = true) => createApp({
 const makeAdminMutationApp = (overrides: Partial<ResourceService>) => createApp({
   checkDatabase: async () => undefined,
   identityRepository,
-  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
   resourceService: { ...service, ...overrides } as ResourceService,
   config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 100_000 },
 })

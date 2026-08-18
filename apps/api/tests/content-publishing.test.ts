@@ -215,7 +215,7 @@ const authenticatedApp = (service: ContentPublishingService = publishingService(
       },
       revokeSessionByTokenHash: async () => undefined,
     },
-    authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+    authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
     config: { allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576 },
   })
 }
@@ -297,7 +297,7 @@ describe('administrator content routes', () => {
         findSessionByTokenHash: async () => null,
         revokeSessionByTokenHash: async () => undefined,
       },
-      authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+      authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
       config: { allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576 },
     })
     expect((await request(app).get('/api/v1/admin/content/basic/draft')).status).toBe(404)

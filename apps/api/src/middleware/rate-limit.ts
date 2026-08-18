@@ -84,7 +84,9 @@ const categoryForPath = (path: string): Exclude<RateLimitCategory, 'login_failur
 export const createRateLimitMiddleware = (limiter: RateLimiter, policies: Record<RateLimitCategory, RateLimitPolicy>): RequestHandler => (request, response, next) => {
   const category = categoryForPath(request.path)
   if (!category) { next(); return }
-  const session = typeof request.cookies?.panshi_session === 'string' ? request.cookies.panshi_session as string : ''
+  const cookieSession = typeof request.cookies?.panshi_session === 'string' ? request.cookies.panshi_session as string : ''
+  const bearerSession = /^Bearer ([a-f0-9]{64})$/u.exec(request.get('Authorization') ?? '')?.[1] ?? ''
+  const session = cookieSession || bearerSession
   const actor = category === 'authenticated' || category === 'admin'
     ? `session:${hashRateLimitIdentifier(session || `ip:${request.ip ?? 'unknown'}`)}`
     : `ip:${request.ip ?? 'unknown'}`

@@ -44,7 +44,7 @@ const makeService = (upload: FileService['upload']): FileService => ({
 const makeApp = (service: FileService, tempDirectory: string, limits: Partial<ApiRuntimeConfig> = {}) => createApp({
   checkDatabase: async () => undefined,
   identityRepository,
-  authTransactionRepository: { rotateSessionAndAudit: async () => undefined },
+  authTransactionRepository: { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined },
   fileService: service,
   config: {
     allowedOrigins: [origin], healthcheckTimeoutMs: 2_000, jsonLimitBytes: 1_048_576,

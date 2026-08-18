@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
@@ -929,6 +929,44 @@ test('direct execution with the embedded release manifest only previews by defau
   assert.equal(result.stderr, '')
   assert.equal(preview.action, 'preview-only')
   assert.equal(preview.requiredVersion, trustedManifest.version)
+})
+
+test('direct execution through a filesystem alias still enters preview mode', { skip: process.platform === 'win32' }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'panshi-installer-entry-alias-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const realSkill = fileURLToPath(new URL('../', import.meta.url))
+  const aliasSkill = join(root, 'skill-alias')
+  await symlink(realSkill, aliasSkill, 'dir')
+
+  const result = await execFileAsync(process.execPath, [join(aliasSkill, 'scripts/install-cli.mjs')], { encoding: 'utf8' })
+  const preview = JSON.parse(result.stdout)
+  assert.equal(result.stderr, '')
+  assert.equal(preview.action, 'preview-only')
+})
+
+test('importing through a filesystem alias never starts the installer', { skip: process.platform === 'win32' }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'panshi-installer-import-alias-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const realSkill = fileURLToPath(new URL('../', import.meta.url))
+  const aliasSkill = join(root, 'skill-alias')
+  await symlink(realSkill, aliasSkill, 'dir')
+  const aliasedScriptUrl = pathToFileURL(join(aliasSkill, 'scripts/install-cli.mjs')).href
+
+  const result = await execFileAsync(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(aliasedScriptUrl)})`], { encoding: 'utf8' })
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, '')
+})
+
+test('a different physical file with the same basename cannot spoof direct invocation', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'panshi-installer-entry-spoof-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const spoofedArgvPath = join(root, 'install-cli.mjs')
+  await writeFile(spoofedArgvPath, '// intentionally unrelated\n')
+  const scriptUrl = new URL('./install-cli.mjs', import.meta.url).href
+
+  const result = await execFileAsync(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(scriptUrl)})`, spoofedArgvPath], { encoding: 'utf8' })
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, '')
 })
 
 test('Skill documents preview-first bootstrap and only uses an absolute stable CLI placeholder', async () => {

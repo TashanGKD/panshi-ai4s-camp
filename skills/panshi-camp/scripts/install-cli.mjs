@@ -22,7 +22,6 @@ import {
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path, { join, posix, relative, resolve, win32 } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
 const PACKAGE_NAME = 'panshi-camp-cli'
@@ -876,8 +875,16 @@ export const runEmbeddedInstaller = async ({ argv = process.argv.slice(2), depen
   return runInstaller({ argv, manifest, dependencies })
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ''
-if (import.meta.url === invokedPath) {
+const isDirectInvocation = async () => {
+  if (!process.argv[1]) return false
+  try {
+    return await realpath(new URL(import.meta.url)) === await realpath(resolve(process.argv[1]))
+  } catch {
+    return false
+  }
+}
+
+if (await isDirectInvocation()) {
   runEmbeddedInstaller().catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

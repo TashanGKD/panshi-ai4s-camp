@@ -13,6 +13,7 @@ import { loadConfig, resolveEndpoint, type CliConfig } from './config.js'
 import { KeychainCredentialStore, type CredentialStore } from './credentials.js'
 import { readSecret as readSecretInput, readSecretBundle } from './io.js'
 import { executeCommand, findCommand } from './commands/registry.js'
+import { runSkillCommand } from './commands/skill.js'
 
 const HELP = `磐石·科学智能实训营 CLI
 
@@ -20,7 +21,8 @@ const HELP = `磐石·科学智能实训营 CLI
 
 公开信息：info show；content get；schedule list；travel show；contacts show；institutions search
 报名与资料：application form/show/validate；resources list/download；files download
-账号与报到：auth login/status；check-in show；check-in qr export`
+账号与报到：auth login/status；check-in show；check-in qr export
+Skill：skill path；skill install --agent codex|claude-code`
 
 type Dependencies = {
   stdout?: (text: string) => unknown
@@ -67,6 +69,15 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
       return 0
     }
     const homeDirectory = dependencies.homeDirectory ?? homedir()
+    if (parsed.command[0] === 'skill') {
+      if (json) throw new CliRuntimeError('INPUT_INVALID', 'skill 管理命令仅支持人工可读模式')
+      const result = await runSkillCommand(parsed.command.slice(1), {
+        homeDirectory,
+        onPreview: (preview) => output.text(`Skill 安装预览：\n${JSON.stringify(preview, null, 2)}`),
+      })
+      output.text(JSON.stringify(result, null, 2))
+      return 0
+    }
     const credentials = dependencies.credentialStore ?? new KeychainCredentialStore()
     let profile: { name: string, baseUrl: string, phoneHint?: string } | undefined
     if (parsed.profile) {

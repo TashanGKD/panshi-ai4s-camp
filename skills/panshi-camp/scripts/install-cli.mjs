@@ -12,8 +12,10 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rename,
   rm,
+  rmdir,
   symlink,
   writeFile,
 } from 'node:fs/promises'
@@ -36,6 +38,7 @@ const RELEASE_ASSET_HOSTS = new Set([
 const MANIFEST_FIELDS = Object.freeze([
   'assetName',
   'packageName',
+  'packageTreeSha256',
   'schemaVersion',
   'sha256',
   'sizeBytes',
@@ -75,6 +78,7 @@ export const validateManifest = (value) => {
     return fail('INSTALLER_MANIFEST_INVALID', '附件名必须是与版本精确匹配的 basename')
   }
   if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(value.sha256)) return fail('INSTALLER_MANIFEST_INVALID', 'sha256 必须是 64 位小写十六进制')
+  if (typeof value.packageTreeSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(value.packageTreeSha256)) return fail('INSTALLER_MANIFEST_INVALID', 'packageTreeSha256 必须是 64 位小写十六进制')
   if (!Number.isSafeInteger(value.sizeBytes) || value.sizeBytes <= 0 || value.sizeBytes > MAX_ASSET_BYTES) return fail('INSTALLER_MANIFEST_INVALID', '附件大小超出允许范围')
   if (typeof value.url !== 'string') return fail('INSTALLER_MANIFEST_INVALID', '下载地址无效')
   let parsed
@@ -195,14 +199,15 @@ const assertSafePaths = async ({ layout, homeDirectory, windowsPathInspector, cu
   return assertPosixPathSafe(homeDirectory, targets, currentUid)
 }
 
-const ensureDirectory = async ({ directory, mode, preserveExistingMode = false, layout, homeDirectory, windowsPathInspector, currentUid }) => {
+const ensureDirectory = async ({ directory, mode, layout, homeDirectory, windowsPathInspector, currentUid }) => {
   await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [directory] })
   const existed = await lstat(directory).then(() => true).catch((error) => error.code === 'ENOENT' ? false : Promise.reject(error))
   await mkdir(directory, { recursive: true, mode })
   await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [directory] })
   const metadata = await lstat(directory)
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) return fail('INSTALLER_PATH_UNSAFE', `目录不安全：${directory}`)
-  if (layout.platform !== 'win32' && (!existed || !preserveExistingMode)) await chmod(directory, mode)
+  if (layout.platform !== 'win32' && !existed) await chmod(directory, mode)
+  return !existed
 }
 
 const secretKeys = new Set(['password', 'passwd', 'token', 'cookie', 'verificationcode', 'code', 'secret'])
@@ -262,8 +267,8 @@ const readConfigForMerge = async ({ layout, homeDirectory, windowsPathInspector,
   return mergePanshiProfile(parsed)
 }
 
-const writeConfigAtomically = async ({ config, layout, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap }) => {
-  await ensureDirectory({ directory: layout.configDirectory, mode: 0o700, layout, homeDirectory, windowsPathInspector, currentUid })
+const writeConfigAtomically = async ({ config, layout, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, directoryState }) => {
+  directoryState.created = await ensureDirectory({ directory: layout.configDirectory, mode: 0o700, layout, homeDirectory, windowsPathInspector, currentUid })
   await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [layout.configDirectory, layout.configPath] })
   const temporary = `${layout.configPath}.tmp-${process.pid}-${Date.now()}`
   const backup = `${layout.configPath}.backup-${process.pid}-${Date.now()}`
@@ -281,7 +286,14 @@ const writeConfigAtomically = async ({ config, layout, homeDirectory, windowsPat
     await checkAfterSwap('config', [layout.configDirectory, layout.configPath])
     await failpoint('config-after-swap')
     return {
-      commit: async () => { if (backedUp) await rm(backup, { force: true }) },
+      commit: async () => {
+        if (backedUp) {
+          try { await backupCleanup(backup) } catch {
+            return { code: 'INSTALLER_BACKUP_CLEANUP_FAILED', path: backup, message: '安装已完成，但备份清理失败；备份已保留' }
+          }
+        }
+        return null
+      },
       rollback: async () => {
         if (swapped) await rm(layout.configPath, { force: true })
         if (backedUp) await rename(backup, layout.configPath)
@@ -300,7 +312,7 @@ const inventoryTree = async (root, { pathApi = path, currentUid } = {}) => {
   const entries = []
   const visit = async (directory, prefix = '') => {
     const children = await readdir(directory, { withFileTypes: true })
-    children.sort((left, right) => left.name.localeCompare(right.name, 'en-US'))
+    children.sort((left, right) => Buffer.compare(Buffer.from(left.name, 'utf8'), Buffer.from(right.name, 'utf8')))
     for (const child of children) {
       if (prefix === '' && child.name === MARKER_NAME) continue
       const absolute = pathApi.join(directory, child.name)
@@ -325,20 +337,50 @@ const inventoryTree = async (root, { pathApi = path, currentUid } = {}) => {
   return { entries, treeSha256 }
 }
 
-const markerFor = (manifest, inventory) => ({
+export const computePackageTreeSha256 = async (packageRoot, { pathApi = path, currentUid } = {}) => {
+  const rootMetadata = await lstat(packageRoot).catch(() => null)
+  if (!rootMetadata?.isDirectory() || rootMetadata.isSymbolicLink()) return fail('INSTALLER_PACKAGE_INVALID', 'CLI package root 缺失或不安全')
+  if (currentUid !== undefined && rootMetadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', 'CLI package root 必须由当前 uid 所有')
+  const files = []
+  const visit = async (directory, prefix = '') => {
+    const children = await readdir(directory, { withFileTypes: true })
+    children.sort((left, right) => Buffer.compare(Buffer.from(left.name, 'utf8'), Buffer.from(right.name, 'utf8')))
+    for (const child of children) {
+      const absolute = pathApi.join(directory, child.name)
+      const relativePath = prefix ? `${prefix}/${child.name}` : child.name
+      const metadata = await lstat(absolute)
+      if (currentUid !== undefined && metadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', `CLI package tree 必须由当前 uid 所有：${relativePath}`)
+      if (metadata.isDirectory() && !metadata.isSymbolicLink()) {
+        await visit(absolute, relativePath)
+      } else if (metadata.isFile() && !metadata.isSymbolicLink()) {
+        const contents = await readFile(absolute)
+        files.push({ path: relativePath, size: contents.length, sha256: createHash('sha256').update(contents).digest('hex') })
+      } else {
+        return fail('INSTALLER_PACKAGE_INVALID', `CLI package tree 包含不支持的节点：${relativePath}`)
+      }
+    }
+  }
+  await visit(packageRoot)
+  files.sort((left, right) => Buffer.compare(Buffer.from(left.path, 'utf8'), Buffer.from(right.path, 'utf8')))
+  return createHash('sha256').update(JSON.stringify(files)).digest('hex')
+}
+
+const markerFor = (manifest, inventory, packageTreeSha256) => ({
   schemaVersion: 2,
   packageName: manifest.packageName,
   version: manifest.version,
   sha256: manifest.sha256,
   treeSha256: inventory.treeSha256,
   entries: inventory.entries,
+  packageTreeSha256,
 })
 
-const verifyInstalledPackage = async (installationRoot, manifest, pathApi = path) => {
+const verifyInstalledPackage = async (installationRoot, manifest, pathApi = path, currentUid) => {
   const packageRoot = pathApi.join(installationRoot, 'node_modules', manifest.packageName)
   const packagePath = pathApi.join(packageRoot, 'package.json')
   const metadata = await lstat(packagePath).catch(() => null)
   if (!metadata?.isFile() || metadata.isSymbolicLink()) return fail('INSTALLER_PACKAGE_INVALID', '安装包 package.json 缺失或不安全')
+  if (currentUid !== undefined && metadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', '安装包 package.json 必须由当前 uid 所有')
   let packageJson
   try { packageJson = JSON.parse(await readFile(packagePath, 'utf8')) } catch { return fail('INSTALLER_PACKAGE_INVALID', '安装包 package.json 无效') }
   if (packageJson.name !== manifest.packageName || packageJson.version !== manifest.version || !isPlainObject(packageJson.bin) || Object.keys(packageJson.bin).length !== 1 || packageJson.bin[BIN_NAME] !== './dist/main.js') {
@@ -349,8 +391,16 @@ const verifyInstalledPackage = async (installationRoot, manifest, pathApi = path
   if (!isInside(packageRoot, binPath, pathApi)) return fail('INSTALLER_PACKAGE_INVALID', 'bin 路径逃逸安装包')
   const binMetadata = await lstat(binPath).catch(() => null)
   if (!binMetadata?.isFile() || binMetadata.isSymbolicLink()) return fail('INSTALLER_PACKAGE_INVALID', 'bin 文件缺失或不安全')
+  if (currentUid !== undefined && binMetadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', 'bin 文件必须由当前 uid 所有')
   if (pathApi === path && (binMetadata.mode & 0o111) === 0) return fail('INSTALLER_PACKAGE_INVALID', 'bin 文件不可执行')
   return binPath
+}
+
+const verifyTrustedPackageTree = async (installationRoot, manifest, pathApi, currentUid) => {
+  const packageRoot = pathApi.join(installationRoot, 'node_modules', manifest.packageName)
+  const packageTreeSha256 = await computePackageTreeSha256(packageRoot, { pathApi, currentUid })
+  if (packageTreeSha256 !== manifest.packageTreeSha256) return fail('INSTALLER_PACKAGE_TREE_MISMATCH', 'CLI package tree SHA-256 与内嵌 manifest 不一致')
+  return packageTreeSha256
 }
 
 const inspectExistingVersion = async ({ versionRoot, manifest, layout, currentUid }) => {
@@ -366,8 +416,10 @@ const inspectExistingVersion = async ({ versionRoot, manifest, layout, currentUi
     if (error instanceof InstallerError) throw error
     return fail('INSTALLER_VERSION_CONFLICT', '无法验证同版本安装树')
   })
-  if (JSON.stringify(marker) !== JSON.stringify(markerFor(manifest, inventory))) return fail('INSTALLER_VERSION_CONFLICT', '同版本安装树清单或摘要冲突')
-  try { await verifyInstalledPackage(versionRoot, manifest, layout.pathApi) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本入口或 package metadata 冲突') }
+  let packageTreeSha256
+  try { packageTreeSha256 = await verifyTrustedPackageTree(versionRoot, manifest, layout.pathApi, currentUid) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本 CLI package tree 与可信 manifest 冲突') }
+  if (JSON.stringify(marker) !== JSON.stringify(markerFor(manifest, inventory, packageTreeSha256))) return fail('INSTALLER_VERSION_CONFLICT', '同版本安装树清单或摘要冲突')
+  try { await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本入口或 package metadata 冲突') }
   return true
 }
 
@@ -447,7 +499,7 @@ const downloadAsset = async ({ manifest, destination, fetchImplementation }) => 
   if (hash.digest('hex') !== manifest.sha256) return fail('INSTALLER_SHA256_MISMATCH', '下载内容 SHA-256 与内嵌 manifest 不一致')
 }
 
-const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap }) => {
+const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup }) => {
   const temporary = `${layout.stableEntry}.tmp-${process.pid}-${Date.now()}`
   const backup = `${layout.stableEntry}.backup-${process.pid}-${Date.now()}`
   let backedUp = false
@@ -467,7 +519,14 @@ const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathI
     await failpoint('stable-entry-after-swap')
     if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) return fail('INSTALLER_STABLE_ENTRY_INVALID', '稳定入口最终目标无效')
     return {
-      commit: async () => { if (backedUp) await rm(backup, { force: true }) },
+      commit: async () => {
+        if (backedUp) {
+          try { await backupCleanup(backup) } catch {
+            return { code: 'INSTALLER_BACKUP_CLEANUP_FAILED', path: backup, message: '安装已完成，但备份清理失败；备份已保留' }
+          }
+        }
+        return null
+      },
       rollback: async () => {
         if (swapped) await rm(layout.stableEntry, { force: true })
         if (backedUp) await rename(backup, layout.stableEntry)
@@ -479,6 +538,47 @@ const switchStableEntry = async ({ layout, manifest, homeDirectory, windowsPathI
     throw error
   } finally {
     await rm(temporary, { force: true })
+  }
+}
+
+const verifyFinalState = async ({ versionRoot, manifest, config, layout, homeDirectory, windowsPathInspector, currentUid }) => {
+  await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [layout.installRoot, versionRoot, layout.binDirectory, layout.configDirectory, layout.configPath] })
+  const configDirectoryMetadata = await lstat(layout.configDirectory).catch(() => null)
+  const configMetadata = await lstat(layout.configPath).catch(() => null)
+  if (!configDirectoryMetadata?.isDirectory() || configDirectoryMetadata.isSymbolicLink()) return fail('INSTALLER_PATH_UNSAFE', '最终配置目录不安全')
+  if (!configMetadata?.isFile() || configMetadata.isSymbolicLink()) return fail('INSTALLER_PATH_UNSAFE', '最终配置文件不安全')
+  if (currentUid !== undefined && (configDirectoryMetadata.uid !== currentUid || configMetadata.uid !== currentUid)) return fail('INSTALLER_PATH_NOT_OWNED', '最终配置目录和文件必须由当前 uid 所有')
+  if (layout.platform !== 'win32' && ((configDirectoryMetadata.mode & 0o077) !== 0 || (configMetadata.mode & 0o077) !== 0)) return fail('INSTALLER_CONFIG_PERMISSIONS_UNSAFE', '最终配置权限必须是目录 0700、文件 0600')
+  if (await readFile(layout.configPath, 'utf8') !== `${JSON.stringify(config, null, 2)}\n`) return fail('INSTALLER_CONFIG_INVALID', '最终配置内容与事务目标不一致')
+  const versionMetadata = await lstat(versionRoot).catch(() => null)
+  if (!versionMetadata?.isDirectory() || versionMetadata.isSymbolicLink()) return fail('INSTALLER_PATH_UNSAFE', '最终版本目录不安全')
+  if (currentUid !== undefined && versionMetadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', '最终版本目录必须由当前 uid 所有')
+  await inspectExistingVersion({ versionRoot, manifest, layout, currentUid })
+  const binPath = await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid)
+  if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) return fail('INSTALLER_STABLE_ENTRY_INVALID', '稳定入口最终版本无效')
+  if (layout.platform === 'win32') {
+    const targetMetadata = await lstat(binPath).catch(() => null)
+    if (!targetMetadata?.isFile() || targetMetadata.isSymbolicLink()) return fail('INSTALLER_STABLE_ENTRY_INVALID', 'Windows 稳定入口目标不存在或不安全')
+    return
+  }
+  const [stableRealpath, expectedRealpath] = await Promise.all([
+    realpath(layout.stableEntry).catch(() => null),
+    realpath(binPath).catch(() => null),
+  ])
+  if (!stableRealpath || stableRealpath !== expectedRealpath) return fail('INSTALLER_STABLE_ENTRY_INVALID', '稳定入口 realpath 与可信 CLI 入口不一致')
+}
+
+const removeCreatedEmptyDirectory = async ({ created, directory, layout, homeDirectory, windowsPathInspector, currentUid }) => {
+  if (!created) return
+  try {
+    await assertSafePaths({ layout, homeDirectory, windowsPathInspector, currentUid, targets: [directory] })
+    const metadata = await lstat(directory)
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) return
+    if (currentUid !== undefined && metadata.uid !== currentUid) return
+    if ((await readdir(directory)).length !== 0) return
+    await rmdir(directory)
+  } catch {
+    // Best-effort rollback cleanup must never damage pre-existing or raced state.
   }
 }
 
@@ -505,6 +605,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   const layout = resolveLayout({ platform, homeDirectory, localAppData, xdgConfigHome })
   const currentUid = platform === 'win32' ? undefined : (dependencies.currentUid ?? (typeof process.getuid === 'function' ? process.getuid() : undefined))
   const failpoint = dependencies.failpoint ?? (async () => {})
+  const backupCleanup = dependencies.backupCleanup ?? (async (candidate) => rm(candidate, { force: true }))
   const checkAfterSwap = async (name, targets) => {
     await assertSafePaths({ layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, targets })
     await (dependencies.afterSwapCheck ?? (async () => {}))(name)
@@ -513,6 +614,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   const versionRoot = layout.pathApi.join(layout.installRoot, manifest.version)
   const preview = previewFor({ manifest, layout })
   const stdout = dependencies.stdout ?? ((text) => process.stdout.write(text))
+  const stderr = dependencies.stderr ?? ((text) => process.stderr.write(text))
   stdout(`${JSON.stringify(preview, null, 2)}\n`)
   if (mode === 'preview') return { status: 'preview', preview }
 
@@ -528,13 +630,19 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   await preflightStableEntry(layout, manifest.version, currentUid)
   const alreadyInstalled = await inspectExistingVersion({ versionRoot, manifest, layout, currentUid })
 
-  await ensureDirectory({ directory: layout.installRoot, mode: 0o700, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
-  const stagingRoot = alreadyInstalled ? null : await mkdtemp(layout.pathApi.join(layout.installRoot, '.install-'))
-  const archivePath = stagingRoot ? layout.pathApi.join(stagingRoot, manifest.assetName) : null
+  let installRootCreated = false
+  let binDirectoryCreated = false
+  const configDirectoryState = { created: false }
+  let stagingRoot = null
+  let archivePath
   let installedFresh = false
   let entryTransaction = null
   let configTransaction = null
+  let succeeded = false
   try {
+    installRootCreated = await ensureDirectory({ directory: layout.installRoot, mode: 0o700, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+    stagingRoot = alreadyInstalled ? null : await mkdtemp(layout.pathApi.join(layout.installRoot, '.install-'))
+    archivePath = stagingRoot ? layout.pathApi.join(stagingRoot, manifest.assetName) : null
     if (!alreadyInstalled) {
       await downloadAsset({ manifest, destination: archivePath, fetchImplementation: dependencies.fetch ?? globalThis.fetch })
       const execute = dependencies.execFile ?? execFileAsync
@@ -543,27 +651,37 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
         cwd: stagingRoot,
         windowsHide: true,
       })
-      await verifyInstalledPackage(stagingRoot, manifest, layout.pathApi)
+      await verifyInstalledPackage(stagingRoot, manifest, layout.pathApi, currentUid)
+      const packageTreeSha256 = await verifyTrustedPackageTree(stagingRoot, manifest, layout.pathApi, currentUid)
       await rm(archivePath, { force: true })
       const inventory = await inventoryTree(stagingRoot, { pathApi: layout.pathApi, currentUid })
-      await writeFile(layout.pathApi.join(stagingRoot, MARKER_NAME), `${JSON.stringify(markerFor(manifest, inventory))}\n`, { flag: 'wx', mode: 0o600 })
+      await writeFile(layout.pathApi.join(stagingRoot, MARKER_NAME), `${JSON.stringify(markerFor(manifest, inventory, packageTreeSha256))}\n`, { flag: 'wx', mode: 0o600 })
       await assertSafePaths({ layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, targets: [layout.installRoot, versionRoot] })
       await rename(stagingRoot, versionRoot)
       installedFresh = true
       await checkAfterSwap('version', [layout.installRoot, versionRoot])
       await inspectExistingVersion({ versionRoot, manifest, layout, currentUid })
     }
-    await ensureDirectory({ directory: layout.binDirectory, mode: 0o755, preserveExistingMode: true, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+    binDirectoryCreated = await ensureDirectory({ directory: layout.binDirectory, mode: 0o755, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
     await failpoint('bin-ready')
     await preflightStableEntry(layout, manifest.version, currentUid)
     if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) {
-      entryTransaction = await switchStableEntry({ layout, manifest, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap })
+      entryTransaction = await switchStableEntry({ layout, manifest, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup })
     }
-    await verifyInstalledPackage(versionRoot, manifest, layout.pathApi)
-    configTransaction = await writeConfigAtomically({ config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap })
-    await configTransaction.commit()
-    await entryTransaction?.commit()
-    return { status: alreadyInstalled ? 'already-installed' : 'installed', version: manifest.version, stableEntry: layout.stableEntry }
+    await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid)
+    configTransaction = await writeConfigAtomically({ config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, directoryState: configDirectoryState })
+    await verifyFinalState({ versionRoot, manifest, config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+    const warnings = []
+    for (const transaction of [configTransaction, entryTransaction]) {
+      if (!transaction) continue
+      const warning = await transaction.commit()
+      if (warning) {
+        warnings.push(warning)
+        stderr(`${warning.code}: 安装状态已确认；安全备份保留，未触发 rollback\n`)
+      }
+    }
+    succeeded = true
+    return { status: alreadyInstalled ? 'already-installed' : 'installed', version: manifest.version, stableEntry: layout.stableEntry, warnings }
   } catch (error) {
     await configTransaction?.rollback().catch(() => {})
     await entryTransaction?.rollback().catch(() => {})
@@ -571,6 +689,11 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
     throw error
   } finally {
     if (stagingRoot) await rm(stagingRoot, { recursive: true, force: true })
+    if (!succeeded) {
+      await removeCreatedEmptyDirectory({ created: configDirectoryState.created, directory: layout.configDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+      await removeCreatedEmptyDirectory({ created: binDirectoryCreated, directory: layout.binDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+      await removeCreatedEmptyDirectory({ created: installRootCreated, directory: layout.installRoot, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
+    }
   }
 }
 

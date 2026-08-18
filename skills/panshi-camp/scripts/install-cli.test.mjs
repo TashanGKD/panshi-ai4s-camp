@@ -22,6 +22,7 @@ import { promisify } from 'node:util'
 
 import {
   assertWindowsPathSafe,
+  computePackageTreeSha256,
   mergePanshiProfile,
   parseInstallerArgv,
   resolveLayout,
@@ -33,6 +34,23 @@ import {
 const execFileAsync = promisify(execFile)
 const body = Buffer.from('pinned release bytes')
 const digest = createHash('sha256').update(body).digest('hex')
+const packageJsonContents = JSON.stringify({
+  name: 'panshi-camp-cli',
+  version: '1.2.3',
+  bin: { 'panshi-camp': './dist/main.js' },
+})
+const mainContents = '#!/usr/bin/env node\n'
+const packageTreeDigest = (overrides = {}) => {
+  const files = [
+    ['dist/main.js', overrides.mainContents ?? mainContents],
+    ['package.json', overrides.packageJsonContents ?? packageJsonContents],
+  ].map(([path, contents]) => ({
+    path,
+    size: Buffer.byteLength(contents),
+    sha256: createHash('sha256').update(contents).digest('hex'),
+  }))
+  return createHash('sha256').update(JSON.stringify(files)).digest('hex')
+}
 const manifest = Object.freeze({
   schemaVersion: 1,
   packageName: 'panshi-camp-cli',
@@ -41,6 +59,7 @@ const manifest = Object.freeze({
   url: 'https://github.com/TashanGKD/panshi-ai4s-camp/releases/download/cli-v1.2.3/panshi-camp-cli-1.2.3.tgz',
   sha256: digest,
   sizeBytes: body.length,
+  packageTreeSha256: packageTreeDigest(),
 })
 
 const response = (bytes = body, overrides = {}) => ({
@@ -74,12 +93,8 @@ const fakeNpmInstall = async (_command, args, options) => {
   const binRoot = join(options.cwd, 'node_modules', '.bin')
   await mkdir(join(packageRoot, 'dist'), { recursive: true })
   await mkdir(binRoot, { recursive: true })
-  await writeFile(join(packageRoot, 'package.json'), JSON.stringify({
-    name: manifest.packageName,
-    version: manifest.version,
-    bin: { 'panshi-camp': './dist/main.js' },
-  }))
-  await writeFile(join(packageRoot, 'dist/main.js'), '#!/usr/bin/env node\n')
+  await writeFile(join(packageRoot, 'package.json'), packageJsonContents)
+  await writeFile(join(packageRoot, 'dist/main.js'), mainContents)
   await chmod(join(packageRoot, 'dist/main.js'), 0o755)
   await writeFile(join(binRoot, 'panshi-camp'), '#!/bin/sh\n')
   await chmod(join(binRoot, 'panshi-camp'), 0o755)
@@ -90,6 +105,7 @@ const install = async (t, overrides = {}) => {
   let fetchCalls = 0
   let execCalls = 0
   const stdout = []
+  const stderr = []
   const dependencies = {
     platform: 'linux',
     ...sandbox,
@@ -102,6 +118,7 @@ const install = async (t, overrides = {}) => {
       return fakeNpmInstall(...args)
     },
     stdout: (text) => stdout.push(text),
+    stderr: (text) => stderr.push(text),
     ...overrides,
   }
   return {
@@ -109,6 +126,7 @@ const install = async (t, overrides = {}) => {
     dependencies,
     counters: { get fetch() { return fetchCalls }, get exec() { return execCalls } },
     stdout,
+    stderr,
     run: (argv = ['--yes'], selectedManifest = manifest) => runInstaller({ argv, manifest: selectedManifest, dependencies }),
   }
 }
@@ -201,12 +219,43 @@ test('strict manifest validation rejects unknown fields, unsafe URLs, bad assets
     { ...manifest, assetName: '../panshi-camp-cli-1.2.3.tgz' },
     { ...manifest, assetName: 'panshi-camp-cli-latest.tgz' },
     { ...manifest, sha256: 'a'.repeat(63) },
+    { ...manifest, packageTreeSha256: 'a'.repeat(63) },
     { ...manifest, sizeBytes: 0 },
     { ...manifest, sizeBytes: 101 * 1024 * 1024 },
     { ...manifest, version: '../1.2.3' },
   ]
   for (const value of badManifests) assert.throws(() => validateManifest(value), /INSTALLER_MANIFEST_INVALID/u)
   assert.deepEqual(validateManifest(manifest), manifest)
+})
+
+test('requires the trusted manifest package tree digest', () => {
+  const withoutPackageTree = { ...manifest }
+  delete withoutPackageTree.packageTreeSha256
+  assert.throws(() => validateManifest(withoutPackageTree), /INSTALLER_MANIFEST_INVALID/u)
+  assert.equal(validateManifest(manifest).packageTreeSha256, packageTreeDigest())
+})
+
+test('package tree digest uses reusable UTF-8 byte path ordering', async (t) => {
+  const fixture = await makeSandbox(t)
+  const packageRoot = join(fixture.root, 'package')
+  await mkdir(join(packageRoot, 'a'), { recursive: true })
+  const files = [
+    ['a/x.txt', 'nested\n'],
+    ['a-z.txt', 'sibling\n'],
+    ['z.txt', 'ascii\n'],
+    ['ä.txt', 'unicode\n'],
+  ]
+  for (const [relativePath, contents] of files) await writeFile(join(packageRoot, relativePath), contents)
+  const entries = files
+    .map(([relativePath, contents]) => ({
+      path: relativePath,
+      size: Buffer.byteLength(contents),
+      sha256: createHash('sha256').update(contents).digest('hex'),
+    }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.path, 'utf8'), Buffer.from(right.path, 'utf8')))
+  const expected = createHash('sha256').update(JSON.stringify(entries)).digest('hex')
+
+  assert.equal(await computePackageTreeSha256(packageRoot), expected)
 })
 
 test('rejects a download redirect to a non-release githubusercontent host', async (t) => {
@@ -378,6 +427,25 @@ for (const mutation of [
   })
 }
 
+test('same-version reuse rejects a forged marker that matches a tampered CLI package tree', async (t) => {
+  const fixture = await install(t)
+  await fixture.run()
+  const versionRoot = join(fixture.homeDirectory, '.local/share/panshi-camp-cli', manifest.version)
+  const markerPath = join(versionRoot, '.panshi-camp-install.json')
+  const tamperedMain = 'tampered by same-user attacker\n'
+  await writeFile(join(versionRoot, 'node_modules/panshi-camp-cli/dist/main.js'), tamperedMain)
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'))
+  const mainEntry = marker.entries.find((entry) => entry.path === 'node_modules/panshi-camp-cli/dist/main.js')
+  mainEntry.size = Buffer.byteLength(tamperedMain)
+  mainEntry.sha256 = createHash('sha256').update(tamperedMain).digest('hex')
+  marker.treeSha256 = createHash('sha256').update(JSON.stringify(marker.entries)).digest('hex')
+  marker.packageTreeSha256 = packageTreeDigest({ mainContents: tamperedMain })
+  await writeFile(markerPath, `${JSON.stringify(marker)}\n`)
+
+  await assert.rejects(fixture.run(), /INSTALLER_VERSION_CONFLICT/u)
+  assert.equal(fixture.counters.fetch, 1)
+})
+
 test('rejects a package whose declared executable target is missing or not executable', async (t) => {
   const fixture = await install(t, {
     execFile: async (_command, _args, options) => {
@@ -460,6 +528,129 @@ test('revalidates the complete version inventory after the version rename', asyn
   await assert.rejects(lstat(join(fixture.homeDirectory, '.local/share/panshi-camp-cli', manifest.version)), { code: 'ENOENT' })
 })
 
+test('final verification rejects a config-after-swap version-root symlink and fully rolls back', async (t) => {
+  const fixture = await install(t)
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  const oldVersionRoot = join(layout.installRoot, '1.2.2')
+  const oldEntry = '../share/panshi-camp-cli/1.2.2/node_modules/panshi-camp-cli/dist/main.js'
+  await mkdir(join(oldVersionRoot, 'node_modules/panshi-camp-cli/dist'), { recursive: true, mode: 0o700 })
+  await writeFile(join(oldVersionRoot, 'node_modules/panshi-camp-cli/dist/main.js'), mainContents, { mode: 0o755 })
+  await mkdir(layout.binDirectory, { recursive: true, mode: 0o755 })
+  await symlink(oldEntry, layout.stableEntry)
+  await mkdir(layout.configDirectory, { recursive: true, mode: 0o700 })
+  const originalConfig = '{"profiles":{"local":{"baseUrl":"http://127.0.0.1:3001"}},"formatVersion":7}\n'
+  await writeFile(layout.configPath, originalConfig, { mode: 0o600 })
+  const outside = join(fixture.root, 'outside-final-swap')
+  await mkdir(outside)
+  await writeFile(join(outside, 'sentinel'), 'keep')
+  fixture.dependencies.afterSwapCheck = async (name) => {
+    if (name !== 'config') return
+    const versionRoot = join(layout.installRoot, manifest.version)
+    await rm(versionRoot, { recursive: true })
+    await symlink(outside, versionRoot)
+  }
+
+  await assert.rejects(fixture.run(), /INSTALLER_(?:PATH_UNSAFE|VERSION_CONFLICT)/u)
+
+  await assert.rejects(lstat(join(layout.installRoot, manifest.version)), { code: 'ENOENT' })
+  assert.equal(await readlink(layout.stableEntry), oldEntry)
+  assert.equal(await readFile(layout.configPath, 'utf8'), originalConfig)
+  assert.equal(await readFile(join(outside, 'sentinel'), 'utf8'), 'keep')
+})
+
+test('final verification rejects a config-after-swap config symlink without touching its target', async (t) => {
+  const fixture = await install(t)
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  const outside = join(fixture.root, 'outside-config.json')
+  await writeFile(outside, 'outside must survive\n')
+  fixture.dependencies.failpoint = async (name) => {
+    if (name !== 'config-after-swap') return
+    await rm(layout.configPath)
+    await symlink(outside, layout.configPath)
+  }
+
+  await assert.rejects(fixture.run(), /INSTALLER_PATH_UNSAFE/u)
+
+  assert.equal(await readFile(outside, 'utf8'), 'outside must survive\n')
+  await assert.rejects(lstat(layout.configPath), { code: 'ENOENT' })
+  await assert.rejects(lstat(join(layout.installRoot, manifest.version)), { code: 'ENOENT' })
+})
+
+test('final verification rejects config-directory permission drift after the config swap', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => {
+      if (name === 'config-after-swap') await chmod(join(fixture.homeDirectory, '.config/panshi-camp'), 0o755)
+    },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+
+  await assert.rejects(fixture.run(), /INSTALLER_CONFIG_PERMISSIONS_UNSAFE/u)
+
+  await assert.rejects(lstat(join(layout.installRoot, manifest.version)), { code: 'ENOENT' })
+})
+
+test('backup cleanup failure is best effort after final state confirmation', async (t) => {
+  const fixture = await install(t, { backupCleanup: () => { throw new Error('reviewer-shaped backup cleanup failure') } })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  const oldVersionRoot = join(layout.installRoot, '1.2.2')
+  await mkdir(join(oldVersionRoot, 'node_modules/panshi-camp-cli/dist'), { recursive: true, mode: 0o700 })
+  await writeFile(join(oldVersionRoot, 'node_modules/panshi-camp-cli/dist/main.js'), mainContents, { mode: 0o755 })
+  await mkdir(layout.binDirectory, { recursive: true, mode: 0o755 })
+  await symlink('../share/panshi-camp-cli/1.2.2/node_modules/panshi-camp-cli/dist/main.js', layout.stableEntry)
+  await mkdir(layout.configDirectory, { recursive: true, mode: 0o700 })
+  await writeFile(layout.configPath, '{"profiles":{"local":{"baseUrl":"http://127.0.0.1:3001"}}}\n', { mode: 0o600 })
+
+  const result = await fixture.run()
+
+  assert.equal(result.status, 'installed')
+  assert.equal(await readlink(layout.stableEntry), '../share/panshi-camp-cli/1.2.3/node_modules/panshi-camp-cli/dist/main.js')
+  assert.deepEqual(JSON.parse(await readFile(layout.configPath, 'utf8')), {
+    profiles: {
+      local: { baseUrl: 'http://127.0.0.1:3001' },
+      panshi: { baseUrl: 'https://panshi-ai4s.tashan.chat' },
+    },
+  })
+  assert.equal((await lstat(join(layout.installRoot, manifest.version))).isDirectory(), true)
+  assert.equal((await readdir(layout.binDirectory)).some((name) => name.includes('.backup-')), true)
+  assert.equal((await readdir(layout.configDirectory)).some((name) => name.includes('.backup-')), true)
+  assert.deepEqual(result.warnings.map(({ code }) => code), [
+    'INSTALLER_BACKUP_CLEANUP_FAILED',
+    'INSTALLER_BACKUP_CLEANUP_FAILED',
+  ])
+  assert.ok(result.warnings.every(({ path, message }) => path.includes('.backup-') && message.includes('备份已保留')))
+  assert.equal(fixture.stderr.length, 2)
+  assert.ok(fixture.stderr.every((line) => line.includes('INSTALLER_BACKUP_CLEANUP_FAILED')))
+})
+
+test('later failure removes only installer-created empty roots', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => { if (name === 'config-after-swap') throw new Error('late failure') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+
+  await assert.rejects(fixture.run(), /late failure/u)
+
+  for (const directory of [layout.installRoot, layout.binDirectory, layout.configDirectory]) {
+    await assert.rejects(lstat(directory), { code: 'ENOENT' })
+  }
+})
+
+test('later failure preserves pre-existing roots and their permissions', async (t) => {
+  const fixture = await install(t, {
+    failpoint: async (name) => { if (name === 'config-after-swap') throw new Error('late failure') },
+  })
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  await mkdir(layout.installRoot, { recursive: true, mode: 0o755 })
+  await mkdir(layout.binDirectory, { recursive: true, mode: 0o751 })
+  await mkdir(layout.configDirectory, { recursive: true, mode: 0o700 })
+
+  await assert.rejects(fixture.run(), /late failure/u)
+
+  assert.equal((await lstat(layout.installRoot)).mode & 0o777, 0o755)
+  assert.equal((await lstat(layout.binDirectory)).mode & 0o777, 0o751)
+  assert.equal((await lstat(layout.configDirectory)).mode & 0o777, 0o700)
+})
+
 test('package name, version, and bin are verified before switching the stable entry', async (t) => {
   const fixture = await install(t, {
     execFile: async (_command, _args, options) => {
@@ -529,7 +720,7 @@ test('Windows path safety fails closed when an ancestor has reparse-point attrib
   assert.ok(seen.some((candidate) => candidate.includes('AppData')))
 })
 
-test('Windows CI rejects a real junction ancestor', { skip: process.platform !== 'win32' }, async (t) => {
+test('Windows real-junction probe (Task4 will add CI; unverified until then)', { skip: process.platform !== 'win32' }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'panshi-installer-junction-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const outside = join(root, 'outside')
@@ -583,6 +774,8 @@ test('Skill documents preview-first bootstrap and only uses an absolute stable C
   assert.match(installation, /\.local\/bin\/panshi-camp/u)
   assert.match(installation, /panshi-camp\.cmd/u)
   assert.doesNotMatch(combined, /github\.com\/[^\s)]+\/releases\/download\//u)
+  assert.match(installation, /Task 4 将加入 Windows CI；加入前未验证/u)
+  assert.match(installation, /同一用户.*返回后.*改写/u)
   const requiredOrder = [
     '无参数运行安装器',
     '读取预览中的 requiredVersion',

@@ -132,6 +132,7 @@ assert.deepEqual(frontend.tmpfs, ['/tmp:rw,noexec,nosuid,size=16m'])
 
 const volumeInit = await readProjectFile('deploy/init-operation-volumes.sh')
 const publicTunnel = await readProjectFile('deploy/start-public-tunnel.sh')
+const publicNginx = await readProjectFile('deploy/ecs-nginx.conf')
 assert.match(volumeInit, /OPERATIONS_UID/u)
 assert.match(volumeInit, /OPERATIONS_GID/u)
 assert.match(volumeInit, /chown[^\n]+\/data[^\n]+\/backups/u)
@@ -143,6 +144,10 @@ assert.match(publicTunnel, /-R "127\.0\.0\.1:\$\{ECS_PORT\}:127\.0\.0\.1:\$\{LOC
 assert.match(publicTunnel, /StrictHostKeyChecking=yes/u)
 assert.match(publicTunnel, /ExitOnForwardFailure=yes/u)
 assert.doesNotMatch(publicTunnel, /StrictHostKeyChecking=no/u)
+assert.match(publicNginx, /server_name panshi-ai4s\.tashan\.chat;/u)
+assert.match(publicNginx, /proxy_pass http:\/\/127\.0\.0\.1:13200;/u)
+assert.match(publicNginx, /Strict-Transport-Security/u)
+assert.match(publicNginx, /client_max_body_size 6m;/u)
 
 const webDockerfile = await readProjectFile('apps/web/Dockerfile')
 const adminDockerfile = await readProjectFile('apps/admin/Dockerfile')

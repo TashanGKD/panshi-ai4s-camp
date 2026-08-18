@@ -43,7 +43,7 @@ const definitions = {
   'content.draft_saved': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, before: z.object({ revision: Revision }).strict(), after: z.object({ revision: Revision, shape: Shape }).strict() }).strict() },
   'content.published': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, revision: Revision, version: Revision, before: z.object({ publishedVersion: Revision.nullable() }).strict(), after: z.object({ publishedVersion: Revision, shape: Shape }).strict() }).strict() },
   'content.rolled_back': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, sourceVersion: Revision, version: Revision, revision: Revision, before: z.object({ publishedVersion: Revision.nullable() }).strict(), after: z.object({ publishedVersion: Revision, shape: Shape }).strict() }).strict() },
-  'file.uploaded': { entityType: 'file', metadata: z.object({ purpose: FilePurpose, visibility: FileVisibility, mimeType: z.enum(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']), sizeBytes: Count, attachmentSlot: AttachmentSlot }).strict() },
+  'file.uploaded': { entityType: 'file', metadata: z.object({ purpose: FilePurpose, visibility: FileVisibility, mimeType: z.enum(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg']), sizeBytes: Count, attachmentSlot: AttachmentSlot }).strict() },
   'file.storage_rejected': { entityType: 'file_storage_recovery', metadata: FileFailureMetadata },
   'file.upload_cleanup_failed': { entityType: 'file_storage_recovery', metadata: FileFailureMetadata },
   'file.hidden': { entityType: 'file', metadata: FileMetadata },

@@ -83,14 +83,88 @@ describe('public published content', () => {
       '专题四\n自驱动的端到端科研闭环',
       '参访交流与结营',
     ])
-    expect(initialPublishedContent.schedule.days.reduce((total, day) => total + day.sessions.length, 0)).toBe(31)
+    expect(initialPublishedContent.schedule.days.reduce((total, day) => total + day.sessions.length, 0)).toBe(34)
     expect(initialPublishedContent.schedule.introduction).toContain('9月3日全天及9月4日8:00—9:00安排学员报到')
     expect(initialPublishedContent.schedule.days[0]).toMatchObject({
       date: '2026-09-03', label: '9.3（周四）', theme: '学员报到',
       sessions: [{ title: '学员报到', time: '全天' }],
     })
     expect(initialPublishedContent.schedule.days[1]?.sessions[0]).toMatchObject({
-      title: '学员报到', timeRange: { start: '08:00', end: '09:00' },
+      title: '报到', timeRange: { start: '08:00', end: '09:00' },
+    })
+    expect(initialPublishedContent.schedule.days.slice(1).map((day) => ({
+      date: day.date,
+      sessions: day.sessions.map((session) => ({
+        time: 'time' in session ? session.time : `${session.timeRange.start}—${session.timeRange.end}`,
+        title: session.title,
+        speakerIds: session.speakerIds,
+      })),
+    }))).toEqual([
+      {
+        date: '2026-09-04',
+        sessions: [
+          { time: '08:00—09:00', title: '报到', speakerIds: ['checkin-team'] },
+          { time: '09:00—09:20', title: '开幕式', speakerIds: ['organizers'] },
+          { time: '09:30—10:30', title: 'AI for Science与磐石科学基础大模型', speakerIds: ['zeng-dajun'] },
+          { time: '10:50—11:50', title: '案例分享：联通数智与京医大模型', speakerIds: ['ding-zhu-schedule'] },
+          { time: '14:00—15:00', title: '科研智能体专题实训（一）：从零搭建智能体', speakerIds: ['chen-xihong'] },
+          { time: '15:10—16:10', title: '科研智能体专题实训（二）：智能体记忆与知识库', speakerIds: ['yu-xuanqing'] },
+          { time: '16:20—17:20', title: '科研智能体专题实训（三）：科研工具调用与工作流搭建', speakerIds: ['liu-zixiao'] },
+          { time: '19:30—21:00', title: '习题课与研讨课（选修）', speakerIds: ['course-team'] },
+        ],
+      },
+      {
+        date: '2026-09-05',
+        sessions: [
+          { time: '09:00—09:30', title: '签到', speakerIds: ['checkin-team'] },
+          { time: '09:30—10:30', title: '前沿讲座：科学数据基础设施与科学语料库', speakerIds: ['zhou-yuanchun'] },
+          { time: '10:50—11:50', title: '理论课程：AI驱动的科学规律发现——从实验数据到控制方程', speakerIds: ['li-kai'] },
+          { time: '14:00—15:00', title: '科研工具专题实训：从领域方法到Skill与MCP', speakerIds: ['pending-ia'] },
+          { time: '15:10—16:10', title: 'AI4S专题实训（一）：从科学问题到AI-ready任务', speakerIds: ['gong-zezhiao'] },
+          { time: '16:20—17:20', title: 'AI4S专题实训（二）：构建科研数据Harness——从科研文献到可信的AI-ready数据集', speakerIds: ['zhang-jian'] },
+          { time: '19:30—21:00', title: '习题课与研讨课（选修）', speakerIds: ['course-team'] },
+        ],
+      },
+      {
+        date: '2026-09-06',
+        sessions: [
+          { time: '09:00—09:30', title: '签到', speakerIds: ['checkin-team'] },
+          { time: '09:30—10:30', title: '前沿讲座：AI-ready物质科学数据、评测基准与材料模型', speakerIds: ['weng-hongming'] },
+          { time: '10:50—11:50', title: '案例分享：LinX超高通量分子互作平台——面向AI药物研发的数据基础', speakerIds: ['pending-hangzhou'] },
+          { time: '14:00—15:00', title: '科学模型专题实训（一）：从线性回归理解学习与模型结构', speakerIds: ['li-wenyi'] },
+          { time: '15:10—16:10', title: '科学模型专题实训（二）：从科学数据到模型选型与可信评测', speakerIds: ['li-wenyi'] },
+          { time: '16:20—17:20', title: '科学模型专题实训（三）：如何构建领域基座模型与AI Scientist系统', speakerIds: ['li-yuyang'] },
+          { time: '19:30—21:00', title: '习题课与研讨课（选修）', speakerIds: ['course-team'] },
+        ],
+      },
+      {
+        date: '2026-09-07',
+        sessions: [
+          { time: '09:00—09:30', title: '签到', speakerIds: ['checkin-team'] },
+          { time: '09:30—10:30', title: '前沿讲座：从多智能体到实验室机器人——AI4S原生系统与自主实验', speakerIds: ['pending-siat'] },
+          { time: '10:50—11:50', title: '案例分享：无机功能材料的计算—实验闭环——从组分设计到制备', speakerIds: ['pending-sic'] },
+          { time: '14:00—15:00', title: '案例分享：催化反应机理的AI建模与自主实验闭环', speakerIds: ['pending-dicp'] },
+          { time: '15:10—16:10', title: 'Agent4S专题实训（一）：从科研任务到可调用能力——CLI、Skill与智能体工作流', speakerIds: ['ou-shigang'] },
+          { time: '16:20—17:20', title: 'Agent4S专题实训（二）：从一次运行到持续科研——长时任务、评价闭环与人工接管', speakerIds: ['ou-shigang'] },
+          { time: '19:30—21:00', title: '习题课与研讨课（选修）', speakerIds: ['course-team'] },
+        ],
+      },
+      {
+        date: '2026-09-08',
+        sessions: [
+          { time: '09:00—09:30', title: '集合签到', speakerIds: ['checkin-team'] },
+          { time: '09:30—11:50', title: '科研机构参访', speakerIds: ['visit'] },
+          { time: '14:00—15:20', title: '学习成果交流：AI4S问题分析方案分组汇报', speakerIds: ['mentors'] },
+          { time: '15:50—17:10', title: '后续项目培育说明与闭营仪式', speakerIds: ['organizers-course'] },
+        ],
+      },
+    ])
+    expect(Object.fromEntries(initialPublishedContent.schedule.speakers?.map((speaker) => [speaker.id, speaker.name]) ?? [])).toMatchObject({
+      'zeng-dajun': '曾大军\n中国科学院自动化研究所研究员、副所长',
+      'ding-zhu-schedule': '丁鼎、朱艳春\n中国联通',
+      'zhou-yuanchun': '周园春\n中国科学院计算机网络信息中心研究员、主任',
+      'li-kai': '李凯\n中国科学院自动化研究所研究员',
+      'weng-hongming': '翁红明\n中国科学院凝聚态物质科学数据中心研究员、主任',
     })
     expect(initialPublishedContent.organizations.items).toContainEqual({ role: '支持单位', name: '腾讯云计算（北京）有限责任公司' })
     expect(initialPublishedContent.organizations.items).toContainEqual({ role: '协办单位', name: '中国科学院国家天文台' })
@@ -110,13 +184,17 @@ describe('public published content', () => {
     expect(initialPublishedContent.display.homeSectionOrder).toEqual([
       'intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation',
     ])
+    expect(initialPublishedContent.basic.intro[0]).toContain('人工智能辅助科学（AI for Science，AI4S）')
+    expect(initialPublishedContent.basic.intro[1]).toContain('主要面向全国非人工智能专业背景')
+    expect(initialPublishedContent.features.items[1]?.description).toContain('先构建最小可运行原型系统，再深入解析核心交互机制')
+    expect(initialPublishedContent.features.items[2]?.description).toContain('双向选择机制匹配导师资源')
     expect(initialPublishedContent.display.relatedLinks).toEqual([
       { label: '磐石官网', href: 'https://www.scienceone.ai/' },
       { label: '中国科学院大学他山学科交叉创新协会', href: 'https://preview.tashan.ac.cn/' },
     ])
     expect(initialPublishedContent.contacts.items).toEqual([
-      { name: '高翔', responsibility: '会务组', methods: [{ type: 'phone', value: '18515181215' }] },
-      { name: '周远航', responsibility: '会务组', methods: [{ type: 'phone', value: '18935301004' }] },
+      { name: '高翔', responsibility: '中关村主会场联系人', methods: [{ type: 'phone', value: '18515181215' }] },
+      { name: '周远航', responsibility: '中关村主会场联系人', methods: [{ type: 'phone', value: '18935301004' }] },
       { name: '杜江彬', responsibility: '雁栖湖分会场联系人', methods: [{ type: 'phone', value: '15990847912' }] },
     ])
     expect(initialPublishedContent.schedule.speakers?.filter((speaker) => speaker.profile).map((speaker) => speaker.profile?.name)).toEqual([
@@ -124,7 +202,7 @@ describe('public published content', () => {
     ])
     const seededSessions: ReadonlyArray<{ title: string, speakerIds?: readonly string[] }> = initialPublishedContent.schedule.days
       .flatMap((day) => day.sessions as ReadonlyArray<{ title: string, speakerIds?: readonly string[] }>)
-    expect(seededSessions.find((session) => session.title.includes('机器学习力场与粗粒化建模'))?.speakerIds).toEqual(['pending-chemistry'])
+    expect(seededSessions.find((session) => session.title.includes('LinX超高通量分子互作平台'))?.speakerIds).toEqual(['pending-hangzhou'])
     expect(initialPublishedContent.travel.sections).toContainEqual(expect.objectContaining({
       title: '实训营地址',
       image: expect.objectContaining({ src: '/images/iop-zhongguancun-location-map.png' }),

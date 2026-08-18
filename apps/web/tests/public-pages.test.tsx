@@ -27,7 +27,10 @@ const siteResponse = {
       image: { src: '/images/guests/zeng-dajun.jpg', alt: '曾大军研究员' },
       profileUrl: 'https://www.ia.cas.cn/rcdw/yjy/202404/t20240425_7131769.html',
     }],
-    scheduleOverview: [{ date: '2026-09-04', label: '9.4（周五）', theme: '专题一 科研智能体' }],
+    scheduleOverview: [
+      { date: '2026-09-03', label: '9.3（周四）', theme: '学员报到' },
+      { date: '2026-09-04', label: '9.4（周五）', theme: '专题一 科研智能体' },
+    ],
     homeSectionOrder: ['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation'],
     display: { series: '磐石科学智能实训营', footer: '接口活动标题', homeSectionOrder: ['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation'] },
   },
@@ -123,11 +126,13 @@ describe('API-driven public pages', () => {
     const headings = within(screen.getByRole('main')).getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
     expect(headings).toEqual(['一、实训营简介', '二、实训营特色', '三、举办时间、地点与规模', '四、日程安排', '五、特邀嘉宾', '六、组织单位', '七、注册与食宿'])
     expect(screen.getByRole('img', { name: '曾大军研究员' })).toHaveAttribute('src', '/images/guests/zeng-dajun.jpg')
-    expect(screen.getByText('曾大军')).toBeVisible()
+    expect(screen.getByRole('heading', { level: 3, name: '曾大军' })).toBeVisible()
+    expect(screen.getByText('研究员、博士生导师')).toBeVisible()
     expect(screen.getByRole('main')).toHaveTextContent('中国科学院自动化研究所副所长')
     expect(screen.getByRole('main')).toHaveTextContent('举办时间：2026年9月4日至9月8日。')
     expect(screen.getByRole('main')).toHaveTextContent('举办地点：主会场设在中国科学院物理研究所，本方案所列课程、研讨与交流等日程均在主会场开展；中国科学院大学雁栖湖校区另设分会场，另行开展研讨与交流活动。')
     expect(screen.getByRole('main')).toHaveTextContent('本次实训营不收取注册费，食宿自理。')
+    expect([...document.querySelectorAll('.schedule-overview__marker')].map((marker) => marker.textContent)).toEqual(['00', '01'])
     const signature = screen.getByText('磐石·科学智能实训营会务组').closest('.event-signature')
     expect(signature).toHaveTextContent('2026年8月18日')
   })
@@ -142,12 +147,13 @@ describe('API-driven public pages', () => {
     expect(screen.getByRole('main')).toHaveTextContent('科研智能体')
     expect(screen.getByRole('main')).toHaveTextContent('参访交流与结营')
     expect(screen.getByRole('columnheader', { name: '日期 / 专题' })).toBeVisible()
-    expect(screen.getByRole('columnheader', { name: '内容要点与学员成果' })).toBeVisible()
+    expect(screen.queryByRole('columnheader', { name: '内容要点与学员成果' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('columnheader')).toHaveLength(4)
     expect(screen.getByRole('columnheader', { name: '组织单位/授课师资' })).toBeVisible()
     expect(screen.getByRole('cell', { name: '智能体构建实践' })).toBeVisible()
     expect(screen.getByText('全天')).toBeVisible()
     expect(screen.queryByText('00:00–23:59')).not.toBeInTheDocument()
-    expect(screen.getByText('核验工具调用结果')).toBeVisible()
+    expect(screen.queryByText('核验工具调用结果')).not.toBeInTheDocument()
     expect(screen.getByText('李老师')).toBeVisible()
     expect(fetchSpy.mock.calls.map(([input]) => requestPath(input))).toEqual(expect.arrayContaining([
       '/api/v1/public/site',

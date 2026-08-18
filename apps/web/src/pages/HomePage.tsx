@@ -18,10 +18,13 @@ export function HomePage({ site }: { site: PublicSiteResponse['data'] }) {
     scale: site.basic.scale ? <ContentSection key="scale" title="实训规模与形式"><p>{site.basic.scale}</p></ContentSection> : null,
     features: site.features.items.length ? <ContentSection key="features" title="二、实训营特色"><div className="feature-list">{site.features.items.map((item) => <article key={item.title}><h3>{item.title}</h3><RichText as="p" html={item.description} /></article>)}</div></ContentSection> : null,
     eventDetails: site.basic.eventDetails?.length ? <ContentSection key="eventDetails" title="三、举办时间、地点与规模">{site.basic.eventDetails.map((paragraph) => <RichText as="p" key={paragraph} html={paragraph} />)}</ContentSection> : null,
-    scheduleOverview: site.scheduleOverview.length ? <ContentSection key="scheduleOverview" title="四、日程安排"><ol className="schedule-overview">{site.scheduleOverview.map((day) => <li key={day.date}><time dateTime={day.date}>{day.label}</time><strong>{day.theme}</strong></li>)}</ol><p><Link to="/schedule">查看完整实训日程</Link></p></ContentSection> : null,
+    scheduleOverview: site.scheduleOverview.length ? <ContentSection key="scheduleOverview" title="四、日程安排"><ol className="schedule-overview">{site.scheduleOverview.map((day, index) => <li key={day.date}>
+      <span className="schedule-overview__marker" aria-hidden="true">{String(index).padStart(2, '0')}</span>
+      <div><time dateTime={day.date}>{day.label}</time><strong>{day.theme}</strong></div>
+    </li>)}</ol><p className="schedule-overview__link"><Link to="/schedule">查看完整实训日程</Link></p></ContentSection> : null,
     guests: site.guests.length ? <ContentSection key="guests" title="五、特邀嘉宾"><div className="guest-list">{site.guests.map((guest) => <article className="guest-profile" key={guest.id}>
       {guest.image ? <img src={guest.image.src} alt={guest.image.alt} /> : <div className="guest-profile__placeholder" aria-hidden="true">{guest.name.slice(0, 1)}</div>}
-      <div><p><strong>{guest.name}</strong>，{guest.title}，{guest.affiliation}。</p><p>{guest.bio}</p>
+      <div><header className="guest-profile__identity"><h3>{guest.name}</h3><p>{guest.title}</p><p>{guest.affiliation}</p></header><p className="guest-profile__bio">{guest.bio}</p>
         {guest.profileUrl ? <p className="guest-profile__source"><a href={guest.profileUrl} target="_blank" rel="noreferrer">查看公开简介</a></p> : null}
       </div>
     </article>)}</div></ContentSection> : null,
@@ -30,8 +33,8 @@ export function HomePage({ site }: { site: PublicSiteResponse['data'] }) {
       {site.basic.registrationAndAccommodation.map((paragraph) => <RichText as="p" key={paragraph} html={paragraph} />)}
       {site.basic.signature ? <div className="event-signature"><p>{site.basic.signature.organization}</p><p>{site.basic.signature.date}</p></div> : null}
     </ContentSection> : null,
-    registrationCta: <ContentSection key="registrationCta" title="报名参加"><p><Link className="registration-cta" to={site.registrationCta.to}>{site.registrationCta.label}</Link></p></ContentSection>,
+    registrationCta: <ContentSection key="registrationCta" title="报名参加"><p className="registration-cta-wrap"><Link className="registration-cta" to={site.registrationCta.to}>{site.registrationCta.label}</Link></p></ContentSection>,
     registrationCount: <ApplicationCount key="registrationCount" />,
   }
-  return <>{site.homeSectionOrder.map((key) => sections[key])}</>
+  return <div className="home-page">{site.homeSectionOrder.map((key) => sections[key])}</div>
 }

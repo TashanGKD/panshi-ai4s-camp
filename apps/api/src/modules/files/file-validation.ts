@@ -3,8 +3,9 @@ import { inflateRawSync, inflateSync } from 'node:zlib'
 
 export const PDF_MIME = 'application/pdf'
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+export const JPEG_MIME = 'image/jpeg'
 
-export type AllowedFileExtension = 'pdf' | 'docx'
+export type AllowedFileExtension = 'pdf' | 'docx' | 'jpg'
 
 export class FileValidationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -22,6 +23,7 @@ export const normalizeMultipartOriginalName = (input: string): string => {
 const allowedByExtension: Record<AllowedFileExtension, string> = {
   pdf: PDF_MIME,
   docx: DOCX_MIME,
+  jpg: JPEG_MIME,
 }
 
 export const validateOriginalFileName = (input: string): {
@@ -48,7 +50,7 @@ export const validateOriginalFileName = (input: string): {
 
   const extension = extname(name).slice(1).toLowerCase()
   if (!(extension in allowedByExtension)) {
-    throw new FileValidationError('FILE_EXTENSION_NOT_ALLOWED', '仅支持 PDF 或 DOCX 文件')
+    throw new FileValidationError('FILE_EXTENSION_NOT_ALLOWED', '仅支持 PDF、DOCX 或 JPG 文件')
   }
 
   return {
@@ -866,6 +868,74 @@ const validateDocx = (content: Buffer, maxBytes: number) => {
   }
 }
 
+const jpegInvalid = (): never => {
+  throw new FileValidationError('FILE_CONTENT_INVALID', 'JPG 文件结构无效')
+}
+
+const isJpegStartOfFrame = (marker: number) => (
+  marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)
+)
+
+const validateJpeg = (content: Buffer) => {
+  if (
+    content.length < 16
+    || content[0] !== 0xff
+    || content[1] !== 0xd8
+    || content[content.length - 2] !== 0xff
+    || content[content.length - 1] !== 0xd9
+  ) jpegInvalid()
+
+  let cursor = 2
+  let sawFrame = false
+  let sawScan = false
+  while (cursor < content.length - 2) {
+    if (content[cursor] !== 0xff) jpegInvalid()
+    const markerStart = cursor
+    while (content[cursor] === 0xff) cursor += 1
+    const marker = content[cursor]
+    if (marker === undefined) jpegInvalid()
+    const safeMarker = marker!
+    if (safeMarker === 0x00 || safeMarker === 0xd8 || safeMarker === 0xd9 || safeMarker === 0x01 || (safeMarker >= 0xd0 && safeMarker <= 0xd7)) jpegInvalid()
+    cursor += 1
+    if (cursor + 2 > content.length - 2) jpegInvalid()
+    const length = content.readUInt16BE(cursor)
+    if (length < 2) jpegInvalid()
+    const segmentEnd = cursor + length
+    if (segmentEnd > content.length - 2) jpegInvalid()
+
+    if (isJpegStartOfFrame(safeMarker)) {
+      if (length < 11) jpegInvalid()
+      const precision = content[cursor + 2]
+      const height = content.readUInt16BE(cursor + 3)
+      const width = content.readUInt16BE(cursor + 5)
+      const components = content[cursor + 7]
+      if ((precision !== 8 && precision !== 12) || height < 1 || width < 1 || !components || components > 4 || length !== 8 + 3 * components) jpegInvalid()
+      sawFrame = true
+    }
+
+    cursor = segmentEnd
+    if (safeMarker !== 0xda) continue
+    if (!sawFrame) jpegInvalid()
+    const components = content[segmentEnd - length + 2]
+    if (!components || components > 4 || length !== 6 + 2 * components) jpegInvalid()
+    sawScan = true
+    while (cursor < content.length - 2) {
+      if (content[cursor] !== 0xff) {
+        cursor += 1
+        continue
+      }
+      const escaped = content[cursor + 1]
+      if (escaped === 0x00 || (escaped !== undefined && escaped >= 0xd0 && escaped <= 0xd7)) {
+        cursor += 2
+        continue
+      }
+      break
+    }
+    if (cursor === markerStart) jpegInvalid()
+  }
+  if (cursor !== content.length - 2 || !sawFrame || !sawScan) jpegInvalid()
+}
+
 export const validateStoredFileContent = (content: Buffer, mime: string, maxBytes: number): void => {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new FileValidationError('FILE_SIZE_INVALID', '文件大小限制无效')
   if (content.length > maxBytes) throw new FileValidationError('FILE_TOO_LARGE', '文件超过大小限制')
@@ -877,5 +947,9 @@ export const validateStoredFileContent = (content: Buffer, mime: string, maxByte
     validateDocx(content, maxBytes)
     return
   }
-  throw new FileValidationError('FILE_MIME_NOT_ALLOWED', '仅支持 PDF 或 DOCX 文件')
+  if (mime === JPEG_MIME) {
+    validateJpeg(content)
+    return
+  }
+  throw new FileValidationError('FILE_MIME_NOT_ALLOWED', '仅支持 PDF、DOCX 或 JPG 文件')
 }

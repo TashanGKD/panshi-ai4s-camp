@@ -40,6 +40,7 @@ describe('authoritative registration form', () => {
       options: [
         expect.objectContaining({ value: 'evening-seminar', label: '晚间研讨' }),
         expect.objectContaining({ value: 'open-practice', label: '开放实践' }),
+        expect.objectContaining({ value: 'continued-research', label: '持续项目研究' }),
         expect.objectContaining({ value: 'not-yet', label: '暂不确定' }),
       ],
     })
@@ -64,6 +65,6 @@ describe('authoritative registration form', () => {
       visibleWhen: { questionId: problem.id, includes: 'other-problem' },
     })
     expect(form.questions[7]).toMatchObject({ type: 'long_text', required: false, validation: {} })
-    expect(form.attachments).toEqual([expect.objectContaining({ label: '个人简历／补充材料', required: false, allowedExtensions: ['pdf', 'docx'] })])
+    expect(form.attachments).toEqual([expect.objectContaining({ label: '个人简历／补充材料', required: false, allowedExtensions: ['pdf', 'docx', 'jpg'] })])
   })
 })

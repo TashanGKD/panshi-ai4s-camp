@@ -21,6 +21,14 @@ const textQuestion = (
 
 const participationQuestionId = '71000000-0000-4000-8000-000000000008'
 const problemPoolQuestionId = '71000000-0000-4000-8000-000000000012'
+const legacyDefaultRegistrationForm: RegistrationForm = {
+  ...DEFAULT_REGISTRATION_FORM,
+  attachments: DEFAULT_REGISTRATION_FORM.attachments.map((attachment) => ({
+    ...attachment,
+    helpText: '支持 PDF、DOCX，单个文件不超过 10 MB。',
+    allowedExtensions: ['pdf', 'docx'],
+  })),
+}
 
 export const authoritativeRegistrationForm: RegistrationForm = RegistrationFormSchema.parse({
   ...DEFAULT_REGISTRATION_FORM,
@@ -57,6 +65,7 @@ export const authoritativeRegistrationForm: RegistrationForm = RegistrationFormS
       options: [
         { id: '72000000-0000-4000-8000-000000000007', value: 'evening-seminar', label: '晚间研讨' },
         { id: '72000000-0000-4000-8000-000000000008', value: 'open-practice', label: '开放实践' },
+        { id: '72000000-0000-4000-8000-000000000009', value: 'continued-research', label: '持续项目研究' },
         { id: '72000000-0000-4000-8000-000000000010', value: 'not-yet', label: '暂不确定' },
       ],
     },
@@ -92,6 +101,7 @@ export const seedAuthoritativeRegistrationForm = async (db: SeedDatabase, creato
       ? (await transaction.select({ form: registrationFormVersions.schema }).from(registrationFormVersions).where(eq(registrationFormVersions.id, draft.baseVersionId)).limit(1))[0]?.form
       : undefined
     const safeToReplace = isDeepStrictEqual(draft.schema, DEFAULT_REGISTRATION_FORM)
+      || isDeepStrictEqual(draft.schema, legacyDefaultRegistrationForm)
       || (previous !== undefined && isDeepStrictEqual(draft.schema, previous))
       || isDeepStrictEqual(draft.schema, authoritativeRegistrationForm)
     if (!safeToReplace) throw new Error('Registration form draft has unpublished staff changes; refusing to overwrite it')

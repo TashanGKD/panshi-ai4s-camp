@@ -67,7 +67,7 @@ describe('registration form contract', () => {
       label: '个人简历／补充材料',
       required: false,
       active: true,
-      allowedExtensions: ['pdf', 'docx'],
+      allowedExtensions: ['pdf', 'docx', 'jpg'],
     })
   })
 

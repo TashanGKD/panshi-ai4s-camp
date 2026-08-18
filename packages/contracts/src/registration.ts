@@ -178,7 +178,7 @@ export const RegistrationAttachmentSchema = z.object({
   required: z.boolean(),
   order: z.number().int().nonnegative(),
   active: z.boolean(),
-  allowedExtensions: z.array(z.enum(['pdf', 'docx'])).min(1),
+  allowedExtensions: z.array(z.enum(['pdf', 'docx', 'jpg'])).min(1),
   maxSizeBytes: z.number().int().positive().max(100 * 1024 * 1024),
 }).strict().superRefine((attachment, context) => {
   if (new Set(attachment.allowedExtensions).size !== attachment.allowedExtensions.length) {
@@ -241,11 +241,11 @@ export const DEFAULT_REGISTRATION_FORM: RegistrationForm = {
   attachments: [{
     id: DEFAULT_REGISTRATION_ATTACHMENT_ID,
     label: '个人简历／补充材料',
-    helpText: '支持 PDF、DOCX，单个文件不超过 10 MB。',
+    helpText: '支持 PDF、DOCX、JPG，单个文件不超过 10 MB。',
     required: false,
     order: 0,
     active: true,
-    allowedExtensions: ['pdf', 'docx'],
+    allowedExtensions: ['pdf', 'docx', 'jpg'],
     maxSizeBytes: 10 * 1024 * 1024,
   }],
 }
@@ -424,7 +424,7 @@ const ApplicationFileSchema = z.object({
   id: UuidSchema,
   slotId: UuidSchema,
   originalName: z.string().min(1).max(255),
-  mimeType: z.enum(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']),
+  mimeType: z.enum(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg']),
   sizeBytes: z.number().int().nonnegative(),
   downloadUrl: z.string().startsWith('/api/v1/files/'),
 }).strict()

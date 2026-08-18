@@ -18,7 +18,7 @@ import {
 import type { AuthenticatedSessionUser } from '../identity/session.service.js'
 
 export type ApplicationFile = {
-  id: string; slotId: string; originalName: string; mimeType: 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; sizeBytes: number
+  id: string; slotId: string; originalName: string; mimeType: 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' | 'image/jpeg'; sizeBytes: number
 }
 export type ApplicationRecord = {
   id: string; revision: number; status: ApplicationStatus; formVersionId: string; formVersion: number; form: RegistrationForm

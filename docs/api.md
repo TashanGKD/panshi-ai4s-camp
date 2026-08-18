@@ -156,7 +156,7 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 ### 报名表配置接口
 
-共享 `RegistrationFormSchema` 固定 `name`、`phone`、`email`、`organization`、`department`、`identityType`、`educationStage`、`majorResearchDirection` 八个核心字段；手机号字段始终 `readOnly: true`。动态问题仅接受 `short_text`、`long_text`、`single_choice`、`multiple_choice`，每题和每个选项均要求稳定 UUID，题目和附件 order 必须从零连续。附件是独立数组，默认种子为 UUID `00000000-0000-4000-8000-000000000001` 的非必填“个人简历／补充材料”，格式为 `pdf`、`docx`。
+共享 `RegistrationFormSchema` 固定 `name`、`phone`、`email`、`organization`、`department`、`identityType`、`educationStage`、`majorResearchDirection` 八个核心字段；手机号字段始终 `readOnly: true`。动态问题接受文本、单选、多选和能力矩阵等已声明类型，每题和每个选项均要求稳定 UUID，题目和附件 order 必须从零连续。附件是独立数组，默认种子为 UUID `00000000-0000-4000-8000-000000000001` 的非必填“个人简历／补充材料”，格式为 `pdf`、`docx`、`jpg`。
 
 管理员接口均要求 `panshi_session` Cookie 和管理员角色；匿名请求返回 401，普通学员返回 403：
 

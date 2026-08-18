@@ -13,6 +13,7 @@ import {
 import {
   buildContentDisposition,
   DOCX_MIME,
+  JPEG_MIME,
   normalizeMultipartOriginalName,
   validateOriginalFileName,
   validateStoredFileContent,
@@ -52,6 +53,14 @@ const incrementalPdf = () => {
 }
 
 const PDF = buildPdf()
+const JPEG = Buffer.from([
+  0xff, 0xd8,
+  0xff, 0xe0, 0x00, 0x02,
+  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
+  0x00,
+  0xff, 0xd9,
+])
 const STORAGE_MARKER = '.panshi-storage-root'
 const STORAGE_MARKER_CONTENT = 'panshi-ai4s-camp:file-storage:v1\n'
 const PDF_2_0 = buildPdf('2.0')
@@ -173,6 +182,7 @@ describe('local protected file storage', () => {
       { stream: Readable.from(PDF), mime: 'application/pdf', size: PDF.length, code: 'FILE_TOO_LARGE' },
       { stream: Readable.from(Buffer.from('%PDF-1.7\ntruncated')), mime: 'application/pdf', size: 18, code: 'FILE_CONTENT_INVALID' },
       { stream: Readable.from(PDF), mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: PDF.length, code: 'FILE_CONTENT_INVALID' },
+      { stream: Readable.from(JPEG.subarray(0, JPEG.length - 2)), mime: JPEG_MIME, size: JPEG.length - 2, code: 'FILE_CONTENT_INVALID' },
       {
         stream: new Readable({ read() { this.destroy(new Error('client interrupted')) } }),
         mime: 'application/pdf',
@@ -339,14 +349,25 @@ describe('safe file names and download headers', () => {
     (name) => expect(() => validateOriginalFileName(name)).toThrowError(expect.objectContaining({ code: 'FILE_NAME_INVALID' })),
   )
 
-  it('accepts PDF/DOCX only and emits a CRLF-safe Unicode disposition with ASCII fallback', () => {
+  it('accepts PDF, DOCX and JPG and emits a CRLF-safe Unicode disposition with ASCII fallback', () => {
     expect(validateOriginalFileName('个人简历.PDF')).toMatchObject({ extension: 'pdf', mime: 'application/pdf' })
     expect(validateOriginalFileName('个人简历.docx')).toMatchObject({ extension: 'docx' })
+    expect(validateOriginalFileName('个人简历.JPG')).toMatchObject({ extension: 'jpg', mime: JPEG_MIME })
     expect(() => validateOriginalFileName('个人简历.doc')).toThrowError(expect.objectContaining({ code: 'FILE_EXTENSION_NOT_ALLOWED' }))
     const disposition = buildContentDisposition('个人 简历（最终版）.pdf')
     expect(disposition).toContain('attachment; filename="download.pdf"')
     expect(disposition).toContain("filename*=UTF-8''")
     expect(disposition).not.toMatch(/[\r\n]/u)
+  })
+
+  it('accepts a structurally complete JPEG and rejects disguised, truncated and trailing-payload files', () => {
+    expect(() => validateStoredFileContent(JPEG, JPEG_MIME, 1_048_576)).not.toThrow()
+    expect(() => validateStoredFileContent(PDF, JPEG_MIME, 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+    expect(() => validateStoredFileContent(JPEG.subarray(0, JPEG.length - 2), JPEG_MIME, 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
+    expect(() => validateStoredFileContent(Buffer.concat([JPEG, Buffer.from('payload')]), JPEG_MIME, 1_048_576))
+      .toThrowError(expect.objectContaining({ code: 'FILE_CONTENT_INVALID' }))
   })
 
   it('restores UTF-8 names decoded as latin1 by multipart parsers without changing normal names', () => {

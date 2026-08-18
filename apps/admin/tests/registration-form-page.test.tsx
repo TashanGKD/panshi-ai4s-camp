@@ -88,7 +88,7 @@ describe('RegistrationFormPage', () => {
     expect(saved.questions[0]?.validation).toEqual({})
     expect(saved.questions[0]?.type).toBe('multiple_choice')
     expect(saved.questions[0]?.options).toHaveLength(1)
-    expect(saved.attachments[0]?.allowedExtensions).toEqual(['pdf'])
+    expect(saved.attachments[0]?.allowedExtensions).toEqual(['pdf', 'jpg'])
   })
 
   it('previews active questions and attachments with learner-facing semantics', async () => {

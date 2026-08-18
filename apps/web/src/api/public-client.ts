@@ -128,7 +128,7 @@ export const createPublicClient = (apiBaseUrl?: string, runtime: PublicClientRun
   }
   const downloadResource = async (downloadUrl: string): Promise<{ blob: Blob, filename: string }> => {
     if (!/^\/api\/v1\/resources\/[0-9a-f-]+\/download$/u.test(downloadUrl)) throw new Error('Invalid resource download URL')
-    const response = await fetch(`${prefix}${downloadUrl}`, { credentials, headers: { Accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document' } })
+    const response = await fetch(`${prefix}${downloadUrl}`, { credentials, headers: { Accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg' } })
     if (!response.ok) throw new Error(response.status === 404 ? 'RESOURCE_NOT_AVAILABLE' : 'RESOURCE_DOWNLOAD_FAILED')
     const disposition = response.headers.get('Content-Disposition') ?? ''
     const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/iu)?.[1]

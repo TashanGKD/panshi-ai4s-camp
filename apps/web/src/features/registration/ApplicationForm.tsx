@@ -1,4 +1,4 @@
-import type { ApplicationAnswers, ApplicationCoreFields, MyApplicationResponse, RegistrationCoreFieldKey } from '@panshi/contracts'
+import { isRegistrationQuestionVisible, type ApplicationAnswers, type ApplicationCoreFields, type InstitutionDirectoryResponse, type MyApplicationResponse, type RegistrationCoreFieldKey } from '@panshi/contracts'
 import { CoreFields, type CoreFieldValues } from './CoreFields'
 import { DynamicQuestion } from './DynamicQuestion'
 
@@ -8,8 +8,11 @@ export type FormDraft = {
   attachments: Array<{ slotId: string, fileId: string }>
 }
 
-export function ApplicationForm({ application, draft, disabled, errors, onChange, onUpload, onRemove, onRemoveUnlinked, supplementRequest }: {
+const emptyDirectory: InstitutionDirectoryResponse['data'] = { version: 'empty', sources: [], universities: [], ucasTrainingUnits: [] }
+
+export function ApplicationForm({ application, draft, directory = emptyDirectory, disabled, errors, onChange, onUpload, onRemove, onRemoveUnlinked, supplementRequest }: {
   application: MyApplicationResponse['data']['application']; draft: FormDraft; disabled: boolean; errors: Record<string, string>
+  directory?: InstitutionDirectoryResponse['data']
   onChange: (draft: FormDraft) => void; onUpload: (slotId: string, file: File) => void; onRemove: (slotId: string, fileId: string) => void
   onRemoveUnlinked?: (fileId: string) => void
   supplementRequest?: MyApplicationResponse['data']['supplementRequest']
@@ -23,9 +26,9 @@ export function ApplicationForm({ application, draft, disabled, errors, onChange
     onChange({ ...draft, profile: { ...draft.profile, [key]: value } })
   }
   return <fieldset disabled={disabled} className="application-form-fields">
-    <CoreFields values={coreValues} phone={application.profile.phone} editableKeys={editableFields} onChange={changeCore} />
-    <section><h3>补充问题</h3>{application.form.questions.filter((question) => question.active).map((question) => <div key={question.id}>
-      <DynamicQuestion disabled={editableFields !== undefined && !editableFields.has(question.id)} question={question} value={draft.answers[question.id] ?? (question.type === 'multiple_choice' ? [] : '')} onChange={(value) => onChange({ ...draft, answers: { ...draft.answers, [question.id]: value as string | string[] } })} />
+    <CoreFields values={coreValues} phone={application.profile.phone} directory={directory} editableKeys={editableFields} errors={errors} onChange={changeCore} />
+    <section><h3>补充问题</h3>{application.form.questions.filter((question) => question.active && isRegistrationQuestionVisible(question, draft.answers)).map((question) => <div key={question.id}>
+      <DynamicQuestion disabled={editableFields !== undefined && !editableFields.has(question.id)} question={question} value={draft.answers[question.id] ?? (question.type === 'multiple_choice' ? [] : question.type === 'proficiency_matrix' ? { ratings: {}, otherLabel: '', otherLevel: '' } : '')} onChange={(value) => onChange({ ...draft, answers: { ...draft.answers, [question.id]: value } })} />
       {errors[`answers.${question.id}`] ? <p className="form-error" role="alert">{errors[`answers.${question.id}`]}</p> : null}
     </div>)}</section>
     <section><h3>附件</h3>{application.form.attachments.filter((slot) => slot.active).map((slot) => {

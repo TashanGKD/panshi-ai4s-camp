@@ -209,6 +209,41 @@ export const applicationStatusHistory = pgTable('application_status_history', {
   index('application_status_history_application_id_idx').on(table.applicationId, table.createdAt),
 ])
 
+export const checkInCredentials = pgTable('check_in_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicationId: uuid('application_id').notNull().references(() => applications.id, { onDelete: 'cascade' }).unique('check_in_credentials_application_id_unique'),
+  publicId: uuid('public_id').notNull().defaultRandom().unique('check_in_credentials_public_id_unique'),
+  revision: integer('revision').notNull().default(0),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check('check_in_credentials_revision_check', sql`${table.revision} >= 0`),
+  index('check_in_credentials_application_id_idx').on(table.applicationId),
+  index('check_in_credentials_public_id_idx').on(table.publicId),
+])
+
+export const checkIns = pgTable('check_ins', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicationId: uuid('application_id').notNull().references(() => applications.id, { onDelete: 'cascade' }).unique('check_ins_application_id_unique'),
+  credentialId: uuid('credential_id').notNull().references(() => checkInCredentials.id, { onDelete: 'cascade' }).unique('check_ins_credential_id_unique'),
+  active: boolean('active').notNull().default(true),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull().defaultNow(),
+  confirmedBy: uuid('confirmed_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedBy: uuid('revoked_by').references(() => users.id, { onDelete: 'restrict' }),
+  revokeReason: text('revoke_reason'),
+  revision: integer('revision').notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check('check_ins_revision_check', sql`${table.revision} >= 0`),
+  check('check_ins_active_state_check', sql`not ${table.active} or (${table.confirmedAt} is not null and ${table.confirmedBy} is not null)`),
+  check('check_ins_revocation_state_check', sql`${table.active} or (${table.revokedAt} is not null and ${table.revokedBy} is not null and ${table.revokeReason} is not null and char_length(btrim(${table.revokeReason})) >= 2)`),
+  index('check_ins_active_idx').on(table.active),
+  index('check_ins_application_id_idx').on(table.applicationId),
+])
+
 export const files = pgTable('files', {
   id: uuid('id').primaryKey().defaultRandom(),
   storageKey: text('storage_key').notNull().unique('files_storage_key_unique'),

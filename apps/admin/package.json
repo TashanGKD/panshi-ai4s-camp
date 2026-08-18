@@ -12,6 +12,7 @@
   "dependencies": {
     "@panshi/contracts": "0.0.0",
     "@panshi/ui": "0.0.0",
+    "@zxing/browser": "^0.1.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.2",

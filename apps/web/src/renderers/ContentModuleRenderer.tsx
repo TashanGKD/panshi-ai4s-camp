@@ -4,6 +4,7 @@ import { ContactPage } from '../pages/ContactPage'
 import { ScheduleContent } from '../pages/SchedulePage'
 import { TravelContentView } from '../pages/TravelPage'
 import { RichText } from '../components/RichText'
+import { OrganizationGroups } from '../components/OrganizationGroups'
 
 type ImportantDatesContentType = ReturnType<typeof PublicContentPayloadSchemas.importantDates.parse>
 
@@ -24,7 +25,7 @@ export function ContentModuleRenderer({ moduleKey, payload }: { moduleKey: Conte
     case 'contacts': return <ContactPage contacts={content as ReturnType<typeof PublicContentPayloadSchemas.contacts.parse>} />
     case 'travel': {
       const travel = content as ReturnType<typeof PublicContentPayloadSchemas.travel.parse>
-      return <section className="public-page__section"><h2>住宿交通</h2><TravelContentView travel={travel} /></section>
+      return <section className="public-page__section"><h2>交通住宿</h2><TravelContentView travel={travel} /></section>
     }
     case 'importantDates': {
       const dates = content as ReturnType<typeof PublicContentPayloadSchemas.importantDates.parse>
@@ -36,7 +37,7 @@ export function ContentModuleRenderer({ moduleKey, payload }: { moduleKey: Conte
     }
     case 'organizations': {
       const organizations = content as ReturnType<typeof PublicContentPayloadSchemas.organizations.parse>
-      return <ContentSection title="组织单位"><dl className="organization-list">{organizations.items.map((item) => <div key={`${item.role}:${item.name}`}><dt>{item.role}</dt><dd>{item.name}</dd></div>)}</dl></ContentSection>
+      return <ContentSection title="组织单位"><OrganizationGroups organizations={organizations} /></ContentSection>
     }
     case 'display': return <section className="public-page__section"><h2>草稿展示设置</h2><p>展示设置请通过页面横幅和页脚查看。</p></section>
   }

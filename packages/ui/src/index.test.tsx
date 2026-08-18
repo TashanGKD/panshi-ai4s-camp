@@ -8,5 +8,7 @@ describe('shared UI package', () => {
     expect(markup).toContain('实训营')
     expect(markup).toContain('2026年8月')
     expect(markup).toContain('物理所')
+    expect(markup).not.toContain('event-banner__series')
+    expect(markup).not.toContain('磐石科学智能实训营')
   })
 })

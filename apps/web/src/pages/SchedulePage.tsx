@@ -36,27 +36,49 @@ export function ScheduleContent({ schedule }: { schedule: ScheduleContentType })
   const speakers = new Map(schedule.speakers?.map((speaker) => [speaker.id, speaker.name]))
   return <section className="public-page__section">
     <h2>实训日程</h2>
-    <ol className="schedule-list">{schedule.days.map((day) => <li key={day.date}>
-      <p className="schedule-list__date">{day.label} · {day.date}</p>
-      <h3>{day.theme}</h3>
-      {day.sessions.length > 0 ? <ul>{day.sessions.map((session) => <li key={`${session.time ?? ''}:${session.title}`}>
-        <article>
-          <h4>{session.title}</h4>
-          {session.timeRange || session.time ? <p><strong>时间：</strong><span>{session.timeRange ? `${session.timeRange.start}–${session.timeRange.end}` : session.time}</span></p> : null}
-          {session.details && session.details.length > 0 ? <section>
-            <h5>课程详情</h5>
-            <ul>{session.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
-          </section> : null}
-          {session.instructors && session.instructors.length > 0 ? <section>
-            <h5>授课教师</h5>
-            <ul>{session.instructors.map((instructor) => <li key={instructor}>{instructor}</li>)}</ul>
-          </section> : null}
-          {session.speakerIds && session.speakerIds.length > 0 ? <section>
-            <h5>授课教师</h5>
-            <ul>{session.speakerIds.map((speakerId) => <li key={speakerId}>{speakers.get(speakerId) ?? speakerId}</li>)}</ul>
-          </section> : null}
-        </article>
-      </li>)}</ul> : null}
-    </li>)}</ol>
+    {schedule.introduction ? <p className="schedule-introduction">{schedule.introduction}</p> : null}
+    <div className="schedule-table-wrap" tabIndex={0} role="region" aria-label="实训营五日日程表">
+      <table className="schedule-table">
+        <colgroup>
+          <col className="schedule-table__day" />
+          <col className="schedule-table__time" />
+          <col className="schedule-table__topic" />
+          <col className="schedule-table__details" />
+          <col className="schedule-table__instructors" />
+        </colgroup>
+        <thead><tr>
+          <th scope="col">日期 / 专题</th>
+          <th scope="col">时间</th>
+          <th scope="col">主题</th>
+          <th scope="col">内容要点与学员成果</th>
+          <th scope="col">组织单位/授课师资</th>
+        </tr></thead>
+        {schedule.days.map((day) => <tbody key={day.date}>
+          {day.sessions.length === 0 ? <tr>
+            <th className="schedule-table__day-cell" scope="row">
+              <time dateTime={day.date}>{day.label}</time>
+              <span>{day.theme}</span>
+            </th>
+            <td className="schedule-table__pending" colSpan={4}>具体日程待发布</td>
+          </tr> : null}
+          {day.sessions.map((session, sessionIndex) => {
+            const instructorNames = [
+              ...(session.instructors ?? []),
+              ...(session.speakerIds ?? []).map((speakerId) => speakers.get(speakerId) ?? speakerId),
+            ]
+            return <tr key={`${session.time ?? session.timeRange?.start ?? ''}:${session.title}`}>
+              {sessionIndex === 0 ? <th className="schedule-table__day-cell" scope="rowgroup" rowSpan={day.sessions.length}>
+                <time dateTime={day.date}>{day.label}</time>
+                <span>{day.theme}</span>
+              </th> : null}
+              <td className="schedule-table__time-cell">{session.timeRange ? `${session.timeRange.start}–${session.timeRange.end}` : session.time}</td>
+              <td className="schedule-table__topic-cell">{session.title}</td>
+              <td><div className="schedule-table__stack">{session.details?.map((detail) => <span key={detail}>{detail}</span>)}</div></td>
+              <td><div className="schedule-table__stack schedule-table__instructor-list">{instructorNames.map((name) => <span key={name}>{name}</span>)}</div></td>
+            </tr>
+          })}
+        </tbody>)}
+      </table>
+    </div>
   </section>
 }

@@ -72,6 +72,7 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(60_000),
   VERIFICATION_PROVIDER: z.enum(['disabled', 'mock']).default('disabled'),
   VERIFICATION_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
+  CHECK_IN_TOKEN_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(1_800).default(300),
   VERIFICATION_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
@@ -97,8 +98,12 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   if (env.VERIFICATION_MOCK_CODE !== undefined && env.NODE_ENV !== 'test') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_MOCK_CODE'], message: 'fixed mock codes are test-only' })
   }
+  if (env.NODE_ENV === 'production' && env.CHECK_IN_TOKEN_SECRET === undefined) {
+    context.addIssue({ code: 'custom', path: ['CHECK_IN_TOKEN_SECRET'], message: 'check-in token secret must be 64 hexadecimal characters' })
+  }
 }).transform(({ JSON_BODY_LIMIT, ...env }) => ({
   ...env,
+  CHECK_IN_TOKEN_SECRET: env.CHECK_IN_TOKEN_SECRET ?? env.VERIFICATION_SECRET ?? '00'.repeat(32),
   JSON_BODY_LIMIT_BYTES: JSON_BODY_LIMIT,
   FILE_UPLOAD_TEMP_ROOT: env.FILE_UPLOAD_TEMP_ROOT ?? resolve(env.FILE_STORAGE_ROOT, '.incoming'),
   SECURE_COOKIES: env.NODE_ENV === 'production',

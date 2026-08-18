@@ -5,7 +5,7 @@ import { DEFAULT_REGISTRATION_FORM, type MyApplicationResponse } from '@panshi/c
 import { RegistrationPage } from '../src/pages/RegistrationPage'
 
 const api = vi.hoisted(() => ({
-  getMine: vi.fn(), saveDraft: vi.fn(), submit: vi.fn(), upload: vi.fn(), removeFile: vi.fn(), logout: vi.fn(),
+  getMine: vi.fn(), getInstitutions: vi.fn(), reopen: vi.fn(), saveDraft: vi.fn(), submit: vi.fn(), upload: vi.fn(), removeFile: vi.fn(), logout: vi.fn(),
 }))
 
 vi.mock('../src/api/application-client', () => ({
@@ -18,7 +18,7 @@ vi.mock('../src/api/application-client', () => ({
 const application: MyApplicationResponse['data']['application'] = {
   id: '10000000-0000-4000-8000-000000000001', status: 'draft', revision: 0, locked: false,
   formVersionId: '30000000-0000-4000-8000-000000000001', formVersion: 1, form: DEFAULT_REGISTRATION_FORM,
-  profile: { name: '张三', phone: '+8613800138000', email: '', organization: '', department: '', identityType: '', educationStage: '', majorResearchDirection: '' },
+  profile: { name: '张三', phone: '+8613800138000', email: '', organization: '', department: '', identityType: '', educationStage: '', majorResearchDirection: '', major: '', researchInterest: '', researchDirection: '', postdocStation: '', disciplineField: '', supervisor: '', jobPosition: '', professionalTitleLevel: '', specificTitle: '', identityDescription: '' },
   answers: {}, attachments: [], unlinkedAttachments: [], retiredAnswerIds: [], submittedAt: null, updatedAt: '2026-08-15T00:00:00.000Z',
 }
 
@@ -38,10 +38,35 @@ const renderPage = () => {
 beforeEach(() => {
   vi.clearAllMocks()
   api.getMine.mockResolvedValue(response())
+  api.getInstitutions.mockResolvedValue({ apiVersion: 'v1', data: { version: 'test', sources: [], universities: [{ name: '中国科学院大学', province: '北京市', level: '本科' }], ucasTrainingUnits: [{ name: '中国科学院物理研究所', type: 'institute' }] } })
   api.saveDraft.mockResolvedValue(response({ ...application, revision: 1, profile: { ...application.profile, name: '李四' } }))
 })
 
 describe('registration route navigation guard', () => {
+  it('reopens a submitted application with every saved value preserved and editable', async () => {
+    const submitted = {
+      ...application,
+      status: 'submitted' as const,
+      revision: 2,
+      locked: true,
+      profile: { ...application.profile, name: '郑博元', organization: '中国科学院大学' },
+      answers: { '20000000-0000-4000-8000-000000000001': '已保存的研究问题' },
+      submittedAt: '2026-08-18T00:00:00.000Z',
+    }
+    const reopened = { ...submitted, status: 'draft' as const, revision: 3, locked: false }
+    api.getMine.mockResolvedValue(response(submitted))
+    api.reopen.mockResolvedValue(response(reopened))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+
+    await screen.findByRole('heading', { name: '在线报名' })
+    fireEvent.click(screen.getByRole('button', { name: '重新提交报名信息' }))
+    await waitFor(() => expect(api.reopen).toHaveBeenCalledWith(2))
+    expect(screen.getByLabelText('姓名')).toHaveValue('郑博元')
+    expect(screen.getByLabelText('姓名')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '正式提交' })).toBeEnabled()
+  })
+
   it('keeps a dirty applicant on the page when cancelled and leaves only after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const router = renderPage()
@@ -76,6 +101,7 @@ describe('registration route navigation guard', () => {
 
     resolveSave?.(response({ ...application, revision: 1, profile: { ...application.profile, name: '李四' } }))
     await screen.findByText('草稿已保存')
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled())
     confirm.mockClear()
     await router.navigate('/account')
     await screen.findByRole('heading', { name: '目标页面' })

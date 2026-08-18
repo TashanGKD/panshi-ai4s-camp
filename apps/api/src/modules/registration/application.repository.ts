@@ -1,6 +1,13 @@
 import { and, asc, eq, isNull, notInArray } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { RegistrationFormSchema, type ApplicationCoreFields, type JsonObject } from '@panshi/contracts'
+import {
+  ApplicationAnswersSchema,
+  ApplicationCoreFieldsSchema,
+  RegistrationFormSchema,
+  type ApplicationAnswers,
+  type ApplicationCoreFields,
+  type JsonObject,
+} from '@panshi/contracts'
 import {
   applications, applicationFiles, applicationStatusHistory, applicationVersions, contentModules, contentVersions,
   files, registrationFormDrafts, registrationFormVersions, userProfiles, users,
@@ -19,6 +26,14 @@ const validatedExtensionByMime: Readonly<Record<string, AllowedFileExtension>> =
 
 const registrationWindowFromPayload = (payload: unknown, today: string) => {
   if (typeof payload !== 'object' || payload === null || !('items' in payload) || !Array.isArray(payload.items)) return { open: false as const, reason: 'REGISTRATION_NOT_OPEN' as const }
+  if ('machineDates' in payload && typeof payload.machineDates === 'object' && payload.machineDates !== null) {
+    const dates = payload.machineDates as Record<string, unknown>
+    const start = dates.registrationOpen
+    const end = dates.registrationDeadline
+    if (typeof start !== 'string' || today < start) return { open: false as const, reason: 'REGISTRATION_NOT_OPEN' as const }
+    if (typeof end !== 'string' || today > end) return { open: false as const, reason: 'REGISTRATION_CLOSED' as const }
+    return { open: true as const }
+  }
   const dates = new Map(payload.items.flatMap((item) => typeof item === 'object' && item !== null && 'machineKey' in item && 'value' in item && typeof item.machineKey === 'string' && typeof item.value === 'string' ? [[item.machineKey, item.value]] : []))
   const start = dates.get('registrationOpen')
   const end = dates.get('registrationDeadline')
@@ -27,11 +42,25 @@ const registrationWindowFromPayload = (payload: unknown, today: string) => {
   return { open: true as const }
 }
 
-const createCore = (user: { displayName: string, phoneNormalized: string }, profile?: Omit<ApplicationCoreFields, 'phone'>): ApplicationCoreFields => ({
-  name: profile?.name ?? user.displayName,
+const createCore = (user: { displayName: string, phoneNormalized: string }, profile?: Partial<Omit<ApplicationCoreFields, 'phone'>>): ApplicationCoreFields => ({
+  name: profile?.name === '实训营学员' ? '' : profile?.name ?? (user.displayName === '实训营学员' ? '' : user.displayName),
   phone: user.phoneNormalized,
   email: profile?.email ?? '', organization: profile?.organization ?? '', department: profile?.department ?? '',
   identityType: profile?.identityType ?? '', educationStage: profile?.educationStage ?? '', majorResearchDirection: profile?.majorResearchDirection ?? '',
+  major: profile?.major ?? '', researchInterest: profile?.researchInterest ?? '', researchDirection: profile?.researchDirection ?? '',
+  postdocStation: profile?.postdocStation ?? '', disciplineField: profile?.disciplineField ?? '', supervisor: profile?.supervisor ?? '',
+  jobPosition: profile?.jobPosition ?? '', professionalTitleLevel: profile?.professionalTitleLevel ?? '', specificTitle: profile?.specificTitle ?? '',
+  identityDescription: profile?.identityDescription ?? '',
+})
+
+const legacyProfile = (profile: Omit<ApplicationCoreFields, 'phone'>) => ({
+  name: profile.name,
+  email: profile.email,
+  organization: profile.organization,
+  department: profile.department,
+  identityType: profile.identityType,
+  educationStage: profile.educationStage,
+  majorResearchDirection: profile.majorResearchDirection,
 })
 
 export const createApplicationRepository = (
@@ -74,8 +103,13 @@ export const createApplicationRepository = (
       id: record.id, revision: record.revision, status: record.status, formVersionId: record.formVersionId,
       formVersion: record.formVersion, submittedAt: record.submittedAt, updatedAt: record.updatedAt,
       form,
-      profile: record.coreFields as ApplicationCoreFields,
-      answers: record.answers as Record<string, string | string[]>,
+      profile: ApplicationCoreFieldsSchema.parse({
+        ...(record.coreFields as Record<string, unknown>),
+        name: record.status === 'draft' && (record.coreFields as Record<string, unknown>).name === '实训营学员'
+          ? ''
+          : (record.coreFields as Record<string, unknown>).name,
+      }),
+      answers: ApplicationAnswersSchema.parse(record.answers),
       attachments: rows as ApplicationFile[],
       unlinkedAttachments: unlinkedRows as Array<Omit<ApplicationFile, 'slotId'>>,
       retiredAnswerIds: Object.keys(record.answers).filter((id) => !activeIds.has(id)),
@@ -92,21 +126,35 @@ export const createApplicationRepository = (
 
   return {
     getOrCreateDraft: (user) => db.transaction(async (transaction) => {
-      const [existingApplication] = await transaction.select({ id: applications.id }).from(applications).where(eq(applications.userId, user.id)).for('update')
+      let [existingApplication] = await transaction.select({
+        id: applications.id,
+        revision: applications.revision,
+        status: applications.status,
+        formVersionId: applications.formVersionId,
+      }).from(applications).where(eq(applications.userId, user.id)).for('update')
       if (!existingApplication) {
         await transaction.select({ id: users.id }).from(users).where(eq(users.id, user.id)).for('update')
-        await transaction.select({ id: applications.id }).from(applications).where(eq(applications.userId, user.id)).for('update')
+        const [lockedApplication] = await transaction.select({
+          id: applications.id,
+          revision: applications.revision,
+          status: applications.status,
+          formVersionId: applications.formVersionId,
+        }).from(applications).where(eq(applications.userId, user.id)).for('update')
+        existingApplication = lockedApplication
       }
-      const current = await readRecord(transaction as NodePgDatabase<typeof schema>, user.id)
-      if (current && current.status !== 'draft') return current
+      if (existingApplication && existingApplication.status !== 'draft') {
+        const current = await readRecord(transaction as NodePgDatabase<typeof schema>, user.id)
+        if (!current) throw new Error('Application disappeared after locking')
+        return current
+      }
       const published = await latestForm(transaction as NodePgDatabase<typeof schema>)
-      if (current) {
-        if (current.formVersionId !== published.id) {
-          await transaction.update(applications).set({ formVersionId: published.id, revision: current.revision + 1, updatedAt: now() }).where(eq(applications.id, current.id))
+      if (existingApplication) {
+        if (existingApplication.formVersionId !== published.id) {
+          await transaction.update(applications).set({ formVersionId: published.id, revision: existingApplication.revision + 1, updatedAt: now() }).where(eq(applications.id, existingApplication.id))
           const activeSlotIds = published.form.attachments.filter((slot) => slot.active).map((slot) => slot.id)
           await transaction.delete(applicationFiles).where(activeSlotIds.length === 0
-            ? eq(applicationFiles.applicationId, current.id)
-            : and(eq(applicationFiles.applicationId, current.id), notInArray(applicationFiles.attachmentSlot, activeSlotIds)))
+            ? eq(applicationFiles.applicationId, existingApplication.id)
+            : and(eq(applicationFiles.applicationId, existingApplication.id), notInArray(applicationFiles.attachmentSlot, activeSlotIds)))
         }
       } else {
         const [existingProfile] = await transaction.select().from(userProfiles).where(eq(userProfiles.userId, user.id)).limit(1)
@@ -117,6 +165,27 @@ export const createApplicationRepository = (
       const result = await readRecord(transaction as NodePgDatabase<typeof schema>, user.id)
       if (!result) throw new Error('Application draft creation failed')
       return result
+    }),
+
+    reopen: (input) => db.transaction(async (transaction) => {
+      const [locked] = await transaction.select({ id: applications.id, revision: applications.revision, status: applications.status })
+        .from(applications).where(eq(applications.userId, input.user.id)).for('update')
+      if (!locked || locked.status !== 'submitted' || locked.revision !== input.expectedRevision) return null
+      const reopenedAt = now()
+      await transaction.update(applications).set({
+        status: 'draft', revision: locked.revision + 1, updatedAt: reopenedAt,
+        supplementPublicMessage: null, supplementDeadline: null,
+        supplementEditableFieldIds: [], supplementEditableAttachmentIds: [],
+      }).where(eq(applications.id, locked.id))
+      await transaction.insert(applicationStatusHistory).values({ applicationId: locked.id, fromStatus: 'submitted', toStatus: 'draft', changedBy: input.user.id })
+      await appendAuditLog(transaction as NodePgDatabase<typeof schema>, {
+        actorUserId: input.user.id,
+        action: 'application.reopened',
+        entityType: 'application',
+        entityId: locked.id,
+        metadata: { revision: locked.revision + 1 },
+      })
+      return readRecord(transaction as NodePgDatabase<typeof schema>, input.user.id)
     }),
 
     saveDraft: (input) => db.transaction(async (transaction) => {
@@ -139,8 +208,9 @@ export const createApplicationRepository = (
         if (!file || !extension || !slot.allowedExtensions.includes(extension) || file.sizeBytes > slot.maxSizeBytes) throw new Error('APPLICATION_ATTACHMENT_INVALID')
       }
       const core = createCore(input.user, input.profile)
-      await transaction.insert(userProfiles).values({ userId: input.user.id, ...input.profile }).onConflictDoUpdate({ target: userProfiles.userId, set: { ...input.profile, updatedAt: now() } })
-      await transaction.update(applications).set({ coreFields: core, answers: input.answers as JsonObject, revision: locked.revision + 1, updatedAt: now() }).where(eq(applications.id, locked.id))
+      const persistedProfile = legacyProfile(input.profile)
+      await transaction.insert(userProfiles).values({ userId: input.user.id, ...persistedProfile }).onConflictDoUpdate({ target: userProfiles.userId, set: { ...persistedProfile, updatedAt: now() } })
+      await transaction.update(applications).set({ coreFields: core, answers: input.answers as ApplicationAnswers as JsonObject, revision: locked.revision + 1, updatedAt: now() }).where(eq(applications.id, locked.id))
       await transaction.delete(applicationFiles).where(eq(applicationFiles.applicationId, locked.id))
       if (input.attachments.length > 0) await transaction.insert(applicationFiles).values(input.attachments.map((reference) => ({ applicationId: locked.id, fileId: reference.fileId, purpose: 'registration_attachment', attachmentSlot: reference.slotId })))
       await appendAuditLog(transaction as NodePgDatabase<typeof schema>, { actorUserId: input.user.id, action: 'application.draft_saved', entityType: 'application', entityId: locked.id, metadata: { revision: locked.revision + 1, answerCount: Object.keys(input.answers).length, attachmentCount: input.attachments.length } })
@@ -200,7 +270,9 @@ export const createApplicationRepository = (
         submittedAt: submittedAt.toISOString(),
       }
       const isSupplement = locked.status === 'needs_supplement'
-      const [version] = await transaction.insert(applicationVersions).values({ applicationId: record.id, snapshot: snapshot as unknown as JsonObject, reason: isSupplement ? 'supplement_resubmission' : 'initial_submission' }).returning({ id: applicationVersions.id })
+      const isResubmission = locked.status === 'draft' && locked.submittedAt !== null
+      const reason = isSupplement ? 'supplement_resubmission' : isResubmission ? 'resubmission' : 'initial_submission'
+      const [version] = await transaction.insert(applicationVersions).values({ applicationId: record.id, snapshot: snapshot as unknown as JsonObject, reason }).returning({ id: applicationVersions.id })
       if (!version) throw new Error('Application version creation failed')
       const nextStatus = isSupplement ? 'reviewing' : 'submitted'
       await transaction.update(applications).set({ status: nextStatus, revision: locked.revision + 1, submittedAt, updatedAt: submittedAt, supplementPublicMessage: null, supplementDeadline: null, supplementEditableFieldIds: [], supplementEditableAttachmentIds: [] }).where(eq(applications.id, record.id))

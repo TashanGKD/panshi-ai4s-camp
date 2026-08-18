@@ -26,6 +26,9 @@ import { createStatisticsService } from './modules/statistics/statistics.service
 import { createAdminManagementRepository } from './modules/identity/admin-management.repository.js'
 import { createAdminManagementService } from './modules/identity/admin-management.service.js'
 import { createAdminHealthFileChecks, createAdminHealthService } from './modules/health/admin-health.routes.js'
+import { createInstitutionDirectoryService } from './modules/institutions/institution.service.js'
+import { createCheckInRepository } from './modules/check-in/check-in.repository.js'
+import { createCheckInService } from './modules/check-in/check-in.service.js'
 
 type ServerError = Error & { code?: string }
 type RuntimeSignal = 'SIGINT' | 'SIGTERM'
@@ -256,7 +259,11 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
   const adminHealthFileChecks = createAdminHealthFileChecks(env.FILE_STORAGE_ROOT, env.BACKUP_ROOT)
   const adminManagementService = createAdminManagementService(createAdminManagementRepository(database.db))
   const registrationFormService = createRegistrationFormService(createRegistrationFormRepository(database.db))
-  const applicationService = createApplicationService(createApplicationRepository(database.db))
+  const institutionDirectoryService = createInstitutionDirectoryService()
+  const applicationService = createApplicationService(createApplicationRepository(database.db), {
+    isUcasTrainingUnit: institutionDirectoryService.isUcasTrainingUnit,
+  })
+  const checkInService = createCheckInService(createCheckInRepository(database.db), { tokenSecret: env.CHECK_IN_TOKEN_SECRET })
   const fileService = createFileService(
     createFileRepository(database.db),
     createLocalFileStorage({ root: env.FILE_STORAGE_ROOT, maxBytes: env.FILE_UPLOAD_MAX_BYTES }),
@@ -270,7 +277,9 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
     verificationService,
     contentPublishingService,
     registrationFormService,
+    institutionDirectoryService,
     applicationService,
+    checkInService,
     reviewService: createReviewService(createReviewRepository(database.db)),
     fileService,
     resourceService: createResourceService(createResourceRepository(database.db), fileService),

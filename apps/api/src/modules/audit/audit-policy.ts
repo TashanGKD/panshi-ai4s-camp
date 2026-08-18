@@ -22,6 +22,9 @@ const FileFailureMetadata = z.object({ failureCode: FileFailureCode }).strict()
 const AdminResult = z.object({ result: Result }).strict()
 const AdminSessionResult = z.object({ result: Result, revokedSessionCount: Count }).strict()
 const RevokedSessions = z.object({ revokedSessionCount: Count }).strict()
+const SeedSource = z.enum(['initial_content_seed', 'authoritative_v2_1_1_seed'])
+const CheckInMetadata = z.object({ applicationId: Uuid, credentialId: Uuid, revision: Revision }).strict()
+const CheckInCredentialMetadata = z.object({ applicationId: Uuid, revision: Revision }).strict()
 
 const definitions = {
   'admin.created': { entityType: 'user', metadata: AdminResult },
@@ -35,8 +38,8 @@ const definitions = {
   'auth.login_succeeded': { entityType: 'session', metadata: z.object({ authenticationMethod: z.literal('password') }).strict() },
   'auth.student_registered': { entityType: 'user', metadata: z.object({ authenticationMethod: z.literal('verification_code') }).strict() },
   'auth.password_reset': { entityType: 'user', metadata: z.object({ revokedSessions: z.literal(true) }).strict() },
-  'content.version_created': { entityType: 'content_version', metadata: z.object({ moduleKey: ContentModuleKeySchema, source: z.literal('initial_content_seed'), version: Revision }).strict() },
-  'content.version_published': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, previousPublishedVersionId: z.null(), source: z.literal('initial_content_seed'), version: Revision, versionId: Uuid }).strict() },
+  'content.version_created': { entityType: 'content_version', metadata: z.object({ moduleKey: ContentModuleKeySchema, source: SeedSource, version: Revision }).strict() },
+  'content.version_published': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, previousPublishedVersionId: Uuid.nullable(), source: SeedSource, version: Revision, versionId: Uuid }).strict() },
   'content.draft_saved': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, before: z.object({ revision: Revision }).strict(), after: z.object({ revision: Revision, shape: Shape }).strict() }).strict() },
   'content.published': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, revision: Revision, version: Revision, before: z.object({ publishedVersion: Revision.nullable() }).strict(), after: z.object({ publishedVersion: Revision, shape: Shape }).strict() }).strict() },
   'content.rolled_back': { entityType: 'content_module', metadata: z.object({ moduleKey: ContentModuleKeySchema, sourceVersion: Revision, version: Revision, revision: Revision, before: z.object({ publishedVersion: Revision.nullable() }).strict(), after: z.object({ publishedVersion: Revision, shape: Shape }).strict() }).strict() },
@@ -50,11 +53,17 @@ const definitions = {
   'registration_form.draft_saved': { entityType: 'registration_form_draft', metadata: z.object({ revision: Revision, summary: FormSummary }).strict() },
   'registration_form.published': { entityType: 'registration_form_version', metadata: z.object({ version: Revision, revision: Revision, summary: FormSummary }).strict() },
   'application.draft_saved': { entityType: 'application', metadata: z.object({ revision: Revision, answerCount: Count, attachmentCount: Count }).strict() },
+  'application.reopened': { entityType: 'application', metadata: z.object({ revision: Revision }).strict() },
   'application.submitted': { entityType: 'application', metadata: z.object({ formVersionId: Uuid, answerCount: Count, retiredAnswerCount: Count, attachmentCount: Count }).strict() },
   'application.supplement_resubmitted': { entityType: 'application', metadata: z.object({ formVersionId: Uuid, answerCount: Count, retiredAnswerCount: Count, attachmentCount: Count }).strict() },
   'application.status_changed': { entityType: 'application', metadata: z.object({ fromStatus: ApplicationStatusSchema, toStatus: ApplicationStatusSchema, revision: Revision, editableFieldCount: Count, editableAttachmentCount: Count }).strict() },
   'application.bulk_status_changed': { entityType: 'application_batch', metadata: z.object({ targetStatus: ApplicationStatusSchema, requestedCount: Count, successCount: Count, failureCount: Count }).strict() },
   'application.exported': { entityType: 'application_export', metadata: z.object({ status: ApplicationStatusSchema.nullable(), organizationFilterApplied: z.boolean(), identityTypeFilterApplied: z.boolean(), educationStageFilterApplied: z.boolean(), submittedFromFilterApplied: z.boolean(), submittedToFilterApplied: z.boolean(), searchProvided: z.boolean(), columnCount: Count, count: Count }).strict() },
+  'check_in.credential_issued': { entityType: 'check_in_credential', metadata: CheckInCredentialMetadata },
+  'check_in.confirmed': { entityType: 'check_in', metadata: CheckInMetadata },
+  'check_in.reconfirmed': { entityType: 'check_in', metadata: CheckInMetadata },
+  'check_in.repeated_lookup': { entityType: 'check_in', metadata: CheckInMetadata },
+  'check_in.revoked': { entityType: 'check_in', metadata: CheckInMetadata.extend({ reason: z.string().trim().min(2).max(500) }).strict() },
   'resource.draft_created': { entityType: 'resource', metadata: ResourceMetadata },
   'resource.draft_saved': { entityType: 'resource', metadata: ResourceMetadata },
   'resource.published': { entityType: 'resource', metadata: ResourceMetadata },

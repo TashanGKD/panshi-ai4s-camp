@@ -13,10 +13,23 @@ const siteResponse = {
       venue: '中国科学院物理研究所',
       intro: ['接口活动简介'],
       target: '青年科研人员与学生',
+      eventDetails: ['举办时间：2026年9月4日至9月8日。', '举办地点：中国科学院物理研究所。'],
+      registrationAndAccommodation: ['本次实训营不收取注册费，食宿自理。'],
+      signature: { organization: '磐石·科学智能实训营会务组', date: '2026年8月18日' },
     },
     importantDates: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] },
     contacts: { items: [] },
-    display: { series: '磐石科学智能实训营', footer: '接口活动标题' },
+    features: { items: [{ title: '系统认知', description: '建立系统化知识框架。' }] },
+    organizations: { items: [{ role: '主办单位', name: '中国科学院物理研究所' }] },
+    guests: [{
+      id: 'zeng-dajun', name: '曾大军', title: '研究员、博士生导师', affiliation: '中国科学院自动化研究所副所长',
+      bio: '研究方向包括情报与安全信息学、传染病信息学与应急管理、经济与社会计算。',
+      image: { src: '/images/guests/zeng-dajun.jpg', alt: '曾大军研究员' },
+      profileUrl: 'https://www.ia.cas.cn/rcdw/yjy/202404/t20240425_7131769.html',
+    }],
+    scheduleOverview: [{ date: '2026-09-04', label: '9.4（周五）', theme: '专题一 科研智能体' }],
+    homeSectionOrder: ['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation'],
+    display: { series: '磐石科学智能实训营', footer: '接口活动标题', homeSectionOrder: ['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation'] },
   },
 }
 
@@ -57,15 +70,19 @@ const installFetch = ({
   site = siteResponse,
   schedule = scheduleResponse,
   travelStatus = 404,
+  travel,
 }: {
   site?: unknown
   schedule?: unknown
   travelStatus?: number
+  travel?: unknown
 } = {}) => vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = requestPath(input)
   if (path.endsWith('/api/v1/public/site')) return jsonResponse(site)
   if (path.endsWith('/api/v1/public/schedule')) return jsonResponse(schedule)
-  if (path.endsWith('/api/v1/public/content/travel')) return jsonResponse({ error: {} }, travelStatus)
+  if (path.endsWith('/api/v1/public/content/travel')) return travel
+    ? jsonResponse({ apiVersion: 'v1', data: { key: 'travel', contentVersion: 'travel:1', payload: travel } })
+    : jsonResponse({ error: {} }, travelStatus)
   if (path.endsWith('/api/v1/resources')) return jsonResponse({ apiVersion: 'v1', data: { resources: [] } })
   if (path.endsWith('/api/v1/public/statistics/applications')) return jsonResponse({ apiVersion: 'v1', data: { visible: false } })
   throw new Error(`Unexpected request: ${path}`)
@@ -93,7 +110,25 @@ describe('API-driven public pages', () => {
     expect(screen.getByRole('complementary')).toHaveTextContent('2026-08-23 至 2026-08-27')
     expect(screen.getByRole('complementary')).not.toHaveTextContent('报名截止')
     expect(screen.getByRole('complementary')).not.toHaveTextContent('联系方式待公布')
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the seven numbered homepage sections, invited guest profile and right-aligned signature in the configured order', async () => {
+    installFetch()
+
+    renderRoute('/')
+
+    await screen.findByRole('heading', { level: 1, name: '接口活动标题' })
+    const headings = within(screen.getByRole('main')).getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
+    expect(headings).toEqual(['一、实训营简介', '二、实训营特色', '三、举办时间、地点与规模', '四、日程安排', '五、特邀嘉宾', '六、组织单位', '七、注册与食宿'])
+    expect(screen.getByRole('img', { name: '曾大军研究员' })).toHaveAttribute('src', '/images/guests/zeng-dajun.jpg')
+    expect(screen.getByText('曾大军')).toBeVisible()
+    expect(screen.getByRole('main')).toHaveTextContent('中国科学院自动化研究所副所长')
+    expect(screen.getByRole('main')).toHaveTextContent('举办时间：2026年9月4日至9月8日。')
+    expect(screen.getByRole('main')).toHaveTextContent('举办地点：中国科学院物理研究所。')
+    expect(screen.getByRole('main')).toHaveTextContent('本次实训营不收取注册费，食宿自理。')
+    const signature = screen.getByText('磐石·科学智能实训营会务组').closest('.event-signature')
+    expect(signature).toHaveTextContent('2026年8月18日')
   })
 
   it('loads schedule from its separate public endpoint', async () => {
@@ -101,15 +136,16 @@ describe('API-driven public pages', () => {
 
     renderRoute('/schedule')
 
-    await screen.findByRole('heading', { level: 4, name: '智能体构建实践' })
+    await screen.findByRole('cell', { name: '智能体构建实践' })
     expect(screen.getByRole('heading', { level: 2, name: '实训日程' })).toBeVisible()
     expect(screen.getByRole('main')).toHaveTextContent('科研智能体')
     expect(screen.getByRole('main')).toHaveTextContent('参访交流与结营')
-    expect(screen.getByRole('heading', { level: 4, name: '智能体构建实践' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '日期 / 专题' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '内容要点与学员成果' })).toBeVisible()
+    expect(screen.getByRole('columnheader', { name: '组织单位/授课师资' })).toBeVisible()
+    expect(screen.getByRole('cell', { name: '智能体构建实践' })).toBeVisible()
     expect(screen.getByText('09:00–10:30')).toBeVisible()
-    expect(screen.getByRole('heading', { level: 5, name: '课程详情' })).toBeVisible()
     expect(screen.getByText('核验工具调用结果')).toBeVisible()
-    expect(screen.getByRole('heading', { level: 5, name: '授课教师' })).toBeVisible()
     expect(screen.getByText('李老师')).toBeVisible()
     expect(fetchSpy.mock.calls.map(([input]) => requestPath(input))).toEqual(expect.arrayContaining([
       '/api/v1/public/site',
@@ -119,7 +155,7 @@ describe('API-driven public pages', () => {
 
   it.each([
     ['/contact', '联系信息尚未发布'],
-    ['/travel', '住宿与交通信息尚未发布'],
+    ['/travel', '交通与住宿信息尚未发布'],
   ])('renders a truthful empty state on %s', async (path, message) => {
     installFetch()
 
@@ -127,6 +163,24 @@ describe('API-driven public pages', () => {
 
     expect(await screen.findByText(message)).toBeVisible()
     expect(screen.queryByText(/138\d{8}|@|报名截止.*2026/u)).not.toBeInTheDocument()
+  })
+
+  it('renders the published travel guide and venue map', async () => {
+    installFetch({ travel: { sections: [{
+      title: '实训营地址',
+      body: '<p><strong>实训营地点：</strong>中国科学院物理研究所</p><p><strong>地址：</strong>北京市海淀区中关村南三街8号。</p>',
+      image: { src: '/images/iop-zhongguancun-location-map.png', alt: '物理所区位示意图', caption: '区位示意图' },
+    }] } })
+
+    renderRoute('/travel')
+
+    const addressHeading = await screen.findByRole('heading', { level: 3, name: '实训营地址' })
+    const addressSection = addressHeading.closest('article')
+    expect(addressSection).not.toBeNull()
+    expect(within(addressSection!).getByText('中国科学院物理研究所')).toBeVisible()
+    expect(within(addressSection!).getByText('北京市海淀区中关村南三街8号。')).toBeVisible()
+    expect(within(addressSection!).getByRole('img', { name: '物理所区位示意图' })).toHaveAttribute('src', '/images/iop-zhongguancun-location-map.png')
+    expect(within(addressSection!).getByText('区位示意图')).toBeVisible()
   })
 
   it('renders structured contact names, responsibilities, methods, and consultation notes', async () => {

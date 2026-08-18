@@ -1,11 +1,11 @@
-import { ApiErrorSchema, MyApplicationResponseSchema, ApplicationSubmitResponseSchema, type ApplicationDraftSaveRequest, type MyApplicationResponse } from '@panshi/contracts'
-import { resolveApiBaseUrl } from './public-client'
+import { ApiErrorSchema, InstitutionDirectoryResponseSchema, MyApplicationResponseSchema, ApplicationSubmitResponseSchema, StudentCheckInResponseSchema, type ApplicationDraftSaveRequest, type InstitutionDirectoryResponse, type MyApplicationResponse } from '@panshi/contracts'
+import { resolveApiBaseUrl, type PublicClientRuntime } from './public-client'
 
 export class ApplicationApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly details?: unknown) { super(message); this.name = 'ApplicationApiError' }
 }
 
-export const createApplicationClient = (apiBaseUrl?: string, runtime: { production: boolean } = { production: false }) => {
+export const createApplicationClient = (apiBaseUrl?: string, runtime: PublicClientRuntime = { production: false }) => {
   const { prefix, credentials } = resolveApiBaseUrl(apiBaseUrl, runtime)
   const request = async (path: string, init: RequestInit = {}) => {
     const response = await fetch(`${prefix}${path}`, { ...init, credentials, headers: { Accept: 'application/json', ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...init.headers } })
@@ -17,7 +17,10 @@ export const createApplicationClient = (apiBaseUrl?: string, runtime: { producti
   }
   return {
     getMine: async (): Promise<MyApplicationResponse> => MyApplicationResponseSchema.parse(await request('/api/v1/me/application')),
+    getInstitutions: async (): Promise<InstitutionDirectoryResponse> => InstitutionDirectoryResponseSchema.parse(await request('/api/v1/public/institutions')),
     saveDraft: async (body: ApplicationDraftSaveRequest): Promise<MyApplicationResponse> => MyApplicationResponseSchema.parse(await request('/api/v1/me/application/draft', { method: 'PUT', body: JSON.stringify(body) })),
+    reopen: async (expectedRevision: number): Promise<MyApplicationResponse> => MyApplicationResponseSchema.parse(await request('/api/v1/me/application/reopen', { method: 'POST', body: JSON.stringify({ expectedRevision }) })),
+    getCheckIn: async () => StudentCheckInResponseSchema.parse(await request('/api/v1/me/check-in')),
     submit: async (expectedRevision: number) => ApplicationSubmitResponseSchema.parse(await request('/api/v1/me/application/submit', { method: 'POST', body: JSON.stringify({ expectedRevision }) })),
     upload: async (file: File, slotId: string) => {
       const body = new FormData(); body.append('file', file); body.append('purpose', 'registration_attachment'); body.append('attachmentSlot', slotId)
@@ -28,4 +31,7 @@ export const createApplicationClient = (apiBaseUrl?: string, runtime: { producti
   }
 }
 
-export const applicationClient = createApplicationClient(import.meta.env.VITE_API_BASE_URL, { production: import.meta.env.PROD })
+export const applicationClient = createApplicationClient(import.meta.env.VITE_API_BASE_URL, {
+  production: import.meta.env.PROD,
+  pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
+})

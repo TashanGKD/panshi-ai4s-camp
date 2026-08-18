@@ -6,67 +6,25 @@ import {
   PublicContentPayloadSchemas,
   type JsonObject,
 } from '@panshi/contracts'
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, max, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { z } from 'zod'
 import { createConfiguredDatabaseClient } from '../client.js'
 import { contentModules, contentVersions, users } from '../schema.js'
 import type * as schema from '../schema.js'
 import { appendAuditLog } from '../../modules/audit/audit.repository.js'
+import { authoritativeContentV211 } from './authoritative-content-v2-1-1.js'
 
-export const initialPublishedContent = {
-  basic: {
-    title: '磐石·科学智能（AI for Science）实训营',
-    dates: {
-      start: '2026-08-23',
-      end: '2026-08-27',
-      label: '2026-08-23 至 2026-08-27',
-    },
-    venue: '中国科学院物理研究所',
-    tagline: '面向科研实践的五日科学智能集中实训',
-    intro: [
-      '实训营围绕 AI for Science 的知识框架、科研智能体与真实科研问题实践展开。',
-    ],
-    target: '有志于从事 AI4S 及其交叉学科研究与应用的青年科研人员、硕博研究生和本科生。',
-    scale: '五天集中实训，按课程学习、实践与分组研讨组织。',
-  },
-  features: {
-    items: [
-      { title: '系统化知识框架', description: '围绕科学数据、科学模型、科研智能体与端到端科研闭环组织学习。' },
-      { title: '实践嵌入', description: '将智能体构建与应用嵌入文献调研、问题定义、数据处理和结果核验。' },
-      { title: '真实问题牵引', description: '通过课程学习、习题课和分组研讨逐步完善 AI4S 问题分析方案。' },
-    ],
-  },
-  organizations: { items: [] },
-  importantDates: {
-    items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }],
-  },
-  schedule: {
-    days: [
-      { date: '2026-08-23', label: '第一天（周日）', theme: '科研智能体', sessions: [] },
-      { date: '2026-08-24', label: '第二天（周一）', theme: 'AI4S 科研方法论', sessions: [] },
-      { date: '2026-08-25', label: '第三天（周二）', theme: '科学模型', sessions: [] },
-      { date: '2026-08-26', label: '第四天（周三）', theme: '自驱动的端到端科研闭环', sessions: [] },
-      { date: '2026-08-27', label: '第五天（周四）', theme: '参访交流与结营', sessions: [] },
-    ],
-  },
-  contacts: { items: [] },
-  display: {
-    series: '磐石科学智能实训营',
-    footer: '磐石·科学智能（AI for Science）实训营',
-    visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
-    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
-    registrationCta: { label: '在线注册', to: '/application' },
-  },
-} as const
+export const initialPublishedContent = authoritativeContentV211
 
-const publishedVersionIds = {
+const firstPublishedVersionIds = {
   basic: '60000000-0000-4000-8000-000000000001',
   features: '60000000-0000-4000-8000-000000000002',
   organizations: '60000000-0000-4000-8000-000000000003',
   importantDates: '60000000-0000-4000-8000-000000000004',
   schedule: '60000000-0000-4000-8000-000000000005',
   contacts: '60000000-0000-4000-8000-000000000006',
+  travel: '60000000-0000-4000-8000-000000000007',
   display: '60000000-0000-4000-8000-000000000008',
 } as const
 
@@ -91,30 +49,32 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
 
     for (const key of Object.keys(initialPublishedContent) as (keyof typeof initialPublishedContent)[]) {
       const payload = PublicContentPayloadSchemas[key].parse(initialPublishedContent[key]) as JsonObject
-      const versionId = publishedVersionIds[key]
-      const [existing] = await transaction.select({
+      const versions = await transaction.select({
         id: contentVersions.id,
+        version: contentVersions.version,
         payload: contentVersions.payload,
-      }).from(contentVersions).where(and(
-        eq(contentVersions.moduleKey, key),
-        eq(contentVersions.version, 1),
-      )).limit(1)
+      }).from(contentVersions).where(eq(contentVersions.moduleKey, key))
+      const matching = versions.find((version) => isDeepStrictEqual(version.payload, payload))
 
       let inserted = false
-      let publishedVersionId: string = versionId
-      if (existing) {
-        if (!isDeepStrictEqual(existing.payload, payload)) {
-          throw new Error(`Initial content version already exists with different payload: ${key}`)
-        }
-        publishedVersionId = existing.id
+      let publishedVersionId: string
+      let publishedVersion: number
+      if (matching) {
+        publishedVersionId = matching.id
+        publishedVersion = matching.version
       } else {
-        await transaction.insert(contentVersions).values({
-          id: versionId,
+        const [latest] = await transaction.select({ value: max(contentVersions.version) })
+          .from(contentVersions).where(eq(contentVersions.moduleKey, key))
+        publishedVersion = (latest?.value ?? 0) + 1
+        const [created] = await transaction.insert(contentVersions).values({
+          ...(publishedVersion === 1 ? { id: firstPublishedVersionIds[key] } : {}),
           moduleKey: key,
-          version: 1,
+          version: publishedVersion,
           payload,
           createdBy: creator.id,
-        })
+        }).returning({ id: contentVersions.id })
+        if (!created) throw new Error(`Content version insert failed: ${key}`)
+        publishedVersionId = created.id
         inserted = true
       }
 
@@ -124,15 +84,21 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
           action: 'content.version_created',
           entityType: 'content_version',
           entityId: publishedVersionId,
-          metadata: { moduleKey: key, source: 'initial_content_seed', version: 1 },
+          metadata: { moduleKey: key, source: 'authoritative_v2_1_1_seed', version: publishedVersion },
         })
       }
 
+      const [moduleBeforePublish] = await transaction.select({
+        draft: contentModules.draft,
+        publishedVersionId: contentModules.publishedVersionId,
+      })
+        .from(contentModules).where(eq(contentModules.key, key)).limit(1)
+      const previousPublishedPayload = versions.find(({ id }) => id === moduleBeforePublish?.publishedVersionId)?.payload
       const publication = await transaction.update(contentModules)
         .set({ publishedVersionId })
         .where(and(
           eq(contentModules.key, key),
-          isNull(contentModules.publishedVersionId),
+          sql`${contentModules.publishedVersionId} is distinct from ${publishedVersionId}`,
         )).returning({ key: contentModules.key })
 
       if (publication.length > 0) {
@@ -143,12 +109,24 @@ export const seedInitialContent = async (db: SeedDatabase, creatorUserId: string
           entityId: key,
           metadata: {
             moduleKey: key,
-            previousPublishedVersionId: null,
-            source: 'initial_content_seed',
-            version: 1,
+            previousPublishedVersionId: moduleBeforePublish?.publishedVersionId ?? null,
+            source: 'authoritative_v2_1_1_seed',
+            version: publishedVersion,
             versionId: publishedVersionId,
           },
         })
+      }
+
+      // Keep an untouched editor draft aligned with the newly published source.
+      // Never overwrite a draft that staff changed independently.
+      if (moduleBeforePublish && (
+        isDeepStrictEqual(moduleBeforePublish.draft, {})
+        || (previousPublishedPayload !== undefined && isDeepStrictEqual(moduleBeforePublish.draft, previousPublishedPayload))
+      )) {
+        await transaction.update(contentModules).set({ draft: payload }).where(and(
+          eq(contentModules.key, key),
+          sql`${contentModules.draft} = ${JSON.stringify(moduleBeforePublish.draft)}::jsonb`,
+        ))
       }
     }
   })

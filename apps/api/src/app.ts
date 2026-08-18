@@ -32,6 +32,10 @@ import { createAdminUsersRouter, createMyAccountRouter } from './modules/identit
 import { createAuditRouter } from './modules/audit/audit.routes.js'
 import type { AdminManagementService } from './modules/identity/admin-management.service.js'
 import { createAdminHealthRouter, type AdminHealthService } from './modules/health/admin-health.routes.js'
+import { createInstitutionRouter } from './modules/institutions/institution.routes.js'
+import type { InstitutionDirectoryService } from './modules/institutions/institution.service.js'
+import { createAdminCheckInRouter, createStudentCheckInRouter } from './modules/check-in/check-in.routes.js'
+import type { CheckInService } from './modules/check-in/check-in.service.js'
 import { createRateLimiter, createRateLimitMiddleware, defaultRateLimits, InMemoryRateLimitStore, type RateLimiter, type RateLimitCategory, type RateLimitPolicy, type RateLimitStore } from './middleware/rate-limit.js'
 
 export type ApiRuntimeConfig = {
@@ -72,6 +76,8 @@ export type AppDependencies = {
   adminManagementService?: AdminManagementService
   auditQueryService?: Pick<AdminManagementService, 'auditLogs' | 'auditLog'>
   adminHealthService?: AdminHealthService
+  institutionDirectoryService?: Pick<InstitutionDirectoryService, 'getDirectory'>
+  checkInService?: CheckInService
   rateLimitStore?: RateLimitStore
   rateLimitNow?: () => number
   config: ApiRuntimeConfig
@@ -145,6 +151,8 @@ export const createApp = ({
   adminManagementService,
   auditQueryService,
   adminHealthService,
+  institutionDirectoryService,
+  checkInService,
   rateLimitStore,
   rateLimitNow,
   config,
@@ -178,7 +186,9 @@ export const createApp = ({
     if (adminSummaryService) app.use('/api/v1/admin/summary', createAdminSummaryRouter(sessions, adminSummaryService))
     if (registrationFormService) app.use('/api/v1/admin/registration-form', createAdminRegistrationFormRouter(sessions, registrationFormService))
     if (applicationService) app.use('/api/v1/me/application', createApplicationRouter(sessions, applicationService))
+    if (checkInService) app.use('/api/v1/me/check-in', createStudentCheckInRouter(sessions, checkInService))
     if (reviewService) app.use('/api/v1/admin/applications', createAdminApplicationRouter(sessions, reviewService))
+    if (checkInService) app.use('/api/v1/admin/check-in', createAdminCheckInRouter(sessions, checkInService))
     if (fileService) {
       if (!config.fileUploadTempDirectory) throw new Error('File upload temporary directory is required')
       app.use('/api/v1/files', createFileRouter(sessions, fileService, {
@@ -200,6 +210,7 @@ export const createApp = ({
     if (adminHealthService) app.use('/api/v1/admin/system-health', createAdminHealthRouter(sessions, adminHealthService))
   }
   if (registrationFormService) app.use('/api/v1/public', createRegistrationFormPublicRouter(registrationFormService))
+  if (institutionDirectoryService) app.use('/api/v1/public', createInstitutionRouter(institutionDirectoryService))
   app.use('/api/v1/public', createContentRouter(createContentService(contentRepository ?? {
     findPublishedByKeys: async () => [],
   })))

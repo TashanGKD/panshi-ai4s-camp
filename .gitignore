@@ -7,5 +7,6 @@ dist/
 **/dist/
 playwright-report/
 test-results/
+.superpowers/
 var/uploads/*
 !var/uploads/.gitkeep

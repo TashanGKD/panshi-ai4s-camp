@@ -43,6 +43,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   createResource: async () => { throw new Error('unused') }, updateResource: async () => { throw new Error('unused') }, publishResource: async () => { throw new Error('unused') },
   listAdministrators: async () => ({ data: { administrators: [] } }), createAdministrator: async () => { throw new Error('unused') }, disableAdministrator: async () => { throw new Error('unused') }, resetAdministratorPassword: async () => { throw new Error('unused') }, listAuditLogs: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }), getAuditLog: async () => { throw new Error('unused') },
   updateSelf: async () => { throw new Error('unused') }, changeOwnPassword: async () => { throw new Error('unused') }, listStudents: async () => ({ data: { students: [] } }), setStudentStatus: async () => { throw new Error('unused') }, forceStudentPasswordReset: async () => { throw new Error('unused') },
+  lookupCheckIn: async () => { throw new Error('unused') }, confirmCheckIn: async () => { throw new Error('unused') }, revokeCheckIn: async () => { throw new Error('unused') },
   ...overrides,
 })
 

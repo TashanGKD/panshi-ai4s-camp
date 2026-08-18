@@ -21,7 +21,6 @@
 
 .event-container { box-sizing: border-box; width: 100%; max-width: var(--panshi-container); margin: 0 auto; padding-inline: var(--panshi-page-gutter); }
 .event-banner { padding: 44px 0 40px; color: var(--panshi-color-light); background: var(--panshi-gradient-banner); }
-.event-banner__series { margin: 0 0 8px; color: rgba(255, 255, 255, 0.75); font-size: 13.5px; }
 .event-banner__title { margin: 0 0 10px; font-size: 30px; font-weight: 800; line-height: 1.4; }
 .event-banner__tagline { max-width: 720px; margin: 0 0 18px; color: rgba(255, 255, 255, 0.85); font-size: 14.5px; line-height: 1.8; }
 .event-banner__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; font-size: 13.5px; }

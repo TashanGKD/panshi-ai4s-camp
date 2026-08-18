@@ -138,4 +138,24 @@ describe('application review detail isolation', () => {
     secondTransition.resolve({ data: { id: secondId, revision: 10, status: 'reviewing' } })
     await waitFor(() => expect(getApplication).toHaveBeenCalledTimes(3))
   })
+
+  it('renders profile labels and selected problem labels instead of internal keys', async () => {
+    const base = detail(firstId, '甲申请人', 1, '')
+    const questionId = '71000000-0000-4000-8000-000000000012'
+    base.data.application.coreFields = { name: '甲申请人', identityType: '博士研究生', major: '物理学', researchDirection: '凝聚态物理' }
+    base.data.application.form = {
+      ...DEFAULT_REGISTRATION_FORM,
+      questions: [{
+        id: questionId, type: 'multiple_choice', label: 'AI4S 问题', helpText: '', required: true, order: 0, active: true,
+        validation: { minSelections: 1, maxSelections: 3 },
+        options: [{ id: '72000000-0000-4000-8000-000000000001', value: 'topic-a', label: '正式题目 A', description: '学术介绍。' }],
+      }],
+    }
+    base.data.application.answers = { [questionId]: ['topic-a'] }
+    renderPage(client({ getApplication: async () => base }))
+    await screen.findByRole('heading', { name: '甲申请人的报名' })
+    expect(screen.getByText('专业：')).toBeInTheDocument()
+    expect(screen.getByText('正式题目 A')).toBeInTheDocument()
+    expect(screen.queryByText('topic-a')).not.toBeInTheDocument()
+  })
 })

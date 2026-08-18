@@ -13,32 +13,31 @@ export function PublicShell({ children, site }: {
   const { pathname } = useLocation()
   const allNavigation = {
     home: { label: '首页', to: '/' }, schedule: { label: '实训日程', to: '/schedule' }, register: { label: '在线注册', to: '/application' },
-    travel: { label: '住宿交通', to: '/travel' }, contacts: { label: '联系我们', to: '/contact' }, resources: { label: '相关资料', to: '/resources' }, account: { label: '个人中心', to: '/account' },
+    travel: { label: '交通住宿', to: '/travel' }, contacts: { label: '联系我们', to: '/contact' }, resources: { label: '相关资料', to: '/resources' }, account: { label: '个人中心', to: '/account' },
   } as const
   const navigationItems = site.visibleNavigation.map((key) => allNavigation[key])
+  const usesWideContent = pathname === '/schedule'
   const content = <main id="main-content" tabIndex={-1}>{children}</main>
 
   return <div className="public-shell">
     <SkipLink />
     <EventBanner
       dates={site.basic.dates.label}
-      series={site.display.series}
       tagline={site.basic.tagline}
       title={site.basic.title}
       venue={site.basic.venue}
     />
     <EventNavigation items={navigationItems} />
-    <div className="event-container public-layout" data-testid="desktop-content-sidebar">
+    <div className={`event-container public-layout${usesWideContent ? ' public-layout--wide' : ''}`} data-testid="desktop-content-sidebar">
       {content}
       <aside className="public-sidebar" aria-label="活动补充信息">
         {site.importantDates.items.length > 0 ? <InfoCard title="重要日期">
           <ImportantDatesContent importantDates={site.importantDates} />
         </InfoCard> : null}
         {site.contacts.items.length > 0 ? <InfoCard title="联系咨询"><ContactList contacts={site.contacts} /></InfoCard> : null}
-        <InfoCard title="相关链接">{pathname === '/resources'
-          ? <span className="sidebar-link" aria-current="page">相关资料</span>
-          : <Link className="sidebar-link" to="/resources">相关资料</Link>}
-        </InfoCard>
+        {site.display.relatedLinks?.length ? <InfoCard title="相关链接">
+          {site.display.relatedLinks.map((item) => <a className="sidebar-link" href={item.href} key={item.href} rel="noreferrer" target="_blank">{item.label}</a>)}
+        </InfoCard> : null}
         {pathname === site.registrationCta.to
           ? <span className="registration-cta sidebar-cta" aria-current="page">{site.registrationCta.label}</span>
           : <Link className="registration-cta sidebar-cta" to={site.registrationCta.to}>{site.registrationCta.label}</Link>}

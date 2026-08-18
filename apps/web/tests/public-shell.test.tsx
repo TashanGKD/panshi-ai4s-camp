@@ -18,7 +18,13 @@ const siteResponse = {
     },
     importantDates: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] },
     contacts: { items: [{ label: '报名咨询', value: 'camp@example.org' }] },
-    display: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营', registrationCta: { label: '立即报名', to: '/application' } },
+    display: {
+      series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营', registrationCta: { label: '立即报名', to: '/application' },
+      relatedLinks: [
+        { label: '磐石官网', href: 'https://www.scienceone.ai/' },
+        { label: '中国科学院大学他山学科交叉创新协会', href: 'https://preview.tashan.ac.cn/' },
+      ],
+    },
     features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
     homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
     visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
@@ -48,7 +54,9 @@ describe('public event shell', () => {
     const sidebar = screen.getByRole('complementary')
     expect(sidebar).toHaveTextContent('重要日期')
     expect(sidebar).toHaveTextContent('报名咨询camp@example.org')
-    expect(within(sidebar).getByRole('link', { name: '相关资料' })).toHaveAttribute('href', '/resources')
+    expect(within(sidebar).queryByRole('link', { name: '相关资料' })).not.toBeInTheDocument()
+    expect(within(sidebar).getByRole('link', { name: '磐石官网' })).toHaveAttribute('href', 'https://www.scienceone.ai/')
+    expect(within(sidebar).getByRole('link', { name: '中国科学院大学他山学科交叉创新协会' })).toHaveAttribute('href', 'https://preview.tashan.ac.cn/')
     expect(within(sidebar).getByRole('link', { name: '立即报名' })).toHaveAttribute('href', '/application')
   })
 
@@ -57,11 +65,11 @@ describe('public event shell', () => {
     const sidebar = await screen.findByRole('complementary')
     expect(sidebar).toHaveTextContent('重要日期')
     expect(sidebar).toHaveTextContent('报名咨询camp@example.org')
-    expect(sidebar).toHaveTextContent('相关资料')
+    expect(sidebar).not.toHaveTextContent('相关资料')
     expect(sidebar).toHaveTextContent('立即报名')
   })
 
-  it('keeps current registration and resources entries visible without self-links', async () => {
+  it('keeps current registration visible and does not duplicate the resources navigation entry in the sidebar', async () => {
     const registration = render(<MemoryRouter initialEntries={['/application']}><PublicShell site={siteResponse.data as never}><p>报名表</p></PublicShell></MemoryRouter>)
     const registrationAside = screen.getByRole('complementary')
     expect(within(registrationAside).getByText('立即报名')).toHaveAttribute('aria-current', 'page')
@@ -69,14 +77,13 @@ describe('public event shell', () => {
     registration.unmount()
     renderRoute('/resources')
     const resourcesAside = await screen.findByRole('complementary')
-    expect(within(resourcesAside).getByText('相关资料')).toHaveAttribute('aria-current', 'page')
-    expect(within(resourcesAside).queryByRole('link', { name: '相关资料' })).not.toBeInTheDocument()
+    expect(within(resourcesAside).queryByText('相关资料')).not.toBeInTheDocument()
   })
 
   it('provides the exact seven event routes and marks home current', async () => {
     renderRoute()
     const links = within(await screen.findByRole('navigation')).getAllByRole('link')
-    expect(links.map((link) => link.textContent)).toEqual(['首页', '实训日程', '在线注册', '住宿交通', '联系我们', '相关资料', '个人中心'])
+    expect(links.map((link) => link.textContent)).toEqual(['首页', '实训日程', '在线注册', '交通住宿', '联系我们', '相关资料', '个人中心'])
     expect(links.map((link) => link.getAttribute('href'))).toEqual(['/', '/schedule', '/application', '/travel', '/contact', '/resources', '/account'])
     expect(links[0]).toHaveAttribute('aria-current', 'page')
     expect(links.slice(1).every((link) => !link.hasAttribute('aria-current'))).toBe(true)
@@ -89,6 +96,12 @@ describe('public event shell', () => {
     expect(screen.getByRole('main')).toBeVisible()
     expect(screen.getByRole('contentinfo')).toBeVisible()
     expect(container.querySelector('main')?.nextElementSibling?.tagName).toBe('ASIDE')
+  })
+
+  it('does not repeat the event series above the main banner title', async () => {
+    renderRoute()
+    const banner = await screen.findByTestId('event-banner')
+    expect(within(banner).queryByText('磐石科学智能实训营')).not.toBeInTheDocument()
   })
 
   it('offers a first-focus skip link that moves focus to home main content', async () => {
@@ -119,7 +132,6 @@ describe('public event shell', () => {
     const pageText = container.textContent ?? ''
     expect(pageText).not.toContain('返回会议')
     expect(pageText).not.toContain('在线课程')
-    expect(pageText).not.toContain('他山学科交叉')
     expect(container.querySelector('.header, .footer, .conf-banner-back')).not.toBeInTheDocument()
   })
 

@@ -34,7 +34,7 @@ export type ResolvedApiBaseUrl = {
   prefix: string
 }
 
-type PublicClientRuntime = { production: boolean }
+export type PublicClientRuntime = { production: boolean, pageOrigin?: string }
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 const invalidApiBaseUrl = () => new Error(
@@ -61,6 +61,17 @@ export const resolveApiBaseUrl = (value?: string, runtime: PublicClientRuntime =
     || (url.protocol === 'http:' && (runtime.production || !loopbackHosts.has(url.hostname)))
   ) {
     throw invalidApiBaseUrl()
+  }
+
+  if (!runtime.production && runtime.pageOrigin) {
+    try {
+      const pageUrl = new URL(runtime.pageOrigin)
+      if (loopbackHosts.has(url.hostname) && loopbackHosts.has(pageUrl.hostname)) {
+        url.hostname = pageUrl.hostname
+      }
+    } catch {
+      // The browser supplies pageOrigin; an invalid test/runtime value should not alter API validation.
+    }
   }
 
   const normalizedPath = url.pathname.replace(/\/+$/u, '')
@@ -127,7 +138,10 @@ export const createPublicClient = (apiBaseUrl?: string, runtime: PublicClientRun
   return { downloadResource, getApplicationCount, getDraftPreview, getPublicSchedule, getPublicSite, getPublicTravel, getResources }
 }
 
-const publicClient = createPublicClient(import.meta.env.VITE_API_BASE_URL, { production: import.meta.env.PROD })
+const publicClient = createPublicClient(import.meta.env.VITE_API_BASE_URL, {
+  production: import.meta.env.PROD,
+  pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
+})
 
 export const getPublicSite = publicClient.getPublicSite
 export const getPublicSchedule = publicClient.getPublicSchedule

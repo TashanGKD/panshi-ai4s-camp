@@ -4,6 +4,8 @@ import {
   AdminContentPreviewResponseSchema,
   AdminSummaryResponseSchema,
   AdminSystemHealthResponseSchema,
+  AdminCheckInLookupResponseSchema,
+  AdminCheckInMutationResponseSchema,
   ApiErrorSchema,
   ContentPublishResponseSchema,
   LoginResponseSchema,
@@ -13,6 +15,8 @@ import {
   type AdminContentPreviewResponse,
   type AdminSummaryResponse,
   type AdminSystemHealthResponse,
+  type AdminCheckInLookupResponse,
+  type AdminCheckInMutationResponse,
   type AdminLoginRequest,
   type ContentModuleKey,
   type ContentPublishResponse,
@@ -107,6 +111,9 @@ export type AdminClient = {
   forceStudentPasswordReset: (id: string, input: { currentPassword: string }) => Promise<{ data: { student: StudentAccount, resetMethod: 'verification_code' } }>
   listAuditLogs: (query: URLSearchParams, signal?: AbortSignal) => Promise<{ data: { items: AuditLogItem[], total: number, page: number, pageSize: number } }>
   getAuditLog: (id: string, signal?: AbortSignal) => Promise<{ data: { item: AuditLogItem } }>
+  lookupCheckIn: (code: string) => Promise<AdminCheckInLookupResponse>
+  confirmCheckIn: (credentialId: string, expectedRevision: number) => Promise<AdminCheckInMutationResponse>
+  revokeCheckIn: (credentialId: string, expectedRevision: number, reason: string) => Promise<AdminCheckInMutationResponse>
 }
 
 export type AdminResource = { id: string, key: string, title: string, description: string | null, fileId: string, accessScope: 'public' | 'authenticated' | 'admitted', sortOrder: number, active: boolean, revision: number }
@@ -116,7 +123,7 @@ export type StudentAccount = Omit<Administrator, 'isCurrent'>
 export type AuditLogItem = { id: string, actor: { id: string, displayName: string | null } | null, action: string, entityType: string, entityId: string | null, metadata: Record<string, unknown>, createdAt: string }
 
 export type AdminApplicationListItem = { id: string, revision: number, status: string, name: string, phone: string, organization: string, identityType: string, educationStage: string, submittedAt: string | null, updatedAt: string }
-export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, string | string[]>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null, changedBy: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
+export type AdminApplicationDetail = { application: AdminApplicationListItem & { coreFields: Record<string, string>, answers: Record<string, unknown>, form: RegistrationForm, internalReviewNote?: string | null }, versions: Array<{ id: string, snapshot: JsonObject, reason: string, createdAt: string }>, history: Array<{ fromStatus: string | null, toStatus: string, reason: string | null, internalNote: string | null, changedBy: string | null, createdAt: string }>, attachments: Array<{ id: string, slotId: string, originalName: string, mimeType: string, sizeBytes: number, downloadUrl: string }> }
 export type ReviewTransitionInput = { expectedRevision: number, targetStatus: string, publicMessage?: string, internalNote?: string, supplementDeadline?: string, editableFieldIds: string[], editableAttachmentIds: string[] }
 
 export const createAdminClient = (apiBaseUrl: string | undefined, runtime: AdminClientRuntime): AdminClient => {
@@ -196,6 +203,9 @@ export const createAdminClient = (apiBaseUrl: string | undefined, runtime: Admin
     forceStudentPasswordReset: async (id, input) => (await send(`/api/v1/admin/users/students/${encodeURIComponent(id)}/force-password-reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })).json(),
     listAuditLogs: async (query, signal) => (await send(`/api/v1/admin/audit-logs?${query.toString()}`, { signal })).json(),
     getAuditLog: async (id, signal) => (await send(`/api/v1/admin/audit-logs/${encodeURIComponent(id)}`, { signal })).json(),
+    lookupCheckIn: async (code) => AdminCheckInLookupResponseSchema.parse(await (await send('/api/v1/admin/check-in/lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })).json()),
+    confirmCheckIn: async (credentialId, expectedRevision) => AdminCheckInMutationResponseSchema.parse(await (await send(`/api/v1/admin/check-in/${encodeURIComponent(credentialId)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision }) })).json()),
+    revokeCheckIn: async (credentialId, expectedRevision, reason) => AdminCheckInMutationResponseSchema.parse(await (await send(`/api/v1/admin/check-in/${encodeURIComponent(credentialId)}/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision, reason }) })).json()),
   }
 }
 

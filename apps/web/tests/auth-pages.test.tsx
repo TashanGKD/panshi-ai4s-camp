@@ -94,7 +94,7 @@ describe('student auth pages', () => {
     expect(await screen.findByText('步骤 2 / 3')).toBeVisible()
   })
 
-  it('logs a student in and keeps links to registration and password recovery', async () => {
+  it('logs a student in and hides registration and password recovery links after success', async () => {
     const fetchSpy = installFetch()
     renderRoute('/login')
     expect(await screen.findByRole('heading', { name: '学员登录' })).toBeVisible()
@@ -104,6 +104,8 @@ describe('student auth pages', () => {
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'password-1' } })
     fireEvent.click(screen.getByRole('button', { name: '登录' }))
     expect(await screen.findByRole('status')).toHaveTextContent('登录成功')
+    expect(screen.queryByRole('link', { name: '忘记密码' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '注册账号' })).not.toBeInTheDocument()
     expect(fetchSpy.mock.calls.some(([input]) => pathOf(input) === '/api/v1/auth/login')).toBe(true)
   })
 

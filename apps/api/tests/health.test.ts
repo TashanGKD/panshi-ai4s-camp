@@ -371,6 +371,7 @@ describe('API runtime configuration', () => {
       RATE_LIMIT_ADMIN_MAX: 180,
       RATE_LIMIT_ADMIN_WINDOW_MS: 60_000,
       VERIFICATION_PROVIDER: 'disabled',
+      CHECK_IN_TOKEN_SECRET: '00'.repeat(32),
       VERIFICATION_TTL_SECONDS: 300,
       VERIFICATION_COOLDOWN_SECONDS: 60,
       VERIFICATION_MAX_ATTEMPTS: 5,
@@ -430,7 +431,7 @@ describe('API runtime configuration', () => {
       .toMatchObject({ JSON_BODY_LIMIT_BYTES: 1_024, HEALTHCHECK_TIMEOUT_MS: 100 })
     expect(getApiEnv({ ...base, JSON_BODY_LIMIT: '10mb', HEALTHCHECK_TIMEOUT_MS: '10000' }))
       .toMatchObject({ JSON_BODY_LIMIT_BYTES: 10_485_760, HEALTHCHECK_TIMEOUT_MS: 10_000 })
-    expect(getApiEnv({ ...base, SESSION_TTL_SECONDS: '300', NODE_ENV: 'production' }))
+    expect(getApiEnv({ ...base, SESSION_TTL_SECONDS: '300', NODE_ENV: 'production', CHECK_IN_TOKEN_SECRET: 'ab'.repeat(32) }))
       .toMatchObject({ SESSION_TTL_SECONDS: 300, SECURE_COOKIES: true })
     expect(getApiEnv({ ...base, FILE_STORAGE_ROOT: 'var/uploads' }).FILE_STORAGE_ROOT)
       .toMatch(/\/panshi-ai4s-camp\/var\/uploads$/u)

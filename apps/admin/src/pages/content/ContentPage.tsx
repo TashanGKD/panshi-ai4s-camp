@@ -8,7 +8,7 @@ import { BasicForm, ContactsForm, DisplayForm, FeaturesForm, ImportantDatesForm,
 
 const moduleTitles: Record<ContentModuleKey, string> = {
   basic: '基本信息', features: '实训特色', organizations: '组织单位', importantDates: '重要日期',
-  schedule: '实训日程与师资', contacts: '联系方式', travel: '住宿交通', display: '展示设置',
+  schedule: '实训日程与师资', contacts: '联系方式', travel: '交通住宿', display: '展示设置',
 }
 const forms = { basic: BasicForm, features: FeaturesForm, organizations: OrganizationsForm, importantDates: ImportantDatesForm, schedule: ScheduleForm, contacts: ContactsForm, travel: TravelForm, display: DisplayForm }
 

@@ -53,7 +53,7 @@ API 数据层使用 PostgreSQL 16、Drizzle 类型映射和受版本控制的 SQ
 
 - 公开 Web：`/`、`/schedule`、`/application`、`/travel`、`/contact`、`/resources`、`/login`、`/register`、`/account`。
 - 管理后台：`/admin/` 下的工作台、八个内容模块、报名审核、表单配置、资料、管理员、审计日志和系统状态。
-- 公开 API：`/api/v1/public/site`、`/schedule`、`/content/:key`、`/registration-form`、`/statistics/applications` 以及 `/api/v1/resources`。
+- 公开 API：`/api/v1/public/site`、`/schedule`、`/content/:key`、`/registration-form`、`/institutions`、`/statistics/applications` 以及 `/api/v1/resources`。
 - 学员 API：`/api/v1/auth/*`、`/api/v1/me/profile`、`/api/v1/me/application`、`/api/v1/files/:id/download`。
 - 管理 API：`/api/v1/admin/content`、`registration-form`、`applications`、`resources`、`users`、`audit-logs`、`system-health` 和 `summary`。
 
@@ -81,7 +81,9 @@ Web Vite 配置通过 `envDir` 显式从本项目根目录加载上述 `.env`，
 
 管理员在“报名管理 → 表单配置”中维护固定核心字段、动态问题和独立附件要求。核心字段不可删除，手机号从账号带入并只读；动态问题仅支持单行、多行、单选和多选，题目与选项使用稳定 UUID，顺序保存为连续 order。默认草稿只包含一个确定性 UUID 的非必填“个人简历／补充材料”附件，允许 PDF/DOCX。
 
-草稿使用 revision 乐观锁，发布会在事务中创建不可变版本并更新草稿基线；历史版本由数据库 trigger 禁止 UPDATE/DELETE。报名应用绑定的 `form_version_id` 指向发布版本，因此后续发布不会改写旧题目快照。报名窗口按上海业务日期包含开放日和截止日全天；站内离开和浏览器关闭均保护未保存或进行中的操作。
+学员端“所在单位”通过教育部全国普通高等学校名录进行搜索；选择“中国科学院大学”后，“培养单位”通过中国科学院大学官网培养单位名录进行二次搜索。运行时名录为版本化只读 JSON，来源快照保存在 `content-source/institution-directories/`，公开接口为 `GET /api/v1/public/institutions`。服务端在正式提交时复核国科大培养单位，避免只依赖前端选择控件。
+
+草稿使用 revision 乐观锁，发布会在事务中创建不可变版本并更新草稿基线；历史版本由数据库 trigger 禁止 UPDATE/DELETE。已提交报名可在报名窗口内恢复为保留全部原值的可编辑草稿，再次正式提交时新增版本并重新进入待审核状态。报名应用绑定的 `form_version_id` 指向发布版本，因此后续发布不会改写旧题目快照。报名窗口按上海业务日期包含开放日和截止日全天；站内离开和浏览器关闭均保护未保存或进行中的操作。
 
 ### 安全附件存储（Task 12）
 
@@ -205,9 +207,11 @@ CONTENT_SEED_CREATOR_USER_ID='00000000-0000-0000-0000-000000000000' \
   npm run db:seed:content -w @panshi/api
 ```
 
-脚本幂等初始化八个固定模块，并发布 `basic`、`features`、`importantDates`、`schedule`、`contacts`、`display` 的版本 1。`organizations` 与 `travel` 仅建立未发布模块；`contacts` 发布为空列表。种子事务先获取项目专用的 transaction-scoped PostgreSQL advisory lock，使并发调用串行化。创建版本与把 `published_version_id` 从空值指向该版本分别记录 `content.version_created` 和 `content.version_published` 审计；复用既有版本时只要实际发生首次发布，仍会记录发布审计。重复无变化运行不重复写入版本或审计；如果既有版本 1 的 payload 不同，脚本拒绝覆盖。
+脚本幂等初始化八个固定模块，并发布 `basic`、`features`、`organizations`、`importantDates`、`schedule`、`contacts`、`display`；`travel` 仅建立未发布模块。种子事务先获取项目专用的 transaction-scoped PostgreSQL advisory lock，使并发调用串行化。首次运行创建版本；已存在旧版内容时，脚本创建新的不可变版本并移动线上发布指针，不覆盖历史版本。重复运行同一真源不重复创建版本或审计。空白后台草稿会同步为当前真源，工作人员已经编辑的非空草稿不会被覆盖。
 
-内容依据文件为 `磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`（本次读取的 SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。公开日期按已确认覆盖值固定为 2026-08-23 至 2026-08-27，地点为中国科学院物理研究所。源文件 OOXML 含 537 处插入和 273 处删除修订，并混有 8 月与 9 月日期残留，因此首版日程只发布五天的可核验专题层级，不复制受修订污染的逐节时间表。组织单位清单在修订中也存在增删，首版暂不发布该模块。报名截止、电话、邮箱、住宿交通、资料文件以及标为“待定”的授课人均未写入公开种子。
+内容依据文件为 [`content-source/磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx`](content-source/磐石·科学智能（AI for Science）实训营计划方案v2.1.1.docx)（SHA-256：`74a56a9a5a51c1e9fdd4b4bb3a88d0f98f493f939967a28289c3cc2b4880b13e`）。网站按 Word“最终显示”文本发布：举办时间为 2026 年 9 月 4 日至 9 月 8 日，地点为中国科学院物理研究所；实训营定位、四项特色、组织单位以及五天 29 个日程环节均逐项进入结构化内容。源文中的 `待定`、现有用词和标点照录，不由工程代码擅自润色。报名截止、联系方式、住宿交通和资料文件未在该版本中提供，因此不补写活动事实。
+
+迁移 `0020_publish_initial_registration_form.sql` 会在尚无发布版本时发布既有默认报名表草稿，使学员端可直接创建报名信息；已有报名表发布版本的环境保持不变。
 
 `相关资料` 路由在全站信息加载成功后调用 `GET /api/v1/resources`，由服务端按 public、authenticated、admitted 三种范围过滤；受限列表与下载禁止缓存，底层文件隐藏或删除后立即失效。
 

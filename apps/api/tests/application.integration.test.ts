@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { eq, sql } from 'drizzle-orm'
-import { DEFAULT_REGISTRATION_FORM, type JsonObject, type RegistrationForm } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, type ApplicationCoreFields, type JsonObject, type RegistrationForm } from '@panshi/contracts'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
 import { applications, applicationFiles, applicationVersions, auditLogs, contentModules, contentVersions, files, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
@@ -19,7 +19,12 @@ const questionId = '20000000-0000-4000-8000-000000000001'
 const slotId = '20000000-0000-4000-8000-000000000002'
 const newQuestionId = '20000000-0000-4000-8000-000000000003'
 const form: RegistrationForm = { ...DEFAULT_REGISTRATION_FORM, questions: [{ id: questionId, type: 'short_text', label: '研究问题', helpText: '', required: true, order: 0, active: true, validation: { minLength: 2, maxLength: 30 } }], attachments: [{ id: slotId, label: '简历', helpText: '', required: true, order: 0, active: true, allowedExtensions: ['pdf'], maxSizeBytes: 1_000_000 }] }
-const profile = { name: '张三', email: 'z@example.com', organization: '物理所', department: '研究生部', identityType: '研究生', educationStage: '博士', majorResearchDirection: '凝聚态' }
+const profile: Omit<ApplicationCoreFields, 'phone'> = {
+  name: '张三', email: 'z@example.com', organization: '中国科学院物理研究所', department: '研究生部',
+  identityType: '博士研究生', educationStage: '博士研究生', majorResearchDirection: '凝聚态物理', major: '物理学',
+  researchInterest: '', researchDirection: '凝聚态物理', postdocStation: '', disciplineField: '', supervisor: '',
+  jobPosition: '', professionalTitleLevel: '', specificTitle: '', identityDescription: '',
+}
 
 describe('application PostgreSQL workflow', () => {
   beforeAll(async () => { await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await runMigrations({ connect: () => database.pool.connect(), close: async () => undefined }) })
@@ -151,6 +156,44 @@ describe('application PostgreSQL workflow', () => {
     expect(logs).not.toContain('绝密研究问题'); expect(logs).not.toContain('private-name.pdf'); expect(logs).not.toContain('c'.repeat(64))
   })
 
+  it('reopens a submitted application without losing data and records the resubmission as a new version', async () => {
+    const { service, mine, file } = await prepareSubmittableDraft()
+    await service.submit(student, { expectedRevision: mine.data.application.revision })
+    const submitted = await service.getMine(student)
+
+    const reopened = await service.reopen(student, { expectedRevision: submitted.data.application.revision })
+    expect(reopened.data.application).toMatchObject({
+      status: 'draft',
+      profile: {
+        name: profile.name,
+        organization: profile.organization,
+        department: profile.department,
+        identityType: profile.identityType,
+        major: profile.major,
+        researchDirection: profile.researchDirection,
+      },
+      answers: { [questionId]: '并发研究问题' },
+      attachments: [{ slotId, id: file.id }],
+    })
+
+    const saved = await service.saveDraft(student, {
+      expectedRevision: reopened.data.application.revision,
+      profile: { ...profile, majorResearchDirection: '凝聚态物理与人工智能' },
+      answers: { [questionId]: '修改后的研究问题' },
+      attachments: [{ slotId, fileId: file.id }],
+    })
+    await service.submit(student, { expectedRevision: saved.data.application.revision })
+    const resubmitted = await service.getMine(student)
+    expect(resubmitted.data.application).toMatchObject({ status: 'submitted', answers: { [questionId]: '修改后的研究问题' } })
+
+    const versions = await database.db.select({ reason: applicationVersions.reason, snapshot: applicationVersions.snapshot })
+      .from(applicationVersions).where(eq(applicationVersions.applicationId, resubmitted.data.application.id))
+      .orderBy(applicationVersions.createdAt)
+    expect(versions.map(({ reason }) => reason)).toEqual(['initial_submission', 'resubmission'])
+    expect(versions[0]?.snapshot).toMatchObject({ answers: { [questionId]: '并发研究问题' } })
+    expect(versions[1]?.snapshot).toMatchObject({ answers: { [questionId]: '修改后的研究问题' } })
+  })
+
   it('rejects closed windows and disabled accounts', async () => {
     const closed = createApplicationService(createApplicationRepository(database.db, { now: () => new Date('2026-09-01T00:00:00Z') }))
     const mine = await closed.getMine(student)
@@ -171,6 +214,40 @@ describe('application PostgreSQL workflow', () => {
     expect(migrated.data.application.answers[questionId]).toBe('保留的旧答案')
     expect(migrated.data.application.retiredAnswerIds).toEqual([questionId])
     expect(migrated.data.application.revision).toBe(mine.data.application.revision + 1)
+  })
+
+  it('migrates a draft before parsing a historical fixed-field definition', async () => {
+    const historicalForm = {
+      ...form,
+      coreFields: form.coreFields.map((field) => field.key === 'email' ? { ...field, required: true } : field),
+    }
+    const [historical] = await database.db.insert(registrationFormVersions).values({
+      version: 2, schema: historicalForm as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date(),
+    }).returning({ id: registrationFormVersions.id })
+    const [published] = await database.db.insert(registrationFormVersions).values({
+      version: 3, schema: form as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date(),
+    }).returning({ id: registrationFormVersions.id })
+    await database.db.update(registrationFormDrafts).set({ baseVersionId: published!.id, schema: form })
+      .where(eq(registrationFormDrafts.id, '00000000-0000-4000-8000-000000000010'))
+    await database.db.insert(applications).values({
+      userId: student.id,
+      formVersionId: historical!.id,
+      status: 'draft',
+      revision: 0,
+      coreFields: { ...profile, phone: student.phoneNormalized },
+      answers: {},
+    })
+    const service = createApplicationService(createApplicationRepository(database.db, { now: () => new Date('2026-08-15T00:00:00Z') }))
+
+    await expect(service.getMine(student)).resolves.toMatchObject({
+      data: {
+        application: {
+          formVersionId: published!.id,
+          formVersion: 3,
+          revision: 1,
+        },
+      },
+    })
   })
 
   it('preserves an inactive answer as retired history while saving and submitting a new required answer', async () => {

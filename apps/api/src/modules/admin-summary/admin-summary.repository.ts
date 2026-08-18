@@ -30,6 +30,14 @@ export const createAdminSummaryRepository = (
     const parsed = ImportantDatesContentSchema.safeParse(record?.payload)
     if (!parsed.success) return []
     const today = todayProvider()
+    if (parsed.data.machineDates) {
+      const labels = { registrationOpen: '报名开放', registrationDeadline: '报名截止', campStart: '实训开始', campEnd: '实训结束' } as const
+      return Object.entries(parsed.data.machineDates)
+        .filter((entry): entry is [keyof typeof labels, string] => machineKeys.has(entry[0]) && entry[1] >= today)
+        .map(([machineKey, date]) => ({ machineKey, label: labels[machineKey], date }))
+        .sort((left, right) => left.date.localeCompare(right.date))
+        .slice(0, 5)
+    }
     return parsed.data.items
       .filter((item): item is typeof item & { machineKey: 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd' } => (
         item.machineKey !== undefined && machineKeys.has(item.machineKey) && /^\d{4}-\d{2}-\d{2}$/u.test(item.value) && item.value >= today

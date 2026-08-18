@@ -1,5 +1,5 @@
 import request from 'supertest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { hashSessionToken } from '../src/modules/identity/session.service.js'
 import { ApplicationError, type ApplicationService } from '../src/modules/registration/application.service.js'
@@ -13,7 +13,7 @@ const identityRepository = {
   revokeSessionByTokenHash: async () => undefined,
 }
 const fakeService = (overrides: Partial<ApplicationService> = {}): ApplicationService => ({
-  getMine: async () => { throw new Error('unused') }, saveDraft: async () => { throw new Error('unused') }, submit: async () => { throw new Error('unused') }, ...overrides,
+  getMine: async () => { throw new Error('unused') }, reopen: async () => { throw new Error('unused') }, saveDraft: async () => { throw new Error('unused') }, submit: async () => { throw new Error('unused') }, ...overrides,
 })
 const app = (service: ApplicationService) => createApp({ checkDatabase: async () => undefined, identityRepository, authTransactionRepository: { rotateSessionAndAudit: async () => undefined }, applicationService: service, config: { allowedOrigins: ['https://camp.example'], healthcheckTimeoutMs: 1000, jsonLimitBytes: 1_000_000 } })
 
@@ -57,5 +57,12 @@ describe('my application routes', () => {
       .send({ phone: '+8613800138000', answers: { q: 'secret' } })
     expect(response.status).toBe(422); expect(response.body.error.details.fields).toEqual([{ path: 'answers.q', message: '必填' }])
     expect(JSON.stringify(response.body)).not.toContain('secret'); expect(JSON.stringify(response.body)).not.toContain('+8613800138000')
+  })
+  it('routes an authenticated learner reopen request without accepting another user id', async () => {
+    const reopen = vi.fn(async () => ({ apiVersion: 'v1', data: { application: { status: 'draft' } } }) as never)
+    const response = await request(app(fakeService({ reopen }))).post('/api/v1/me/application/reopen')
+      .set('Origin', 'https://camp.example').set('Cookie', 'panshi_session=student-token').send({ expectedRevision: 2 })
+    expect(response.status).toBe(200)
+    expect(reopen).toHaveBeenCalledWith(student, { expectedRevision: 2 })
   })
 })

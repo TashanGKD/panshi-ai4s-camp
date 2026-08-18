@@ -27,7 +27,7 @@ const publishedSiteRows: PublishedRow[] = [
   { key: 'organizations', payload: { items: [{ role: '承办单位', name: '测试组织' }] }, version: 3 },
   { key: 'importantDates', payload: { items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }] }, version: 1 },
   { key: 'contacts', payload: { items: [{ label: '报名咨询', value: 'camp@example.org' }] }, version: 1 },
-  { key: 'display', payload: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营' }, version: 1 },
+  { key: 'display', payload: { series: '磐石科学智能实训营', footer: '磐石·科学智能（AI for Science）实训营', homeSectionOrder: ['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations'] }, version: 1 },
   { key: 'schedule', payload: { days: [
     { date: '2026-08-23', label: '第一天', theme: '主题一', sessions: [] },
     { date: '2026-08-24', label: '第二天', theme: '主题二', sessions: [] },
@@ -56,21 +56,70 @@ describe('public published content', () => {
     const { initialPublishedContent } = await import('../src/db/seeds/initial-content.js')
 
     expect(initialPublishedContent.basic.dates).toEqual({
-      start: '2026-08-23',
-      end: '2026-08-27',
-      label: '2026-08-23 至 2026-08-27',
+      start: '2026-09-04',
+      end: '2026-09-08',
+      label: '2026 年 9月 4 日 — 9 月8日',
     })
     expect(initialPublishedContent.basic.venue).toBe('中国科学院物理研究所')
+    expect(initialPublishedContent.basic.eventDetails).toEqual([
+      '举办时间：2026 年9 月 4 日至 9 月 8 日，共 5 天。前 4 天分别围绕科研智能体、AI4S 科研方法论、科学模型和自驱动的端到端科研闭环开展课程教学，第 5 天安排科研机构参访、学习成果交流与结营。',
+      '举办地点：中国科学院物理研究所。',
+      '举办规模：线下集中学习规模原则上控制在 80—100 人；学习后纳入实训项目培育计划的学员规模约 30—50 人。',
+      '首届实训营拟采取公开报名、材料审核和分类录取的方式组织。',
+    ])
+    expect(initialPublishedContent.basic.registrationAndAccommodation).toEqual([
+      '本次实训营不收取注册费，食宿自理。',
+    ])
+    expect(initialPublishedContent.basic.signature).toEqual({
+      organization: '磐石·科学智能实训营会务组',
+      date: '2026年8月18日',
+    })
     expect(initialPublishedContent.schedule.days.map((day) => day.theme)).toEqual([
-      '科研智能体',
-      'AI4S 科研方法论',
-      '科学模型',
-      '自驱动的端到端科研闭环',
+      '专题一\n科研智能体',
+      '专题二\nAI4S 科研方法论',
+      '专题三\n科学模型',
+      '专题四\n自驱动的端到端科研闭环',
       '参访交流与结营',
     ])
-    expect(initialPublishedContent.contacts.items).toEqual([])
-    expect('travel' in initialPublishedContent).toBe(false)
-    expect(JSON.stringify(initialPublishedContent)).not.toMatch(/报名截止|手机号|电子邮箱|待定/u)
+    expect(initialPublishedContent.schedule.days.reduce((total, day) => total + day.sessions.length, 0)).toBe(29)
+    expect(initialPublishedContent.organizations.items).toContainEqual({ role: '支持单位', name: '腾讯云计算（北京）有限责任公司' })
+    expect(initialPublishedContent.organizations.items).toContainEqual({ role: '协办单位', name: '中国科学院国家天文台' })
+    expect(initialPublishedContent.organizations.items).toContainEqual({ role: '协办单位', name: '长三角物理研究中心' })
+    expect(initialPublishedContent.organizations.items).toContainEqual({ role: '支持单位', name: '中国科学院数学与系统科学研究院研究生会' })
+    expect(initialPublishedContent.organizations.items).toContainEqual({ role: '支持单位', name: '国家纳米科学中心研究生会' })
+    expect(initialPublishedContent.organizations.items.map((item) => item.role)).not.toContain('共同举办')
+    expect(initialPublishedContent.importantDates.items).toEqual([
+      { label: '报名时间', value: '2026年8月18日—9月1日' },
+      { label: '实训营时间', value: '2026年9月4日—9月8日' },
+      { label: '项目培育', value: '2026年9月4日—10月31日' },
+    ])
+    expect(initialPublishedContent.importantDates.machineDates).toEqual({
+      registrationOpen: '2026-08-18', registrationDeadline: '2026-09-01', campStart: '2026-09-04', campEnd: '2026-09-08',
+    })
+    expect(initialPublishedContent.display.homeSectionOrder).toEqual([
+      'intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation',
+    ])
+    expect(initialPublishedContent.display.relatedLinks).toEqual([
+      { label: '磐石官网', href: 'https://www.scienceone.ai/' },
+      { label: '中国科学院大学他山学科交叉创新协会', href: 'https://preview.tashan.ac.cn/' },
+    ])
+    expect(initialPublishedContent.contacts.items).toEqual([
+      { name: '高翔', responsibility: '会务组', methods: [{ type: 'phone', value: '18515181215' }] },
+      { name: '周远航', responsibility: '会务组', methods: [{ type: 'phone', value: '18935301004' }] },
+    ])
+    expect(initialPublishedContent.schedule.speakers?.filter((speaker) => speaker.profile).map((speaker) => speaker.profile?.name)).toEqual([
+      '曾大军', '丁鼎', '朱艳春', '周园春', '李凯', '翁红明',
+    ])
+    const seededSessions: ReadonlyArray<{ title: string, speakerIds?: readonly string[] }> = initialPublishedContent.schedule.days
+      .flatMap((day) => day.sessions as ReadonlyArray<{ title: string, speakerIds?: readonly string[] }>)
+    expect(seededSessions.find((session) => session.title.includes('机器学习力场与粗粒化建模'))?.speakerIds).toEqual(['pending-chemistry'])
+    expect(initialPublishedContent.travel.sections).toContainEqual(expect.objectContaining({
+      title: '实训营地址',
+      image: expect.objectContaining({ src: '/images/iop-zhongguancun-location-map.png' }),
+    }))
+    expect(initialPublishedContent.travel.sections.find(({ title }) => title === '住宿安排')?.body).toContain('住宿费用由学员自行承担')
+    expect(initialPublishedContent.travel.sections.find(({ title }) => title === '住宿安排')?.body).toContain('北京物科宾馆')
+    expect(JSON.stringify(initialPublishedContent)).not.toMatch(/报名截止|手机号|电子邮箱/u)
   })
 
   it('never exposes drafts from the public site endpoint', async () => {
@@ -134,6 +183,7 @@ describe('public published content', () => {
     expect(siteResponse.status).toBe(200)
     expect(site.data.features.items[0]?.title).toBe('真实问题')
     expect(site.data.organizations.items[0]?.name).toBe('测试组织')
+    expect(site.data.guests).toEqual([])
     expect(site.data.scheduleOverview).toEqual([{ date: '2026-08-23', label: '第一天', theme: '科研智能体' }])
     expect(site.data.visibleNavigation).toEqual(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'])
     expect(site.data.registrationCta).toEqual({ label: '在线注册', to: '/application' })

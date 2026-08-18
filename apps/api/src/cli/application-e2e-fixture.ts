@@ -2,17 +2,16 @@ import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_REGISTRATION_FORM, type JsonObject, type RegistrationForm } from '@panshi/contracts'
+import { type JsonObject } from '@panshi/contracts'
 import { eq } from 'drizzle-orm'
 import { createDatabaseClient } from '../db/client.js'
 import { seedInitialContent } from '../db/seeds/initial-content.js'
 import { contentModules, contentVersions, registrationFormDrafts, registrationFormVersions, users } from '../db/schema.js'
 import { hashPassword } from '../modules/identity/password.js'
+import { authoritativeRegistrationForm } from '../db/seeds/authoritative-registration-form.js'
 
 const exactUrl = 'postgresql://boyuan@127.0.0.1:5432/panshi_ai4s_camp_test'
-const questionId = '20000000-0000-4000-8000-000000000001'
-const slotId = '20000000-0000-4000-8000-000000000002'
-const form: RegistrationForm = { ...DEFAULT_REGISTRATION_FORM, questions: [{ id: questionId, type: 'long_text', label: '拟解决的科研问题', helpText: '请简要说明', required: true, order: 0, active: true, validation: { minLength: 2, maxLength: 500 } }], attachments: [{ id: slotId, label: '个人简历／补充材料', helpText: '支持 PDF、DOCX', required: true, order: 0, active: true, allowedExtensions: ['pdf', 'docx'], maxSizeBytes: 5 * 1024 * 1024 }] }
+const form = authoritativeRegistrationForm
 
 const clear = async (database: ReturnType<typeof createDatabaseClient>) => {
   await database.pool.query('TRUNCATE application_files, application_status_history, application_versions, applications, files, file_storage_recoveries, user_profiles, registration_form_drafts, registration_form_versions, audit_logs, resources, content_modules, content_versions, sessions, verification_codes, users CASCADE')

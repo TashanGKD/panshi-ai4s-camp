@@ -8,6 +8,7 @@
     "admin:create": "tsx src/cli/create-admin.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed:content": "tsx src/db/seeds/initial-content.ts",
+    "db:seed:registration-form": "tsx src/db/seeds/authoritative-registration-form.ts",
     "e2e:publishing-fixture": "tsx src/cli/content-publishing-e2e-fixture.ts",
     "e2e:visual-fixture": "tsx src/cli/visual-e2e-fixture.ts",
     "e2e:student-auth-fixture": "tsx src/cli/student-auth-e2e-fixture.ts",

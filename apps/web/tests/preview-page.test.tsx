@@ -23,7 +23,7 @@ const site: PublicSiteResponse['data'] = {
   importantDates: { items: [] },
   contacts: { items: [] },
   display: { series: '磐石实训营', footer: '正式页脚' },
-  features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
+  features: { items: [] }, organizations: { items: [] }, guests: [], scheduleOverview: [],
   homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
   visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
   registrationCta: { label: '在线注册', to: '/application' },
@@ -44,13 +44,13 @@ describe('protected public Web draft preview', () => {
     }
     const client = { getDraftPreview: vi.fn(async () => preview('schedule', schedule)) }
     const { container } = render(<MemoryRouter><PreviewPage site={site} moduleKey="schedule" client={client} /></MemoryRouter>)
-    expect(await screen.findByRole('heading', { name: '预览课程' })).toBeVisible()
+    expect(await screen.findByRole('cell', { name: '预览课程' })).toBeVisible()
     expect(screen.getByText('09:00–10:30')).toBeVisible()
     expect(screen.getByText('张老师')).toBeVisible()
 
     const production = render(<ScheduleContent schedule={schedule} />)
-    expect(production.container.querySelector('.schedule-list')?.textContent).toBe(
-      container.querySelector('.schedule-list')?.textContent,
+    expect(production.container.querySelector('.schedule-table')?.textContent).toBe(
+      container.querySelector('.schedule-table')?.textContent,
     )
   })
 
@@ -112,6 +112,19 @@ describe('protected public Web draft preview', () => {
 })
 
 describe('canonical content module renderer', () => {
+  it('groups organizations by role without repeating the role for every unit', () => {
+    render(<ContentModuleRenderer moduleKey="organizations" payload={{ items: [
+      { role: '主办单位', name: '中国科学院物理研究所' },
+      { role: '主办单位', name: '中国科学院自动化研究所' },
+      { role: '协办单位', name: '中国科学院国家天文台' },
+    ] }} />)
+
+    expect(screen.getAllByRole('heading', { name: '主办单位' })).toHaveLength(1)
+    expect(screen.getByText('中国科学院物理研究所')).toBeVisible()
+    expect(screen.getByText('中国科学院自动化研究所')).toBeVisible()
+    expect(screen.getAllByRole('heading', { name: '协办单位' })).toHaveLength(1)
+  })
+
   it('labels unsupported nonvisual states clearly', () => {
     render(<ContentModuleRenderer moduleKey="display" payload={site.display} />)
     expect(screen.getByText('草稿展示设置')).toBeVisible()

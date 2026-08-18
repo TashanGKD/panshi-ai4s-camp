@@ -6,7 +6,7 @@ import {
   type RegistrationResponse,
   type VerificationPurpose,
 } from '@panshi/contracts'
-import { resolveApiBaseUrl } from './public-client'
+import { resolveApiBaseUrl, type PublicClientRuntime } from './public-client'
 
 export class AuthApiError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) {
@@ -15,7 +15,7 @@ export class AuthApiError extends Error {
   }
 }
 
-export const createAuthClient = (apiBaseUrl?: string, runtime: { production: boolean } = { production: false }) => {
+export const createAuthClient = (apiBaseUrl?: string, runtime: PublicClientRuntime = { production: false }) => {
   const { credentials, prefix } = resolveApiBaseUrl(apiBaseUrl, runtime)
   const request = async (path: string, body: Record<string, unknown>) => {
     const response = await fetch(`${prefix}${path}`, {
@@ -47,7 +47,10 @@ export const createAuthClient = (apiBaseUrl?: string, runtime: { production: boo
   }
 }
 
-const authClient = createAuthClient(import.meta.env.VITE_API_BASE_URL, { production: import.meta.env.PROD })
+const authClient = createAuthClient(import.meta.env.VITE_API_BASE_URL, {
+  production: import.meta.env.PROD,
+  pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
+})
 export const sendVerificationCode = authClient.sendVerificationCode
 export const registerStudent = authClient.register
 export const loginStudent = authClient.login

@@ -13,11 +13,12 @@ import { AuditLogsPage } from '../pages/AuditLogsPage'
 import { SystemStatusPage } from '../pages/SystemStatusPage'
 import { AdminAccountPage } from '../pages/AdminAccountPage'
 import { StudentAccountsPage } from '../pages/StudentAccountsPage'
+import { CheckInPage } from '../pages/CheckInPage'
 
 const modules: ContentModuleKey[] = ['basic', 'features', 'organizations', 'importantDates', 'schedule', 'travel', 'contacts', 'display']
 
 export function AdminApp({ client, publicWebBaseUrl, displayName = '管理员', onLogout }: { client: AdminClient, publicWebBaseUrl: string, displayName?: string, onLogout?: () => Promise<void> }) {
   return <AdminLayout displayName={displayName} onLogout={onLogout}><Routes><Route path="/" element={<DashboardPage client={client} />} />
     {modules.map((key) => <Route key={key} path={`/content/${key}`} element={<ContentPage key={key} moduleKey={key} client={client} publicWebBaseUrl={publicWebBaseUrl} />} />)}
-    <Route path="/content/resources" element={<ResourcesPage client={client} />} /><Route path="/registration/form" element={<RegistrationFormPage client={client} />} /><Route path="/applications" element={<ApplicationsPage client={client} />} /><Route path="/applications/:id" element={<ApplicationReviewPage client={client} />} /><Route path="/students" element={<StudentAccountsPage client={client} />} /><Route path="/administrators" element={<AdminUsersPage client={client} onLogout={onLogout} />} /><Route path="/account" element={<AdminAccountPage client={client} displayName={displayName} onLogout={onLogout} />} /><Route path="/audit-logs" element={<AuditLogsPage client={client} />} /><Route path="/system-status" element={<SystemStatusPage client={client} />} /><Route path="*" element={<Navigate replace to="/" />} /></Routes></AdminLayout>
+    <Route path="/content/resources" element={<ResourcesPage client={client} />} /><Route path="/registration/form" element={<RegistrationFormPage client={client} />} /><Route path="/applications" element={<ApplicationsPage client={client} />} /><Route path="/applications/:id" element={<ApplicationReviewPage client={client} />} /><Route path="/check-in" element={<CheckInPage client={client} />} /><Route path="/students" element={<StudentAccountsPage client={client} />} /><Route path="/administrators" element={<AdminUsersPage client={client} onLogout={onLogout} />} /><Route path="/account" element={<AdminAccountPage client={client} displayName={displayName} onLogout={onLogout} />} /><Route path="/audit-logs" element={<AuditLogsPage client={client} />} /><Route path="/system-status" element={<SystemStatusPage client={client} />} /><Route path="*" element={<Navigate replace to="/" />} /></Routes></AdminLayout>
 }

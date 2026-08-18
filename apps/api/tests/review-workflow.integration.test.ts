@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { DEFAULT_REGISTRATION_FORM, type JsonObject, type RegistrationForm } from '@panshi/contracts'
+import { DEFAULT_REGISTRATION_FORM, type ApplicationCoreFields, type JsonObject, type RegistrationForm } from '@panshi/contracts'
 import { createDatabaseClient } from '../src/db/client.js'
 import { runMigrations } from '../src/db/migrate.js'
 import { applications, applicationStatusHistory, applicationVersions, auditLogs, registrationFormDrafts, registrationFormVersions, users } from '../src/db/schema.js'
@@ -16,6 +16,12 @@ const admin = { id: '10000000-0000-4000-8000-000000000001', displayName: '审核
 const student = { id: '10000000-0000-4000-8000-000000000002', displayName: '张三', phoneNormalized: '+8613900139000', passwordHash: 'x', role: 'user' as const, disabledAt: null }
 const questionId = '20000000-0000-4000-8000-000000000001'; const slotId = '20000000-0000-4000-8000-000000000002'
 const form: RegistrationForm = { ...DEFAULT_REGISTRATION_FORM, questions: [{ id: questionId, type: 'long_text', label: '研究计划', helpText: '', required: true, order: 0, active: true, validation: { maxLength: 1000 } }], attachments: [{ ...DEFAULT_REGISTRATION_FORM.attachments[0]!, id: slotId }] }
+const profile: Omit<ApplicationCoreFields, 'phone'> = {
+  name: '=张三', email: 'z@example.com', organization: '中国科学院物理研究所', department: '研究生部',
+  identityType: '博士研究生', educationStage: '博士研究生', majorResearchDirection: '凝聚态物理', major: '物理学',
+  researchInterest: '', researchDirection: '凝聚态物理', postdocStation: '', disciplineField: '', supervisor: '',
+  jobPosition: '', professionalTitleLevel: '', specificTitle: '', identityDescription: '',
+}
 
 describe('review workflow PostgreSQL', () => {
   beforeAll(async () => { await database.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await runMigrations({ connect: () => database.pool.connect(), close: async () => undefined }) })
@@ -24,7 +30,7 @@ describe('review workflow PostgreSQL', () => {
     await database.db.insert(users).values([admin, student])
     const [version] = await database.db.insert(registrationFormVersions).values({ version: 1, schema: form as unknown as JsonObject, createdBy: admin.id, publishedAt: new Date() }).returning({ id: registrationFormVersions.id })
     await database.db.insert(registrationFormDrafts).values({ id: '00000000-0000-4000-8000-000000000010', schema: form, baseVersionId: version!.id })
-    await database.db.insert(applications).values({ id: '30000000-0000-4000-8000-000000000001', userId: student.id, formVersionId: version!.id, status: 'submitted', revision: 2, coreFields: { name: '=张三', phone: student.phoneNormalized, email: 'z@example.com', organization: '物理所', department: '研究生部', identityType: '研究生', educationStage: '博士', majorResearchDirection: '凝聚态' }, answers: { [questionId]: '内部答案' }, submittedAt: new Date('2026-08-15T00:00:00Z') })
+    await database.db.insert(applications).values({ id: '30000000-0000-4000-8000-000000000001', userId: student.id, formVersionId: version!.id, status: 'submitted', revision: 2, coreFields: { ...profile, phone: student.phoneNormalized }, answers: { [questionId]: '内部答案' }, submittedAt: new Date('2026-08-15T00:00:00Z') })
     await database.db.insert(applicationVersions).values({ applicationId: '30000000-0000-4000-8000-000000000001', snapshot: { profile: { name: '=张三', organization: '物理所' }, answers: { [questionId]: '内部答案' }, attachments: [] }, reason: 'initial_submission' })
     await database.db.insert(applicationStatusHistory).values({ applicationId: '30000000-0000-4000-8000-000000000001', fromStatus: 'draft', toStatus: 'submitted', changedBy: student.id })
   })
@@ -97,7 +103,7 @@ describe('review workflow PostgreSQL', () => {
     const service = createReviewService(createReviewRepository(database.db))
     const bulk = await service.bulkTransition(admin, { applicationIds: ['30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000099'], targetStatus: 'reviewing' })
     expect(bulk.data.results).toEqual([expect.objectContaining({ success: true }), expect.objectContaining({ success: false, code: 'APPLICATION_NOT_FOUND' })])
-    const exported = await service.exportCsv(admin, { status: 'reviewing', organization: '物理所' })
+    const exported = await service.exportCsv(admin, { status: 'reviewing', organization: '中国科学院物理研究所' })
     expect(exported.csv.startsWith('\uFEFF')).toBe(true); expect(exported.csv).toContain("'=张三"); expect(exported.csv).not.toContain(student.phoneNormalized); expect(exported.csv).not.toContain('内部答案'); expect(exported.csv).not.toContain('内部备注')
     const [row] = await database.db.select().from(applications).where(eq(applications.id, '30000000-0000-4000-8000-000000000001')); expect(row?.status).toBe('reviewing')
   })
@@ -109,8 +115,8 @@ describe('review workflow PostgreSQL', () => {
     const applicationsService = createApplicationService(createApplicationRepository(database.db))
     const mine = await applicationsService.getMine(student)
     expect(mine.data.supplementRequest).toMatchObject({ message: '请完善研究计划', editableFieldIds: [questionId] })
-    await expect(applicationsService.saveDraft(student, { expectedRevision: mine.data.application.revision, profile: { name: '篡改姓名', email: 'z@example.com', organization: '物理所', department: '研究生部', identityType: '研究生', educationStage: '博士', majorResearchDirection: '凝聚态' }, answers: { [questionId]: '补充后的研究计划' }, attachments: [] })).rejects.toMatchObject({ code: 'APPLICATION_VALIDATION_FAILED' })
-    const saved = await applicationsService.saveDraft(student, { expectedRevision: mine.data.application.revision, profile: { name: '=张三', email: 'z@example.com', organization: '物理所', department: '研究生部', identityType: '研究生', educationStage: '博士', majorResearchDirection: '凝聚态' }, answers: { [questionId]: '补充后的研究计划' }, attachments: [] })
+    await expect(applicationsService.saveDraft(student, { expectedRevision: mine.data.application.revision, profile: { ...profile, name: '篡改姓名' }, answers: { [questionId]: '补充后的研究计划' }, attachments: [] })).rejects.toMatchObject({ code: 'APPLICATION_VALIDATION_FAILED' })
+    const saved = await applicationsService.saveDraft(student, { expectedRevision: mine.data.application.revision, profile, answers: { [questionId]: '补充后的研究计划' }, attachments: [] })
     await expect(applicationsService.submit(student, { expectedRevision: saved.data.application.revision })).resolves.toMatchObject({ data: { status: 'reviewing' } })
     const versions = await database.db.select().from(applicationVersions).where(eq(applicationVersions.applicationId, '30000000-0000-4000-8000-000000000001'))
     expect(versions).toHaveLength(2); expect(versions[0]?.snapshot).toMatchObject({ answers: { [questionId]: '内部答案' } }); expect(versions[1]?.snapshot).toMatchObject({ answers: { [questionId]: '补充后的研究计划' } })

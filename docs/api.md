@@ -168,10 +168,13 @@ Cookie 和 session 实现必须满足以下安全底线：
 
 公共读取不返回任何学员私人值：`GET /api/v1/public/registration-form` 返回当前发布版本；尚未发布时返回 404 `REGISTRATION_FORM_NOT_FOUND`。`GET /api/v1/public/registration-forms/:id` 按 `formVersionId` 读取原始表单快照，供绑定应用或测试读取。
 
+`GET /api/v1/public/institutions` 返回版本化单位名录及来源说明：`universities` 为教育部全国普通高等学校名单，`ucasTrainingUnits` 为中国科学院大学院系及培养研究所名单。该接口只提供报名选择项，不包含学员信息。选择“中国科学院大学”时，正式提交的 `profile.department` 必须与 `ucasTrainingUnits` 中的名称一致，否则返回 422 `APPLICATION_VALIDATION_FAILED`，字段错误为 `profile.department`。
+
 ### 学员报名
 
 - `GET /api/v1/me/application`：读取或初始化当前登录学员唯一报名，返回固定资料、当前表单版本、草稿答案、有效附件、状态时间线和补充要求占位；禁用账号返回 403 `ACCOUNT_DISABLED`。
 - `PUT /api/v1/me/application/draft`：按 `expectedRevision` 保存资料、答案和附件引用。草稿可不完整，但类型、长度、选项和附件归属必须有效；冲突返回 409 `APPLICATION_REVISION_CONFLICT`。手机号由会话账号写入，不接收客户端覆盖。
+- `POST /api/v1/me/application/reopen`：在报名窗口内按 `expectedRevision` 将已提交报名恢复为可编辑草稿。原资料、答案和附件保持不变，状态历史追加“草稿”记录；再次正式提交时生成新的不可变报名版本，旧版本不被覆盖。
 - `POST /api/v1/me/application/submit`：按 `expectedRevision` 原子提交。报名窗口按 `Asia/Shanghai` 业务日期判断，开放日和截止日均包含全天。服务端在事务内复核报名窗口、账号状态、表单版本、全部必填项及附件状态，写不可变快照、状态历史和脱敏审计；提交后锁定，重复提交返回 409。
 
 草稿在管理员发布新版表单后按稳定字段 ID 迁移到新版本，已有答案不删除，停用或移除字段 ID 通过 `retiredAnswerIds` 明示。停用附件项会在同一事务中解除草稿关联，但不隐藏或删除用户文件；这些文件通过 `unlinkedAttachments` 返回，用户仍可下载或主动删除。已提交报名永久绑定提交时的表单和附件元数据快照。审计仅记录 revision、答案数、附件数和表单版本，不记录答案、手机号或文件名。

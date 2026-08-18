@@ -45,7 +45,7 @@ export const createContentService = (repository: PublicContentRepository) => ({
     const parsedSchedule = schedule ? parsePublishedContent('schedule', schedule.payload) as ScheduleContent : undefined
     const defaultNavigation = ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'] as const
     const fixedNavigation = defaultNavigation.filter((key) => parsedDisplay.visibleNavigation?.includes(key) ?? true)
-    const defaultOrder = ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'] as const
+    const defaultOrder = ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'guests', 'organizations', 'registrationCta', 'registrationCount'] as const
 
     return PublicSiteResponseSchema.parse({
       apiVersion: 'v1',
@@ -57,6 +57,7 @@ export const createContentService = (repository: PublicContentRepository) => ({
         display: parsedDisplay,
         features: features ? parsePublishedContent('features', features.payload) : { items: [] },
         organizations: organizations ? parsePublishedContent('organizations', organizations.payload) : { items: [] },
+        guests: parsedSchedule?.speakers?.flatMap((speaker) => speaker.profile ? [speaker.profile] : []) ?? [],
         homeSectionOrder: parsedDisplay.homeSectionOrder ?? defaultOrder,
         visibleNavigation: fixedNavigation,
         scheduleOverview: parsedSchedule?.days.slice(0, 5).map(({ date, label, theme }) => ({ date, label, theme })) ?? [],

@@ -3,10 +3,14 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
+  AdminCheckInConfirmRequestSchema,
+  AdminCheckInRevokeRequestSchema,
   AdminLoginRequestSchema,
   PasswordResetRequestSchema,
   SendVerificationCodeRequestSchema,
   StudentLoginRequestSchema,
+  StudentCheckInResponseSchema,
+  ApplicationReopenRequestSchema,
   StudentRegistrationRequestSchema,
   ApplicationStatusSchema,
   ContentModuleKeySchema,
@@ -41,7 +45,13 @@ const publicSiteResponse = {
     display: { series: '磐石科学智能实训营', footer: '磐石 AI4S 实训营' },
     features: { items: [] },
     organizations: { items: [] },
-    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
+    guests: [{
+      id: 'zeng-dajun', name: '曾大军', title: '研究员、博士生导师', affiliation: '中国科学院自动化研究所副所长',
+      bio: '研究方向包括情报与安全信息学、传染病信息学与应急管理、经济与社会计算。',
+      image: { src: '/images/guests/zeng-dajun.jpg', alt: '曾大军研究员' },
+      profileUrl: 'https://www.ia.cas.cn/rcdw/yjy/202404/t20240425_7131769.html',
+    }],
+    homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'guests', 'organizations', 'registrationCta', 'registrationCount'],
     visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
     scheduleOverview: [],
     registrationCta: { label: '在线注册', to: '/application' },
@@ -70,6 +80,37 @@ describe('contracts', () => {
 
   it.each(['pending', 'approved', 'cancelled'])('rejects unknown application status %s', (value) => {
     expect(ApplicationStatusSchema.safeParse(value).success).toBe(false)
+  })
+
+  it('models admission-gated student check-in data without leaking a QR payload early', () => {
+    expect(StudentCheckInResponseSchema.parse({
+      apiVersion: 'v1',
+      data: { availability: 'unavailable', reason: '录取后开放报到二维码' },
+    }).data.availability).toBe('unavailable')
+    expect(StudentCheckInResponseSchema.safeParse({
+      apiVersion: 'v1',
+      data: { availability: 'unavailable', reason: '尚未录取', qrPayload: 'must-not-exist' },
+    }).success).toBe(false)
+    expect(StudentCheckInResponseSchema.safeParse({
+      apiVersion: 'v1',
+      data: { availability: 'available', qrPayload: 'a'.repeat(32), displayCode: 'ABCD1234', checkedInAt: null },
+    }).success).toBe(true)
+    expect(StudentCheckInResponseSchema.safeParse({
+      apiVersion: 'v1',
+      data: { availability: 'checked_in', qrPayload: 'a'.repeat(32), displayCode: 'ABCD1234', checkedInAt: '2026-09-04T01:00:00.000Z' },
+    }).success).toBe(true)
+  })
+
+  it('accepts only revision-bound application reopen requests', () => {
+    expect(ApplicationReopenRequestSchema.parse({ expectedRevision: 2 })).toEqual({ expectedRevision: 2 })
+    expect(ApplicationReopenRequestSchema.safeParse({ expectedRevision: -1 }).success).toBe(false)
+  })
+
+  it('requires optimistic concurrency and a substantive revoke reason', () => {
+    expect(AdminCheckInConfirmRequestSchema.safeParse({ expectedRevision: 0 }).success).toBe(true)
+    expect(AdminCheckInConfirmRequestSchema.safeParse({}).success).toBe(false)
+    expect(AdminCheckInRevokeRequestSchema.safeParse({ expectedRevision: 2, reason: '重复录入，现场核实后撤销' }).success).toBe(true)
+    expect(AdminCheckInRevokeRequestSchema.safeParse({ expectedRevision: 2, reason: ' ' }).success).toBe(false)
   })
 
   it('requires stable machine-readable errors', () => {
@@ -132,6 +173,17 @@ describe('contracts', () => {
         ],
         consultationNote: '仅用于测试',
       }],
+    }).success).toBe(true)
+  })
+
+  it('accepts a verified guest profile attached to a schedule speaker', () => {
+    expect(PublicContentPayloadSchemas.schedule.safeParse({
+      speakers: [{
+        id: 'zeng-dajun',
+        name: '曾大军研究员',
+        profile: publicSiteResponse.data.guests[0],
+      }],
+      days: [],
     }).success).toBe(true)
   })
 

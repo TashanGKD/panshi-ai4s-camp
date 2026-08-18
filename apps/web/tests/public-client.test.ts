@@ -13,7 +13,7 @@ const siteResponse = {
     importantDates: { items: [] },
     contacts: { items: [] },
     display: { series: '磐石科学智能实训营', footer: '活动标题' },
-    features: { items: [] }, organizations: { items: [] }, scheduleOverview: [],
+    features: { items: [] }, organizations: { items: [] }, guests: [], scheduleOverview: [],
     homeSectionOrder: ['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'],
     visibleNavigation: ['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'],
     registrationCta: { label: '在线注册', to: '/application' },
@@ -28,7 +28,7 @@ const jsonResponse = (body: unknown) => ({
 
 type PublicClientModule = {
   createPublicClient: (value?: string) => { getPublicSite: () => Promise<unknown> }
-  resolveApiBaseUrl: (value?: string) => { prefix: string, credentials: RequestCredentials }
+  resolveApiBaseUrl: (value?: string, runtime?: { production: boolean, pageOrigin?: string }) => { prefix: string, credentials: RequestCredentials }
 }
 
 const loadClientModule = async () => import('../src/api/public-client') as unknown as PublicClientModule
@@ -72,6 +72,32 @@ describe('public API base URL', () => {
     expect(() => resolveApiBaseUrl('http://localhost:3001', { production: true })).toThrow(/VITE_API_BASE_URL/u)
     expect(resolveApiBaseUrl('http://127.0.0.1:3001', { production: false }).prefix).toBe('http://127.0.0.1:3001')
     expect(() => resolveApiBaseUrl('http://192.168.1.20:3001', { production: false })).toThrow(/VITE_API_BASE_URL/u)
+  })
+
+  it('aligns loopback API host with the current loopback page host so session cookies remain same-site', async () => {
+    const { resolveApiBaseUrl } = await loadClientModule()
+
+    expect(resolveApiBaseUrl('http://localhost:3001', {
+      production: false,
+      pageOrigin: 'http://127.0.0.1:5173',
+    })).toEqual({ prefix: 'http://127.0.0.1:3001', credentials: 'include' })
+    expect(resolveApiBaseUrl('http://127.0.0.1:3001', {
+      production: false,
+      pageOrigin: 'http://localhost:5173',
+    })).toEqual({ prefix: 'http://localhost:3001', credentials: 'include' })
+  })
+
+  it('does not rewrite non-loopback or production API hosts', async () => {
+    const { resolveApiBaseUrl } = await loadClientModule()
+
+    expect(resolveApiBaseUrl('https://api.example.test', {
+      production: false,
+      pageOrigin: 'http://127.0.0.1:5173',
+    }).prefix).toBe('https://api.example.test')
+    expect(resolveApiBaseUrl('https://localhost:3001', {
+      production: true,
+      pageOrigin: 'https://127.0.0.1:5173',
+    }).prefix).toBe('https://localhost:3001')
   })
 
   it.each([

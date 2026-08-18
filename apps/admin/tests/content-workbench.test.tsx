@@ -11,14 +11,14 @@ import { ContentPage } from '../src/pages/content/ContentPage'
 afterEach(cleanup)
 
 const drafts = {
-  basic: { title: '旧标题', dates: { start: '2026-08-23', end: '2026-08-27', label: '8月23日至27日' }, venue: '物理所', intro: ['<p>旧简介</p>'] },
+  basic: { title: '旧标题', dates: { start: '2026-08-23', end: '2026-08-27', label: '8月23日至27日' }, venue: '物理所', intro: ['<p>旧简介</p>'], eventDetails: ['<p>旧举办信息</p>'], registrationAndAccommodation: ['<p>不收取注册费，食宿自理。</p>'], signature: { organization: '会务组', date: '2026年8月18日' } },
   features: { items: [{ title: '系统课程', description: '<p>课程说明</p>' }, { title: '真实问题', description: '<p>问题说明</p>' }] },
   organizations: { items: [{ role: '主办单位', name: '中国科学院物理研究所' }] },
   importantDates: { items: [{ label: '报名截止', value: '2026-08-15', machineKey: 'registrationDeadline' }] },
-  schedule: { speakers: [{ id: 'speaker-1', name: '张老师' }], days: [{ date: '2026-08-23', label: '第一天', theme: '科研智能体', sessions: [] }] },
+  schedule: { speakers: [{ id: 'speaker-1', name: '张老师', profile: { id: 'speaker-1', name: '张老师', title: '研究员', affiliation: '测试单位', bio: '测试简介。' } }], days: [{ date: '2026-08-23', label: '第一天', theme: '科研智能体', sessions: [] }] },
   contacts: { items: [{ name: '会务组', responsibility: '报名咨询', methods: [{ type: 'email', value: 'camp@example.com' }] }] },
   travel: { sections: [{ title: '交通路线', body: '<p>乘坐地铁抵达。</p>' }] },
-  display: { series: '磐石科学智能实训营', footer: '实训营', showRegistrationCount: false, visibleNavigation: ['home', 'schedule'] },
+  display: { series: '磐石科学智能实训营', footer: '实训营', showRegistrationCount: false, visibleNavigation: ['home', 'schedule'], relatedLinks: [{ label: '磐石官网', href: 'https://www.scienceone.ai/' }] },
 } as const
 
 const summary = {
@@ -53,6 +53,7 @@ const client = (overrides: Partial<AdminClient> = {}): AdminClient => ({
   createResource: async () => { throw new Error('unused') }, updateResource: async () => { throw new Error('unused') }, publishResource: async () => { throw new Error('unused') },
   listAdministrators: async () => ({ data: { administrators: [] } }), createAdministrator: async () => { throw new Error('unused') }, disableAdministrator: async () => { throw new Error('unused') }, resetAdministratorPassword: async () => { throw new Error('unused') }, listAuditLogs: async () => ({ data: { items: [], total: 0, page: 1, pageSize: 20 } }), getAuditLog: async () => { throw new Error('unused') },
   updateSelf: async () => { throw new Error('unused') }, changeOwnPassword: async () => { throw new Error('unused') }, listStudents: async () => ({ data: { students: [] } }), setStudentStatus: async () => { throw new Error('unused') }, forceStudentPasswordReset: async () => { throw new Error('unused') },
+  lookupCheckIn: async () => { throw new Error('unused') }, confirmCheckIn: async () => { throw new Error('unused') }, revokeCheckIn: async () => { throw new Error('unused') },
   ...overrides,
 })
 
@@ -79,7 +80,7 @@ describe('content workbench', () => {
   it('provides the complete business navigation and the resource publishing workbench', async () => {
     renderAdmin()
     expect(await screen.findByRole('heading', { name: '工作台' })).toBeVisible()
-    for (const name of ['基本信息', '实训特色', '组织单位', '重要日期', '实训日程与师资', '住宿交通', '联系方式', '相关资料', '展示设置', '表单配置']) {
+    for (const name of ['基本信息', '实训特色', '组织单位', '重要日期', '实训日程与师资', '交通住宿', '联系方式', '相关资料', '展示设置', '表单配置']) {
       expect(screen.getByRole('link', { name })).toBeVisible()
     }
     fireEvent.click(screen.getByRole('link', { name: '表单配置' }))
@@ -106,6 +107,16 @@ describe('content workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('basic', expect.objectContaining({ title: '新标题' }), 1))
     expect(screen.queryByLabelText(/内容 JSON/u)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('注册与食宿说明 1')).toHaveTextContent('不收取注册费，食宿自理。')
+    expect(screen.getByLabelText('落款单位')).toHaveValue('会务组')
+    expect(screen.getByLabelText('落款日期')).toHaveValue('2026年8月18日')
+  })
+
+  it('edits the homepage event details as an ordered paragraph collection', async () => {
+    renderAdmin(client(), '/content/basic')
+
+    expect(await screen.findByRole('textbox', { name: '举办信息 1' })).toHaveTextContent('旧举办信息')
+    expect(screen.getByRole('button', { name: '添加举办信息' })).toBeVisible()
   })
 
   it('blocks preview and publish while dirty, then publishes the saved revision', async () => {
@@ -435,6 +446,17 @@ describe('content workbench', () => {
     }), 7))
   })
 
+  it('edits the invited-guest profile attached to a schedule speaker', async () => {
+    const { api, saveDraft } = clientWithDraft('schedule', drafts.schedule)
+    renderAdmin(api, '/content/schedule')
+    const bio = await screen.findByLabelText('讲师 1 的嘉宾简介')
+    fireEvent.change(bio, { target: { value: '更新后的嘉宾简介。' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(saveDraft).toHaveBeenCalledWith('schedule', expect.objectContaining({
+      speakers: [expect.objectContaining({ profile: expect.objectContaining({ bio: '更新后的嘉宾简介。' }) })],
+    }), 7))
+  })
+
   it('preserves schedule day, session and detail DOM identity through nested sorting', async () => {
     const { api } = clientWithDraft('schedule', {
       speakers: [],
@@ -466,7 +488,7 @@ describe('content workbench', () => {
     renderAdmin(api, '/content/display')
     await screen.findByText('首页模块顺序')
     fireEvent.click(screen.getByRole('button', { name: '上移“面向对象”' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除“实训特色”' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除“实训营特色”' }))
     fireEvent.change(screen.getByLabelText('待添加首页模块'), { target: { value: 'organizations' } })
     fireEvent.click(screen.getByRole('button', { name: '添加首页模块' }))
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))

@@ -25,6 +25,9 @@ export const createApplicationRouter = (sessions: SessionService, service: Appli
   router.put('/draft', async (request, response: Response<unknown, AuthenticatedLocals>, next) => {
     try { response.json(await service.saveDraft(response.locals.authenticatedUser, request.body)) } catch (error) { next(toHttpError(error)) }
   })
+  router.post('/reopen', async (request, response: Response<unknown, AuthenticatedLocals>, next) => {
+    try { response.json(await service.reopen(response.locals.authenticatedUser, request.body)) } catch (error) { next(toHttpError(error)) }
+  })
   router.post('/submit', async (request, response: Response<unknown, AuthenticatedLocals>, next) => {
     try { response.status(201).json(await service.submit(response.locals.authenticatedUser, request.body)) } catch (error) { next(toHttpError(error)) }
   })

@@ -54,25 +54,30 @@ const schemaIssues = (key: ContentModuleKey, payload: JsonObject): FieldIssue[] 
 }
 
 type ImportantDateItem = { value: string, machineKey?: 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd' }
-type ImportantDatesPayload = { items: ImportantDateItem[] }
+type MachineDateKey = 'registrationOpen' | 'registrationDeadline' | 'campStart' | 'campEnd'
+type ImportantDatesPayload = { items: ImportantDateItem[], machineDates?: Record<MachineDateKey, string> }
 
 const validateImportantDates = (
   payload: ImportantDatesPayload,
   basic: JsonObject | null,
 ): FieldIssue[] => {
   const issues: FieldIssue[] = []
-  const indexed = new Map<string, { item: ImportantDateItem, index: number }>()
+  const indexed = new Map<string, { value: string, path: string }>()
 
-  payload.items.forEach((item, index) => {
+  if (payload.machineDates) {
+    for (const key of ['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'] as const) {
+      const value = payload.machineDates[key]
+      indexed.set(key, { value, path: `machineDates.${key}` })
+      if (!isRealDate(value)) issues.push({ path: `machineDates.${key}`, code: 'INVALID_MACHINE_DATE', message: '机器日期必须使用有效的 YYYY-MM-DD' })
+    }
+  } else payload.items.forEach((item, index) => {
     if (!item.machineKey) return
     if (indexed.has(item.machineKey)) {
       issues.push({ path: `items.${index}.machineKey`, code: 'DUPLICATE_MACHINE_KEY', message: '机器日期键不能重复' })
       return
     }
-    indexed.set(item.machineKey, { item, index })
-    if (!isRealDate(item.value)) {
-      issues.push({ path: `items.${index}.value`, code: 'INVALID_MACHINE_DATE', message: '机器日期必须使用有效的 YYYY-MM-DD' })
-    }
+    indexed.set(item.machineKey, { value: item.value, path: `items.${index}.value` })
+    if (!isRealDate(item.value)) issues.push({ path: `items.${index}.value`, code: 'INVALID_MACHINE_DATE', message: '机器日期必须使用有效的 YYYY-MM-DD' })
   })
 
   for (const machineKey of ['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd'] as const) {
@@ -85,11 +90,11 @@ const validateImportantDates = (
   const registrationDeadline = indexed.get('registrationDeadline')
   if (
     registrationOpen && registrationDeadline
-    && isRealDate(registrationOpen.item.value) && isRealDate(registrationDeadline.item.value)
-    && registrationOpen.item.value >= registrationDeadline.item.value
+    && isRealDate(registrationOpen.value) && isRealDate(registrationDeadline.value)
+    && registrationOpen.value >= registrationDeadline.value
   ) {
     issues.push({
-      path: `items.${registrationDeadline.index}.value`,
+      path: registrationDeadline.path,
       code: 'INVALID_REGISTRATION_WINDOW',
       message: '报名截止时间必须晚于报名开放时间',
     })
@@ -99,11 +104,11 @@ const validateImportantDates = (
   const campEnd = indexed.get('campEnd')
   if (
     campStart && campEnd
-    && isRealDate(campStart.item.value) && isRealDate(campEnd.item.value)
-    && campStart.item.value > campEnd.item.value
+    && isRealDate(campStart.value) && isRealDate(campEnd.value)
+    && campStart.value > campEnd.value
   ) {
     issues.push({
-      path: `items.${campEnd.index}.value`,
+      path: campEnd.path,
       code: 'INVALID_CAMP_WINDOW',
       message: '实训结束日期不能早于开始日期',
     })
@@ -115,8 +120,8 @@ const validateImportantDates = (
   for (const [machineKey, basicKey] of [['campStart', 'start'], ['campEnd', 'end']] as const) {
     const date = indexed.get(machineKey)
     const expected = basicDates?.[basicKey]
-    if (date && isRealDate(date.item.value) && typeof expected === 'string' && date.item.value !== expected) {
-      issues.push({ path: `items.${date.index}.value`, code: 'CAMP_DATE_MISMATCH', message: '实训日期必须与基本信息一致' })
+    if (date && isRealDate(date.value) && typeof expected === 'string' && date.value !== expected) {
+      issues.push({ path: date.path, code: 'CAMP_DATE_MISMATCH', message: '实训日期必须与基本信息一致' })
     }
   }
   return issues

@@ -21,6 +21,11 @@ export function BasicForm({ value, errors, onChange }: FormProps) {
   const dates = object(data.dates)
   const intro = array(data.intro)
   const introEditors = useEditorKeys(intro.length)
+  const eventDetails = array(data.eventDetails)
+  const eventDetailEditors = useEditorKeys(eventDetails.length)
+  const registrationAndAccommodation = array(data.registrationAndAccommodation)
+  const registrationEditors = useEditorKeys(registrationAndAccommodation.length)
+  const signature = object(data.signature)
   const set = (key: string, next: JsonValue) => onChange({ ...data, [key]: next })
   const setDate = (key: string, next: string) => set('dates', { ...dates, [key]: next })
   return <div className="structured-form">
@@ -39,6 +44,20 @@ export function BasicForm({ value, errors, onChange }: FormProps) {
       <CollectionActions label={`简介段落 ${index + 1}`} index={index} length={intro.length} onMove={(direction) => { introEditors.move(index, direction); set('intro', moveItem(intro, index, direction)) }} onDelete={() => { introEditors.remove(index); set('intro', intro.filter((_, itemIndex) => itemIndex !== index)) }} />
     </fieldset>)}
     <button type="button" className="button-secondary" onClick={() => { introEditors.append(); set('intro', [...intro, '<p></p>']) }}>添加简介段落</button>
+    {eventDetails.map((item, index) => <fieldset key={eventDetailEditors.keys[index]}><legend>举办信息 {index + 1}</legend>
+      <RichTextField label={`举办信息 ${index + 1}`} path={`eventDetails.${index}`} value={text(item)} errors={errors} onChange={(next) => set('eventDetails', eventDetails.map((entry, itemIndex) => itemIndex === index ? next : entry))} />
+      <CollectionActions label={`举办信息 ${index + 1}`} index={index} length={eventDetails.length} onMove={(direction) => { eventDetailEditors.move(index, direction); set('eventDetails', moveItem(eventDetails, index, direction)) }} onDelete={() => { eventDetailEditors.remove(index); set('eventDetails', eventDetails.filter((_, itemIndex) => itemIndex !== index)) }} />
+    </fieldset>)}
+    <button type="button" className="button-secondary" onClick={() => { eventDetailEditors.append(); set('eventDetails', [...eventDetails, '<p></p>']) }}>添加举办信息</button>
+    {registrationAndAccommodation.map((item, index) => <fieldset key={registrationEditors.keys[index]}><legend>注册与食宿说明 {index + 1}</legend>
+      <RichTextField label={`注册与食宿说明 ${index + 1}`} path={`registrationAndAccommodation.${index}`} value={text(item)} errors={errors} onChange={(next) => set('registrationAndAccommodation', registrationAndAccommodation.map((entry, itemIndex) => itemIndex === index ? next : entry))} />
+      <CollectionActions label={`注册与食宿说明 ${index + 1}`} index={index} length={registrationAndAccommodation.length} onMove={(direction) => { registrationEditors.move(index, direction); set('registrationAndAccommodation', moveItem(registrationAndAccommodation, index, direction)) }} onDelete={() => { registrationEditors.remove(index); set('registrationAndAccommodation', registrationAndAccommodation.filter((_, itemIndex) => itemIndex !== index)) }} />
+    </fieldset>)}
+    <button type="button" className="button-secondary" onClick={() => { registrationEditors.append(); set('registrationAndAccommodation', [...registrationAndAccommodation, '<p></p>']) }}>添加注册与食宿说明</button>
+    <fieldset><legend>首页落款</legend><div className="form-grid">
+      <TextField label="落款单位" path="signature.organization" value={text(signature.organization)} errors={errors} onChange={(next) => set('signature', { ...signature, organization: next })} />
+      <TextField label="落款日期" path="signature.date" value={text(signature.date)} errors={errors} onChange={(next) => set('signature', { ...signature, date: next })} />
+    </div></fieldset>
   </div>
 }
 
@@ -78,9 +97,15 @@ const dateKeyLabels = { registrationOpen: '报名开放', registrationDeadline: 
 export function ImportantDatesForm({ value, errors, onChange }: FormProps) {
   const data = object(value)
   const items = array(data.items)
+  const machineDates = object(data.machineDates)
   const editors = useEditorKeys(items.length)
   const update = (next: JsonValue[]) => onChange({ ...data, items: next })
-  return <div className="structured-form collection-list">{items.map((raw, index) => {
+  const updateMachineDate = (key: string, next: string) => onChange({ ...data, machineDates: { ...machineDates, [key]: next } })
+  return <div className="structured-form collection-list">
+    <fieldset><legend>系统日期</legend><p className="field-help">用于控制报名开放、报名截止和实训日期，页面仍按下方展示文字呈现。</p><div className="form-grid">
+      {Object.entries(dateKeyLabels).map(([key, label]) => <TextField key={key} label={label} path={`machineDates.${key}`} type="date" value={text(machineDates[key])} errors={errors} onChange={(next) => updateMachineDate(key, next)} />)}
+    </div></fieldset>
+    {items.map((raw, index) => {
     const item = object(raw)
     const label = text(item.label)
     const machinePath = `items.${index}.machineKey`
@@ -111,6 +136,18 @@ export function TravelForm({ value, errors, onChange }: FormProps) {
     return <fieldset key={editors.keys[index]}><legend>交通住宿内容 {index + 1}</legend>
       <TextField label="小节标题" path={`sections.${index}.title`} value={label} errors={errors} onChange={(next) => update(sections.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), title: next } : entry))} />
       <RichTextField label={`${label || '小节'}内容`} path={`sections.${index}.body`} value={text(section.body)} errors={errors} onChange={(next) => update(sections.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), body: next } : entry))} />
+      <div className="form-grid">
+        <TextField label="配图路径（可选）" path={`sections.${index}.image.src`} value={text(object(section.image).src)} errors={errors} onChange={(next) => update(sections.map((entry, itemIndex) => {
+          if (itemIndex !== index) return entry
+          const current = object(entry)
+          if (next) return { ...current, image: { ...object(current.image), src: next } }
+          const withoutImage = { ...current }
+          delete withoutImage.image
+          return withoutImage
+        }))} />
+        <TextField label="配图说明（可选）" path={`sections.${index}.image.alt`} value={text(object(section.image).alt)} errors={errors} onChange={(next) => update(sections.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), image: { ...object(object(entry).image), alt: next } } : entry))} />
+        <TextField label="图片题注（可选）" path={`sections.${index}.image.caption`} value={text(object(section.image).caption)} errors={errors} onChange={(next) => update(sections.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), image: { ...object(object(entry).image), caption: next } } : entry))} />
+      </div>
       <CollectionActions label={label} index={index} length={sections.length} onMove={(direction) => { editors.move(index, direction); update(moveItem(sections, index, direction)) }} onDelete={() => { editors.remove(index); update(sections.filter((_, itemIndex) => itemIndex !== index)) }} />
     </fieldset>
   })}<button type="button" className="button-secondary" onClick={() => { editors.append(); update([...sections, { title: '', body: '' }]) }}>添加交通住宿小节</button></div>
@@ -179,18 +216,28 @@ export function ContactsForm({ value, errors, onChange }: FormProps) {
   />)}<FieldError path="items" errors={errors} /><button type="button" className="button-secondary" onClick={() => { editors.append(); update([...items, { name: '', responsibility: '', methods: [{ type: 'email', value: '' }] }]) }}>添加联系人</button></div>
 }
 
-const homeSectionLabels: Record<string, string> = { intro: '实训营简介', target: '面向对象', scale: '实训规模与形式', features: '实训特色', scheduleOverview: '五日实训概览', organizations: '组织单位', registrationCta: '报名入口', registrationCount: '报名人数' }
+const homeSectionLabels: Record<string, string> = { intro: '实训营简介', target: '面向对象', scale: '实训规模与形式', features: '实训营特色', eventDetails: '举办时间、地点与规模', scheduleOverview: '日程安排', guests: '特邀嘉宾', organizations: '组织单位', registrationAndAccommodation: '注册与食宿', registrationCta: '报名入口', registrationCount: '报名人数' }
 
 export function DisplayForm({ value, errors, onChange }: FormProps) {
   const data = object(value)
   const visible = array(data.visibleNavigation).map(String)
   const order = array(data.homeSectionOrder).map(String)
+  const relatedLinks = array(data.relatedLinks)
+  const relatedLinkEditors = useEditorKeys(relatedLinks.length)
   const [sectionToAdd, setSectionToAdd] = useState('')
   const set = (key: string, next: JsonValue) => onChange({ ...data, [key]: next })
   return <div className="structured-form">
     <TextField label="系列名称" path="series" value={text(data.series)} errors={errors} onChange={(next) => set('series', next)} />
     <TextField label="页脚文字" path="footer" value={text(data.footer)} errors={errors} onChange={(next) => set('footer', next)} />
     <TextField label="报名按钮文字" path="registrationCta.label" value={text(object(data.registrationCta).label)} errors={errors} onChange={(next) => set('registrationCta', { label: next, to: '/application' })} />
+    <fieldset><legend>侧栏相关链接</legend>{relatedLinks.map((rawItem, index) => {
+      const item = object(rawItem)
+      const label = text(item.label)
+      return <fieldset key={relatedLinkEditors.keys[index]}><legend>相关链接 {index + 1}</legend><div className="form-grid">
+        <TextField label={`相关链接 ${index + 1} 名称`} path={`relatedLinks.${index}.label`} value={label} errors={errors} onChange={(next) => set('relatedLinks', relatedLinks.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), label: next } : entry))} />
+        <TextField label={`相关链接 ${index + 1} 地址`} path={`relatedLinks.${index}.href`} value={text(item.href)} errors={errors} onChange={(next) => set('relatedLinks', relatedLinks.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), href: next } : entry))} />
+      </div><CollectionActions label={label || `相关链接 ${index + 1}`} index={index} length={relatedLinks.length} onMove={(direction) => { relatedLinkEditors.move(index, direction); set('relatedLinks', moveItem(relatedLinks, index, direction)) }} onDelete={() => { relatedLinkEditors.remove(index); set('relatedLinks', relatedLinks.filter((_, itemIndex) => itemIndex !== index)) }} /></fieldset>
+    })}<button type="button" className="button-secondary" onClick={() => { relatedLinkEditors.append(); set('relatedLinks', [...relatedLinks, { label: '', href: 'https://' }]) }}>添加相关链接</button></fieldset>
     <label className="check-field"><input type="checkbox" checked={data.showRegistrationCount === true} onChange={(event) => set('showRegistrationCount', event.target.checked)} />公开显示已提交报名人数</label>
     <fieldset><legend>公开导航</legend>{['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'].map((key) => <label className="check-field" key={key}><input type="checkbox" checked={visible.includes(key)} onChange={(event) => set('visibleNavigation', event.target.checked ? [...visible, key] : visible.filter((item) => item !== key))} />{key}</label>)}</fieldset>
     <fieldset><legend>首页模块顺序</legend>{order.map((sectionId, index) => <div key={sectionId} className="ordered-setting"><strong>{homeSectionLabels[sectionId] ?? sectionId}</strong><CollectionActions label={homeSectionLabels[sectionId] ?? sectionId} index={index} length={order.length} onMove={(direction) => set('homeSectionOrder', moveItem(order, index, direction))} onDelete={() => set('homeSectionOrder', order.filter((_, itemIndex) => itemIndex !== index))} /></div>)}
@@ -283,13 +330,27 @@ export function ScheduleForm({ value, errors, onChange }: FormProps) {
   const dayEditors = useEditorKeys(days.length)
   const set = (key: string, next: JsonValue) => onChange({ ...data, [key]: next })
   return <div className="structured-form">
+    <TextField label="日程说明" path="introduction" value={text(data.introduction)} errors={errors} onChange={(next) => set('introduction', next)} />
     <h3>讲师库</h3>{speakers.map((raw, index) => {
       const speaker = object(raw)
+      const profile = object(speaker.profile)
       const label = text(speaker.name)
+      const updateSpeaker = (next: JsonObject) => set('speakers', speakers.map((entry, itemIndex) => itemIndex === index ? next : entry))
+      const updateProfile = (key: string, next: JsonValue) => updateSpeaker({ ...speaker, profile: { ...profile, [key]: next } })
       return <fieldset key={speakerEditors.keys[index]}><legend>讲师 {index + 1}</legend><div className="form-grid">
-        <TextField label="讲师 ID" path={`speakers.${index}.id`} value={text(speaker.id)} errors={errors} onChange={(next) => set('speakers', speakers.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), id: next } : entry))} />
-        <TextField label="讲师姓名" path={`speakers.${index}.name`} value={label} errors={errors} onChange={(next) => set('speakers', speakers.map((entry, itemIndex) => itemIndex === index ? { ...object(entry), name: next } : entry))} />
-      </div><CollectionActions label={label} index={index} length={speakers.length} onMove={(direction) => { speakerEditors.move(index, direction); set('speakers', moveItem(speakers, index, direction)) }} onDelete={() => { speakerEditors.remove(index); set('speakers', speakers.filter((_, itemIndex) => itemIndex !== index)) }} /></fieldset>
+        <TextField label="讲师 ID" path={`speakers.${index}.id`} value={text(speaker.id)} errors={errors} onChange={(next) => updateSpeaker({ ...speaker, id: next })} />
+        <TextField label="讲师姓名" path={`speakers.${index}.name`} value={label} errors={errors} onChange={(next) => updateSpeaker({ ...speaker, name: next })} />
+      </div><fieldset className="nested-fieldset"><legend>首页特邀嘉宾资料（填写后展示）</legend><div className="form-grid">
+        <TextField label={`讲师 ${index + 1} 的嘉宾 ID`} path={`speakers.${index}.profile.id`} value={text(profile.id)} errors={errors} onChange={(next) => updateProfile('id', next)} />
+        <TextField label={`讲师 ${index + 1} 的嘉宾姓名`} path={`speakers.${index}.profile.name`} value={text(profile.name)} errors={errors} onChange={(next) => updateProfile('name', next)} />
+        <TextField label={`讲师 ${index + 1} 的职称`} path={`speakers.${index}.profile.title`} value={text(profile.title)} errors={errors} onChange={(next) => updateProfile('title', next)} />
+        <TextField label={`讲师 ${index + 1} 的单位及职务`} path={`speakers.${index}.profile.affiliation`} value={text(profile.affiliation)} errors={errors} onChange={(next) => updateProfile('affiliation', next)} />
+        <TextField label={`讲师 ${index + 1} 的嘉宾简介`} path={`speakers.${index}.profile.bio`} value={text(profile.bio)} errors={errors} onChange={(next) => updateProfile('bio', next)} />
+        <TextField label={`讲师 ${index + 1} 的头像路径`} path={`speakers.${index}.profile.image.src`} value={text(object(profile.image).src)} errors={errors} onChange={(next) => updateProfile('image', { ...object(profile.image), src: next })} />
+        <TextField label={`讲师 ${index + 1} 的头像说明`} path={`speakers.${index}.profile.image.alt`} value={text(object(profile.image).alt)} errors={errors} onChange={(next) => updateProfile('image', { ...object(profile.image), alt: next })} />
+        <TextField label={`讲师 ${index + 1} 的公开简介链接`} path={`speakers.${index}.profile.profileUrl`} value={text(profile.profileUrl)} errors={errors} onChange={(next) => updateProfile('profileUrl', next)} />
+      </div>{Object.keys(profile).length > 0 ? <button type="button" className="button-secondary" onClick={() => { const next = { ...speaker }; delete next.profile; updateSpeaker(next) }}>不在首页展示此讲师</button> : null}</fieldset>
+      <CollectionActions label={label} index={index} length={speakers.length} onMove={(direction) => { speakerEditors.move(index, direction); set('speakers', moveItem(speakers, index, direction)) }} onDelete={() => { speakerEditors.remove(index); set('speakers', speakers.filter((_, itemIndex) => itemIndex !== index)) }} /></fieldset>
     })}<button type="button" className="button-secondary" onClick={() => { speakerEditors.append(); set('speakers', [...speakers, { id: '', name: '' }]) }}>添加讲师</button>
     <h3>日程</h3>{days.map((raw, dayIndex) => <ScheduleDayEditor
       key={dayEditors.keys[dayIndex]}

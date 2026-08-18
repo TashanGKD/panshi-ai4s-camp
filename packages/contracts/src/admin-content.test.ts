@@ -79,6 +79,10 @@ describe('administrator content contracts', () => {
       items: [{ label: '实训时间', value: '2026-08-23 至 2026-08-27' }],
     })).toBeTruthy()
     expect(PublicContentPayloadSchemas.importantDates.parse({
+      items: [{ label: '报名时间', value: '2026年8月18日—9月1日' }],
+      machineDates: { registrationOpen: '2026-08-18', registrationDeadline: '2026-09-01', campStart: '2026-09-04', campEnd: '2026-09-08' },
+    })).toBeTruthy()
+    expect(PublicContentPayloadSchemas.importantDates.parse({
       items: [
         { label: '报名开放', value: '2026-08-01', machineKey: 'registrationOpen' },
         { label: '报名截止', value: '2026-08-20', machineKey: 'registrationDeadline' },

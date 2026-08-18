@@ -54,7 +54,7 @@ export const createReviewRepository = (db: NodePgDatabase<typeof schema>, option
     if (input.targetStatus === 'needs_supplement') {
       const [version] = await transaction.select({ form: registrationFormVersions.schema }).from(registrationFormVersions).where(eq(registrationFormVersions.id, locked.formVersionId)).limit(1)
       const form = RegistrationFormSchema.parse(version?.form)
-      const allowedFields = new Set<string>(['name', 'email', 'organization', 'department', 'identityType', 'educationStage', 'majorResearchDirection', ...form.questions.filter((item) => item.active).map((item) => item.id)])
+      const allowedFields = new Set<string>(['name', 'email', 'organization', 'department', 'identityType', 'major', 'researchInterest', 'researchDirection', 'postdocStation', 'disciplineField', 'supervisor', 'jobPosition', 'professionalTitleLevel', 'specificTitle', 'identityDescription', ...form.questions.filter((item) => item.active).map((item) => item.id)])
       const allowedAttachments = new Set(form.attachments.filter((item) => item.active).map((item) => item.id))
       if (input.editableFieldIds.some((id) => !allowedFields.has(id)) || input.editableAttachmentIds.some((id) => !allowedAttachments.has(id))) throw new ReviewError(422, 'INVALID_SUPPLEMENT_WHITELIST', '补充材料白名单包含无效字段')
     }

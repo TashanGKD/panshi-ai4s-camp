@@ -66,6 +66,12 @@ export const BasicContentSchema = z.object({
   venue: NonEmptyTextSchema,
   tagline: NonEmptyTextSchema.optional(),
   intro: z.array(NonEmptyTextSchema),
+  eventDetails: z.array(NonEmptyTextSchema).optional(),
+  registrationAndAccommodation: z.array(NonEmptyTextSchema).optional(),
+  signature: z.object({
+    organization: NonEmptyTextSchema,
+    date: NonEmptyTextSchema,
+  }).strict().optional(),
   target: NonEmptyTextSchema.optional(),
   scale: NonEmptyTextSchema.optional(),
 }).strict()
@@ -90,12 +96,33 @@ export const ImportantDatesContentSchema = z.object({
     value: NonEmptyTextSchema,
     machineKey: z.enum(['registrationOpen', 'registrationDeadline', 'campStart', 'campEnd']).optional(),
   }).strict()),
+  machineDates: z.object({
+    registrationOpen: IsoDateSchema,
+    registrationDeadline: IsoDateSchema,
+    campStart: IsoDateSchema,
+    campEnd: IsoDateSchema,
+  }).strict().optional(),
+}).strict()
+
+export const GuestProfileSchema = z.object({
+  id: NonEmptyTextSchema,
+  name: NonEmptyTextSchema,
+  title: NonEmptyTextSchema,
+  affiliation: NonEmptyTextSchema,
+  bio: NonEmptyTextSchema,
+  image: z.object({
+    src: z.string().regex(/^\/images\/[a-zA-Z0-9._/-]+$/u),
+    alt: NonEmptyTextSchema,
+  }).strict().optional(),
+  profileUrl: z.string().trim().url().startsWith('https://').optional(),
 }).strict()
 
 export const ScheduleContentSchema = z.object({
+  introduction: NonEmptyTextSchema.optional(),
   speakers: z.array(z.object({
     id: NonEmptyTextSchema,
     name: NonEmptyTextSchema,
+    profile: GuestProfileSchema.optional(),
   }).strict()).optional(),
   days: z.array(z.object({
     date: IsoDateSchema,
@@ -146,12 +173,21 @@ export const TravelContentSchema = z.object({
   sections: z.array(z.object({
     title: NonEmptyTextSchema,
     body: NonEmptyTextSchema,
+    image: z.object({
+      src: z.string().regex(/^\/images\/[a-zA-Z0-9._/-]+$/u),
+      alt: NonEmptyTextSchema,
+      caption: NonEmptyTextSchema.optional(),
+    }).strict().optional(),
   }).strict()),
 }).strict()
 
-export const HomeSectionIdSchema = z.enum(['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount'])
+export const HomeSectionIdSchema = z.enum(['intro', 'target', 'scale', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation', 'registrationCta', 'registrationCount'])
 export const PublicNavigationKeySchema = z.enum(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account'])
 export const RegistrationCtaSchema = z.object({ label: NonEmptyTextSchema, to: z.literal('/application') }).strict()
+export const RelatedLinkSchema = z.object({
+  label: NonEmptyTextSchema,
+  href: z.string().trim().url().startsWith('https://'),
+}).strict()
 
 export const DisplayContentSchema = z.object({
   series: NonEmptyTextSchema,
@@ -163,6 +199,7 @@ export const DisplayContentSchema = z.object({
     'home section IDs must not repeat',
   ).optional(),
   registrationCta: RegistrationCtaSchema.optional(),
+  relatedLinks: z.array(RelatedLinkSchema).optional(),
 }).strict()
 
 export const PublicContentPayloadSchemas = {
@@ -206,7 +243,8 @@ export const PublicSiteResponseSchema = z.object({
     display: DisplayContentSchema,
     features: FeaturesContentSchema.default({ items: [] }),
     organizations: OrganizationsContentSchema.default({ items: [] }),
-    homeSectionOrder: z.array(HomeSectionIdSchema).default(['intro', 'target', 'scale', 'features', 'scheduleOverview', 'organizations', 'registrationCta', 'registrationCount']),
+    guests: z.array(GuestProfileSchema).default([]),
+    homeSectionOrder: z.array(HomeSectionIdSchema).default(['intro', 'features', 'eventDetails', 'scheduleOverview', 'guests', 'organizations', 'registrationAndAccommodation', 'registrationCta', 'registrationCount']),
     visibleNavigation: z.array(PublicNavigationKeySchema).default(['home', 'schedule', 'register', 'travel', 'contacts', 'resources', 'account']),
     scheduleOverview: z.array(z.object({ date: IsoDateSchema, label: NonEmptyTextSchema, theme: NonEmptyTextSchema }).strict()).max(5).default([]),
     registrationCta: RegistrationCtaSchema.default({ label: '在线注册', to: '/application' }),
@@ -235,6 +273,7 @@ export type BasicContent = z.infer<typeof BasicContentSchema>
 export type FeaturesContent = z.infer<typeof FeaturesContentSchema>
 export type OrganizationsContent = z.infer<typeof OrganizationsContentSchema>
 export type ImportantDatesContent = z.infer<typeof ImportantDatesContentSchema>
+export type GuestProfile = z.infer<typeof GuestProfileSchema>
 export type ScheduleContent = z.infer<typeof ScheduleContentSchema>
 export type ContactsContent = z.infer<typeof ContactsContentSchema>
 export type TravelContent = z.infer<typeof TravelContentSchema>

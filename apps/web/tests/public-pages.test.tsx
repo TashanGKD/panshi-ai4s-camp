@@ -13,7 +13,7 @@ const siteResponse = {
       venue: '中国科学院物理研究所',
       intro: ['接口活动简介'],
       target: '青年科研人员与学生',
-      eventDetails: ['举办时间：2026年9月4日至9月8日。', '举办地点：主会场设在中国科学院物理研究所，分会场设在中国科学院大学雁栖湖校区，用于研讨和交流。'],
+      eventDetails: ['举办时间：2026年9月4日至9月8日。', '举办地点：主会场设在中国科学院物理研究所，本方案所列课程、研讨与交流等日程均在主会场开展；中国科学院大学雁栖湖校区另设分会场，另行开展研讨与交流活动。'],
       registrationAndAccommodation: ['本次实训营不收取注册费，食宿自理。'],
       signature: { organization: '磐石·科学智能实训营会务组', date: '2026年8月18日' },
     },
@@ -126,7 +126,7 @@ describe('API-driven public pages', () => {
     expect(screen.getByText('曾大军')).toBeVisible()
     expect(screen.getByRole('main')).toHaveTextContent('中国科学院自动化研究所副所长')
     expect(screen.getByRole('main')).toHaveTextContent('举办时间：2026年9月4日至9月8日。')
-    expect(screen.getByRole('main')).toHaveTextContent('举办地点：主会场设在中国科学院物理研究所，分会场设在中国科学院大学雁栖湖校区，用于研讨和交流。')
+    expect(screen.getByRole('main')).toHaveTextContent('举办地点：主会场设在中国科学院物理研究所，本方案所列课程、研讨与交流等日程均在主会场开展；中国科学院大学雁栖湖校区另设分会场，另行开展研讨与交流活动。')
     expect(screen.getByRole('main')).toHaveTextContent('本次实训营不收取注册费，食宿自理。')
     const signature = screen.getByText('磐石·科学智能实训营会务组').closest('.event-signature')
     expect(signature).toHaveTextContent('2026年8月18日')

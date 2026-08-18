@@ -13,7 +13,7 @@ CLI 与公开网站、学员个人中心使用同一套 `/api/v1` 服务和权�
 npm install
 npm run build -w @panshi/contracts
 npm run build -w @panshi/camp-client
-npm run build -w @panshi/cli
+npm run build -w panshi-camp-cli
 node apps/cli/dist/main.js --help
 ```
 

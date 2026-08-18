@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -19,20 +19,34 @@ const run = (command, args, options = {}) => execFileAsync(command, args, {
 })
 
 const createTrackedSourceSnapshot = async (temporaryRoot) => {
-  const indexPath = join(temporaryRoot, 'git-index')
   const archivePath = join(temporaryRoot, 'source.tar')
   const extractionRoot = join(temporaryRoot, 'source')
-  const gitEnvironment = { ...process.env, GIT_INDEX_FILE: indexPath }
 
-  await run('git', ['read-tree', 'HEAD'], { env: gitEnvironment })
-  await run('git', ['add', '--all'], { env: gitEnvironment })
-  const { stdout: treeOutput } = await run('git', ['write-tree'], { env: gitEnvironment })
-  await run('git', ['archive', '--format=tar', '--output', archivePath, treeOutput.trim()])
+  await run('git', ['archive', '--format=tar', '--output', archivePath, 'HEAD'])
   await mkdir(extractionRoot)
   await run('tar', ['-xf', archivePath, '-C', extractionRoot])
 
   return extractionRoot
 }
+
+test('fresh-source snapshot ignores uncommitted working-tree files', async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-head-snapshot-'))
+  const sentinelName = `.cli-package-uncommitted-${process.pid}`
+  const sentinelPath = join(repoRoot, sentinelName)
+  try {
+    await writeFile(sentinelPath, 'must not enter the HEAD snapshot\n')
+    const sourceRoot = await createTrackedSourceSnapshot(temporaryRoot)
+
+    await assert.rejects(
+      readFile(join(sourceRoot, sentinelName)),
+      { code: 'ENOENT' },
+      'fresh-source snapshot must contain committed HEAD only',
+    )
+  } finally {
+    await rm(sentinelPath, { force: true })
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+})
 
 test('tracked source can npm ci and pack the CLI without ignored dist files', async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-fresh-source-'))

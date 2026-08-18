@@ -1,148 +1,55 @@
-import {
-  PublicContentModuleResponseSchema,
-  PublicScheduleResponseSchema,
-  PublicSiteResponseSchema,
-  AdminContentPreviewResponseSchema,
-  TravelContentSchema,
-  type PublicScheduleResponse,
-  type PublicSiteResponse,
-  type TravelContent,
-  type AdminContentPreviewResponse,
-  type ContentModuleKey,
-  ResourceListResponseSchema,
-  ApplicationCountResponseSchema,
-  type ResourceListResponse,
-  type ApplicationCountResponse,
-} from '@panshi/contracts'
+import { AdminContentPreviewResponseSchema, ApiErrorSchema, type AdminContentPreviewResponse, type ContentModuleKey } from '@panshi/contracts'
+import { CampClientError } from '@panshi/camp-client'
+import { createBrowserCampClient, resolveApiBaseUrl, type PublicClientRuntime, type ResolvedApiBaseUrl } from './browser-client'
+
+export { resolveApiBaseUrl }
+export type { PublicClientRuntime, ResolvedApiBaseUrl }
 
 export class PublicContentNotFoundError extends Error {
-  constructor() {
-    super('Published content was not found')
-    this.name = 'PublicContentNotFoundError'
-  }
+  constructor() { super('Published content was not found'); this.name = 'PublicContentNotFoundError' }
 }
-
 export class PreviewAccessError extends Error {
-  constructor(readonly status: 401 | 403) {
-    super('Draft preview access denied')
-    this.name = 'PreviewAccessError'
-  }
+  constructor(readonly status: 401 | 403) { super('Draft preview access denied'); this.name = 'PreviewAccessError' }
 }
 
-export type ResolvedApiBaseUrl = {
-  credentials: RequestCredentials
-  prefix: string
+const mapPublicError = (error: unknown): never => {
+  if (error instanceof CampClientError && (error.status === 404 || error.code === 'CONTENT_NOT_FOUND')) throw new PublicContentNotFoundError()
+  throw error
 }
-
-export type PublicClientRuntime = { production: boolean, pageOrigin?: string }
-const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
-
-const invalidApiBaseUrl = () => new Error(
-  'Invalid VITE_API_BASE_URL: expected an absolute HTTP(S) URL without credentials, query, or fragment',
-)
-
-export const resolveApiBaseUrl = (value?: string, runtime: PublicClientRuntime = { production: false }): ResolvedApiBaseUrl => {
-  const candidate = value?.trim() ?? ''
-  if (candidate === '') return { prefix: '', credentials: 'same-origin' }
-
-  let url: URL
-  try {
-    url = new URL(candidate)
-  } catch {
-    throw invalidApiBaseUrl()
-  }
-
-  if (
-    !['http:', 'https:'].includes(url.protocol)
-    || url.username !== ''
-    || url.password !== ''
-    || url.search !== ''
-    || url.hash !== ''
-    || (url.protocol === 'http:' && (runtime.production || !loopbackHosts.has(url.hostname)))
-  ) {
-    throw invalidApiBaseUrl()
-  }
-
-  if (!runtime.production && runtime.pageOrigin) {
-    try {
-      const pageUrl = new URL(runtime.pageOrigin)
-      if (loopbackHosts.has(url.hostname) && loopbackHosts.has(pageUrl.hostname)) {
-        url.hostname = pageUrl.hostname
-      }
-    } catch {
-      // The browser supplies pageOrigin; an invalid test/runtime value should not alter API validation.
-    }
-  }
-
-  const normalizedPath = url.pathname.replace(/\/+$/u, '')
-  return {
-    prefix: `${url.origin}${normalizedPath}`,
-    credentials: 'include',
-  }
+const filenameFrom = (headers: Headers) => {
+  const disposition = headers.get('Content-Disposition') ?? ''
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/iu)?.[1]
+  return encoded ? decodeURIComponent(encoded) : '资料文件'
 }
 
 export const createPublicClient = (apiBaseUrl?: string, runtime: PublicClientRuntime = { production: false }) => {
-  const { credentials, prefix } = resolveApiBaseUrl(apiBaseUrl, runtime)
-
-  const getJson = async (path: string): Promise<unknown> => {
-    const response = await fetch(`${prefix}${path}`, {
-      credentials,
-      headers: { Accept: 'application/json' },
-    })
-    if (response.status === 404) throw new PublicContentNotFoundError()
-    if (!response.ok) throw new Error('Public content request failed')
-    return response.json()
-  }
-
+  const { client, resolved } = createBrowserCampClient(apiBaseUrl, runtime)
   const getDraftPreview = async (key: ContentModuleKey): Promise<AdminContentPreviewResponse> => {
-    const response = await fetch(`${prefix}/api/v1/admin/content/${key}/preview`, {
-      credentials,
-      headers: { Accept: 'application/json' },
-    })
+    const response = await fetch(`${resolved.prefix}/api/v1/admin/content/${key}/preview`, { credentials: resolved.credentials, headers: { Accept: 'application/json' } })
     if (response.status === 401 || response.status === 403) throw new PreviewAccessError(response.status)
-    if (!response.ok) throw new Error('Draft preview request failed')
+    if (!response.ok) {
+      const parsed = ApiErrorSchema.safeParse(await response.json().catch(() => undefined))
+      throw new Error(parsed.success ? parsed.data.error.message : 'Draft preview request failed')
+    }
     return AdminContentPreviewResponseSchema.parse(await response.json())
   }
-
-  const getPublicSite = async (): Promise<PublicSiteResponse> => (
-    PublicSiteResponseSchema.parse(await getJson('/api/v1/public/site'))
-  )
-
-  const getPublicSchedule = async (): Promise<PublicScheduleResponse> => (
-    PublicScheduleResponseSchema.parse(await getJson('/api/v1/public/schedule'))
-  )
-
-  const getPublicTravel = async (): Promise<TravelContent> => {
-    const response = PublicContentModuleResponseSchema.parse(
-      await getJson('/api/v1/public/content/travel'),
-    )
-    if (response.data.key !== 'travel') throw new Error('Unexpected public content module')
-    return TravelContentSchema.parse(response.data.payload)
+  return {
+    getPublicSite: () => client.public.getSite().catch(mapPublicError),
+    getPublicSchedule: () => client.public.getSchedule().catch(mapPublicError),
+    getPublicTravel: () => client.public.getTravel().catch(mapPublicError),
+    getResources: () => client.public.listResources(),
+    getApplicationCount: async (signal?: AbortSignal) => (await client.public.getApplicationCount(signal)).data,
+    getDraftPreview,
+    downloadResource: async (downloadUrl: string) => {
+      const match = downloadUrl.match(/^\/api\/v1\/resources\/([0-9a-f-]+)\/download$/u)
+      if (!match) throw new Error('Invalid resource download URL')
+      const result = await client.public.downloadResource(match[1]!)
+      return { blob: await new Response(result.stream, { headers: result.headers }).blob(), filename: filenameFrom(result.headers) }
+    },
   }
-
-  const getResources = async (): Promise<ResourceListResponse> => ResourceListResponseSchema.parse(await getJson('/api/v1/resources'))
-  const getApplicationCount = async (signal?: AbortSignal): Promise<ApplicationCountResponse['data']> => {
-    const response = await fetch(`${prefix}/api/v1/public/statistics/applications`, { credentials, headers: { Accept: 'application/json' }, signal })
-    if (!response.ok) throw new Error('Application count request failed')
-    return ApplicationCountResponseSchema.parse(await response.json()).data
-  }
-  const downloadResource = async (downloadUrl: string): Promise<{ blob: Blob, filename: string }> => {
-    if (!/^\/api\/v1\/resources\/[0-9a-f-]+\/download$/u.test(downloadUrl)) throw new Error('Invalid resource download URL')
-    const response = await fetch(`${prefix}${downloadUrl}`, { credentials, headers: { Accept: 'application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg' } })
-    if (!response.ok) throw new Error(response.status === 404 ? 'RESOURCE_NOT_AVAILABLE' : 'RESOURCE_DOWNLOAD_FAILED')
-    const disposition = response.headers.get('Content-Disposition') ?? ''
-    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/iu)?.[1]
-    return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : '资料文件' }
-  }
-
-  return { downloadResource, getApplicationCount, getDraftPreview, getPublicSchedule, getPublicSite, getPublicTravel, getResources }
 }
 
-const publicClient = createPublicClient(import.meta.env.VITE_API_BASE_URL, {
-  production: import.meta.env.PROD,
-  pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
-})
-
+const publicClient = createPublicClient(import.meta.env.VITE_API_BASE_URL, { production: import.meta.env.PROD, pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin })
 export const getPublicSite = publicClient.getPublicSite
 export const getPublicSchedule = publicClient.getPublicSchedule
 export const getPublicTravel = publicClient.getPublicTravel

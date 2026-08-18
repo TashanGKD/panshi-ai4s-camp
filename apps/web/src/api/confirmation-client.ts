@@ -4,7 +4,7 @@ import {
   type JsonObject,
   type LearnerCapabilityId,
 } from '@panshi/contracts'
-import { resolveApiBaseUrl, type PublicClientRuntime } from './public-client'
+import { resolveApiBaseUrl, type PublicClientRuntime } from './browser-client'
 
 export class ConfirmationApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly details?: unknown) {

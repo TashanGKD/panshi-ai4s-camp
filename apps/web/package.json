@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
+    "@panshi/camp-client": "0.0.0",
     "@panshi/contracts": "0.0.0",
     "@panshi/ui": "0.0.0",
     "qrcode.react": "^4.2.0",

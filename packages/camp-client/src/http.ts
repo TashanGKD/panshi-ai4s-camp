@@ -11,6 +11,7 @@ export type TransportOptions = {
   fetch?: typeof globalThis.fetch
   credentialProvider?: CredentialProvider
   credentials?: RequestCredentials
+  onCapability?: (capabilityId: LearnerCapabilityId, path: string) => void
 }
 
 export type JsonRequestOptions<T> = {
@@ -56,16 +57,18 @@ export const resolveCliBaseUrl = (value?: string): string => {
   return `${url.origin}${path}`
 }
 
+const responseHeader = (response: Response, name: string) => response.headers?.get(name) ?? undefined
+
 const parseError = async (response: Response) => {
-  const parsed = ApiErrorSchema.safeParse(await response.clone().json().catch(() => undefined))
-  const requestId = parsed.success ? parsed.data.error.requestId : response.headers.get('X-Request-Id') ?? undefined
+  const parsed = ApiErrorSchema.safeParse(await response.json().catch(() => undefined))
+  const requestId = parsed.success ? parsed.data.error.requestId : responseHeader(response, 'X-Request-Id')
   return new CampClientError(
     parsed.success ? parsed.data.error.code : 'REQUEST_FAILED',
     parsed.success ? parsed.data.error.message : `Request failed with status ${response.status}`,
     response.status,
     requestId,
     parsed.success ? parsed.data.error.details : undefined,
-    response.headers.get('Retry-After') ?? undefined,
+    responseHeader(response, 'Retry-After'),
   )
 }
 
@@ -75,11 +78,11 @@ export const createTransport = (options: TransportOptions) => {
   const request = async (capabilityId: LearnerCapabilityId | null, path: string, init: RequestInit = {}) => {
     let token: string | null = null
     try {
-      token = await options.credentialProvider?.getToken() ?? null
+      token = options.credentialProvider ? await options.credentialProvider.getToken() : null
       if (token !== null && !TOKEN_PATTERN.test(token)) throw new CampClientError('UNAUTHORIZED', 'Stored credential is invalid', 401)
       const headers = new Headers(init.headers)
       if (!headers.has('Accept')) headers.set('Accept', 'application/json')
-      if (capabilityId) headers.set('X-Capability-Id', capabilityId)
+      if (capabilityId) options.onCapability?.(capabilityId, path)
       if (token) headers.set('Authorization', `Bearer ${token}`)
       return await fetchImpl(`${baseUrl}${path}`, {
         ...init,
@@ -101,7 +104,7 @@ export const createTransport = (options: TransportOptions) => {
     if (!response.ok) throw await parseError(response)
     const value = response.status === 204 ? {} : await response.json()
     const parsed = options.schema.safeParse(value)
-    if (!parsed.success) throw new CampClientError('INVALID_RESPONSE', 'Server response did not match its contract', response.status, response.headers.get('X-Request-Id') ?? undefined)
+    if (!parsed.success) throw new CampClientError('INVALID_RESPONSE', 'Server response did not match its contract', response.status, responseHeader(response, 'X-Request-Id'))
     return parsed.data
   }
 
@@ -112,7 +115,7 @@ export const createTransport = (options: TransportOptions) => {
     if (!response.ok) throw await parseError(response)
     const value = response.status === 204 ? {} : await response.json()
     const parsed = options.schema.safeParse(value)
-    if (!parsed.success) throw new CampClientError('INVALID_RESPONSE', 'Server response did not match its contract', response.status, response.headers.get('X-Request-Id') ?? undefined)
+    if (!parsed.success) throw new CampClientError('INVALID_RESPONSE', 'Server response did not match its contract', response.status, responseHeader(response, 'X-Request-Id'))
     return parsed.data
   }
 
@@ -123,7 +126,7 @@ export const createTransport = (options: TransportOptions) => {
   ): Promise<DownloadResult> => {
     const response = await request(capabilityId, path, { method: 'GET', signal: options.signal, headers: { Accept: 'application/octet-stream' } })
     if (!response.ok) throw await parseError(response)
-    if (!response.body) throw new CampClientError('INVALID_RESPONSE', 'Download response had no body', response.status, response.headers.get('X-Request-Id') ?? undefined)
+    if (!response.body) throw new CampClientError('INVALID_RESPONSE', 'Download response had no body', response.status, responseHeader(response, 'X-Request-Id'))
     options.onHeaders?.(response.headers, response.status)
     return { stream: response.body, headers: response.headers, status: response.status }
   }

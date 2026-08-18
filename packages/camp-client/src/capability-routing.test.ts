@@ -23,12 +23,14 @@ describe('business method capability routing', () => {
     ['file.hide', '/api/v1/files/file-id/hide', (client: ReturnType<typeof createCampClient>) => client.files.hide('file-id', confirmation)],
     ['file.delete', '/api/v1/files/file-id', (client: ReturnType<typeof createCampClient>) => client.files.delete('file-id', confirmation)],
   ])('declares %s for %s', async (capabilityId, path, invoke) => {
+    const observed: Array<[string, string]> = []
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe(`http://127.0.0.1:3001${path}`)
-      expect(new Headers(init?.headers).get('X-Capability-Id')).toBe(capabilityId)
+      expect(new Headers(init?.headers).has('X-Capability-Id')).toBe(false)
       return new Response(JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE', message: 'fixture stop', requestId: 'fixture' } }), { status: 503, headers: { 'Content-Type': 'application/json' } })
     })
-    await expect(invoke(createCampClient({ fetch: fetchMock as typeof fetch }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    await expect(invoke(createCampClient({ fetch: fetchMock as typeof fetch, onCapability: (id, requestedPath) => observed.push([id, requestedPath]) }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' })
+    expect(observed).toEqual([[capabilityId, path]])
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 })

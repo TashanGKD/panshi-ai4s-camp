@@ -11,12 +11,14 @@ export type CampClientOptions = {
   fetch?: typeof globalThis.fetch
   credentialProvider?: CredentialProvider
   credentials?: RequestCredentials
+  onCapability?: (capabilityId: import('@panshi/contracts').LearnerCapabilityId, path: string) => void
 }
 
 export const createCampClient = (options: CampClientOptions = {}) => {
   const transport = createTransport({
     baseUrl: resolveCliBaseUrl(options.baseUrl), fetch: options.fetch,
     credentialProvider: options.credentialProvider, credentials: options.credentials,
+    onCapability: options.onCapability,
   })
   return {
     public: createPublicApi(transport), auth: createAuthApi(transport),

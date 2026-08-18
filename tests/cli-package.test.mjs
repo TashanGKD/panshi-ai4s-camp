@@ -12,11 +12,40 @@ const cliRoot = join(repoRoot, 'apps/cli')
 const cliPackage = JSON.parse(await readFile(join(cliRoot, 'package.json'), 'utf8'))
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
-const run = (command, args, options = {}) => execFileAsync(command, args, {
+const resolveCommandInvocation = (command, args, { platform = process.platform, env = process.env } = {}) => (
+  platform === 'win32' && command.toLowerCase().endsWith('.cmd')
+    ? {
+        command: env.ComSpec || env.COMSPEC || 'cmd.exe',
+        args: ['/d', '/s', '/c', command, ...args],
+      }
+    : { command, args }
+)
+
+const run = (command, args, options = {}) => {
+  const invocation = resolveCommandInvocation(command, args, { env: options.env ?? process.env })
+  return execFileAsync(invocation.command, invocation.args, {
   cwd: repoRoot,
   encoding: 'utf8',
   maxBuffer: 20 * 1024 * 1024,
   ...options,
+})
+}
+
+test('Windows command shims run through ComSpec under Node 24', () => {
+  assert.deepEqual(
+    resolveCommandInvocation('npm.cmd', ['ci'], {
+      platform: 'win32',
+      env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+    }),
+    {
+      command: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/s', '/c', 'npm.cmd', 'ci'],
+    },
+  )
+  assert.deepEqual(
+    resolveCommandInvocation('panshi-camp', ['--version'], { platform: 'linux', env: {} }),
+    { command: 'panshi-camp', args: ['--version'] },
+  )
 })
 
 const createTrackedSourceSnapshot = async (temporaryRoot) => {

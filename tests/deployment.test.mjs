@@ -154,6 +154,34 @@ const adminDockerfile = await readProjectFile('apps/admin/Dockerfile')
 const apiDockerfile = await readProjectFile('apps/api/Dockerfile')
 const operationsDockerfile = await readProjectFile('deploy/Dockerfile.operations')
 const operationsCommon = await readProjectFile('deploy/operations-common.sh')
+const webPackageJson = JSON.parse(await readProjectFile('apps/web/package.json'))
+const adminPackageJson = JSON.parse(await readProjectFile('apps/admin/package.json'))
+const frontendWorkspaceViolations = (dockerfile, manifest) => Object.keys(manifest.dependencies ?? {})
+  .filter((name) => name.startsWith('@panshi/'))
+  .flatMap((name) => {
+    const directory = name.slice('@panshi/'.length)
+    const violations = []
+    if (!dockerfile.includes(`COPY packages/${directory} ./packages/${directory}`)) {
+      violations.push(`${manifest.name} dependency ${name} is not copied into the image dependency stage`)
+    }
+    if (!dockerfile.includes(`--workspace ${name}`)) {
+      violations.push(`${manifest.name} dependency ${name} is not installed in the image dependency stage`)
+    }
+    return violations
+  })
+const frontendViolations = [
+  ...frontendWorkspaceViolations(webDockerfile, webPackageJson),
+  ...frontendWorkspaceViolations(webDockerfile, adminPackageJson),
+]
+assert.deepEqual(frontendViolations, [], `frontend workspace dependency drift:\n${frontendViolations.join('\n')}`)
+const frontendGateCanary = frontendWorkspaceViolations(
+  webDockerfile.replace('COPY packages/contracts ./packages/contracts', ''),
+  webPackageJson,
+)
+assert.ok(
+  frontendGateCanary.some((violation) => violation.includes('@panshi/contracts') && violation.includes('not copied')),
+  'frontend workspace dependency gate must reject a missing package copy',
+)
 for (const [path, dockerfile] of Object.entries({
   'apps/web/Dockerfile': webDockerfile,
   'apps/admin/Dockerfile': adminDockerfile,

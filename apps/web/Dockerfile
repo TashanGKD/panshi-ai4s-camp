@@ -5,9 +5,11 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY apps/admin/package.json ./apps/admin/package.json
+COPY packages/camp-client ./packages/camp-client
 COPY packages/contracts ./packages/contracts
 COPY packages/ui ./packages/ui
-RUN npm ci --include-workspace-root --workspace @panshi/web --workspace @panshi/admin --workspace @panshi/contracts --workspace @panshi/ui
+RUN npm ci --include-workspace-root --workspace @panshi/web --workspace @panshi/admin --workspace @panshi/camp-client --workspace @panshi/contracts --workspace @panshi/ui
+RUN npm run build -w @panshi/camp-client
 
 FROM frontend-deps AS web-build
 COPY apps/web ./apps/web

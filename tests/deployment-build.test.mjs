@@ -50,7 +50,7 @@ const simulations = [
   {
     name: 'web image',
     dockerfile: 'apps/web/Dockerfile',
-    dependencyPaths: ['package.json', 'package-lock.json', 'tsconfig.base.json', 'apps/web/package.json', 'apps/admin/package.json', 'packages/contracts', 'packages/ui'],
+    dependencyPaths: ['package.json', 'package-lock.json', 'tsconfig.base.json', 'apps/web/package.json', 'apps/admin/package.json', 'packages/camp-client', 'packages/contracts', 'packages/ui'],
     buildPaths: ['apps/web', 'apps/admin'],
     expectedOutputs: ['apps/web/dist/index.html', 'apps/admin/dist/index.html'],
   },

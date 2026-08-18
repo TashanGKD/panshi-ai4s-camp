@@ -42,7 +42,8 @@ test('CLI command reference matches the capability registry', async () => {
 
 test('CLI documentation gate catches a missing registered capability', async () => {
   const document = await readFile(new URL('../docs/cli.md', import.meta.url), 'utf8')
-  const damaged = document.replace(/^\| `check_in\.qr\.export` .*\n/mu, '')
+  const windowsDocument = document.replace(/\r?\n/gu, '\r\n')
+  const damaged = windowsDocument.replace(/^\| `check_in\.qr\.export` .*\r?\n/mu, '')
   assert.throws(() => verifyReference(damaged), /capability order drifted/u)
 })
 
@@ -65,7 +66,7 @@ test('active docs and executable scripts do not use the retired CLI workspace na
 })
 
 test('CLI workspace commands match the package name in docs and root scripts', async () => {
-  const cliDocument = await readFile(new URL('../docs/cli.md', import.meta.url), 'utf8')
+  const cliDocument = (await readFile(new URL('../docs/cli.md', import.meta.url), 'utf8')).replace(/\r\n/gu, '\n')
   const expectedSelector = `-w ${cliPackage.name}`
 
   assert.ok(cliDocument.includes(`npm run build ${expectedSelector}\n`), 'docs/cli.md CLI workspace selector drifted from package name')

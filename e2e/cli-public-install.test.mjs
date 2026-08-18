@@ -120,6 +120,7 @@ const dependenciesFor = (sandbox, state, bytes = archive) => ({
   homeDirectory: sandbox.homeDirectory,
   workspaceRoot: sandbox.workspaceRoot,
   localAppData: sandbox.localAppData,
+  xdgConfigHome: process.platform === 'win32' ? undefined : join(sandbox.homeDirectory, '.config'),
   fetch: localFetch(state, bytes),
   execFile: installLocalArchive,
   stdout: (text) => state.stdout.push(text),

@@ -19,7 +19,7 @@
 
 ## CLI / Agent Skill 公开安装
 
-所需 CLI 版本：`0.1.0`。前置环境为 Node.js 24 与 npm 11。直接从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
+所需 CLI 版本：`0.1.1`。前置环境为 Node.js 24 与 npm 11。直接从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
 
 ```bash
 npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes

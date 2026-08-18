@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
@@ -110,6 +111,7 @@ const install = async (t, overrides = {}) => {
   const dependencies = {
     platform: 'linux',
     ...sandbox,
+    xdgConfigHome: join(sandbox.homeDirectory, '.config'),
     fetch: async () => {
       fetchCalls += 1
       return response()
@@ -903,10 +905,10 @@ test('the executable has no URL or SHA environment/argument override hooks', asy
 
 test('direct execution with the embedded release manifest only previews by default', async () => {
   const script = new URL('./install-cli.mjs', import.meta.url)
-  const result = await execFileAsync(process.execPath, [script.pathname], { encoding: 'utf8' })
+  const result = await execFileAsync(process.execPath, [fileURLToPath(script)], { encoding: 'utf8' })
   assert.equal(result.stderr, '')
   assert.match(result.stdout, /"action": "preview-only"/u)
-  assert.match(result.stdout, /"requiredVersion": "0\.1\.0"/u)
+  assert.match(result.stdout, /"requiredVersion": "0\.1\.1"/u)
 })
 
 test('Skill documents preview-first bootstrap and only uses an absolute stable CLI placeholder', async () => {

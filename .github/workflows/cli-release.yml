@@ -22,8 +22,15 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: node --test skills/panshi-camp/scripts/install-cli.test.mjs
+      - name: Test installer on Unix
+        if: runner.os != 'Windows'
+        run: node --test skills/panshi-camp/scripts/install-cli.test.mjs
+      - name: Test Windows installer boundaries
+        if: runner.os == 'Windows'
+        run: node --test --test-name-pattern "Windows layout|Windows path safety|Windows real-junction|embedded entry fails safely|executable has no URL|direct execution|Skill documents" skills/panshi-camp/scripts/install-cli.test.mjs
+      - run: node --test e2e/cli-public-install.test.mjs
       - run: npm run build -w @panshi/contracts
+      - run: npm run build -w @panshi/camp-client
       - run: node --test tests/cli-docs.test.mjs tests/cli-package.test.mjs tests/cli-release.test.mjs
       - run: npm test -w panshi-camp-cli
       - run: npm run typecheck

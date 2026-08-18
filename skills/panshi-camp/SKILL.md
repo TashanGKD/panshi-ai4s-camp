@@ -9,7 +9,7 @@ description: 通过 panshi-camp CLI 查询实训营公开信息、管理个人�
 
 ## 准备
 
-所需 CLI 版本：`0.1.0`。公开安装 Skill 使用 `npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes`。需要 Node.js 24 与 npm 11；无需克隆源码、无需 sudo。Skill 安装完成不代表已同意安装 CLI。
+所需 CLI 版本：`0.1.1`。公开安装 Skill 使用 `npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes`。需要 Node.js 24 与 npm 11；无需克隆源码、无需 sudo。Skill 安装完成不代表已同意安装 CLI。
 
 1. 先把 `<PANSHI_CAMP_CLI>` 解析成当前平台稳定入口的绝对路径：Unix 为当前用户主目录下 `.local/bin/panshi-camp`，Windows 为 `LOCALAPPDATA` 绝对目录下 `panshi-camp-cli\\bin\\panshi-camp.cmd`。后续始终直接调用该绝对路径，不依赖 `PATH`。
 2. 每次自举都按 [安装与安全自举](references/installation.md) 的固定顺序操作：先无参数运行安装器取得 `requiredVersion`；再检查稳定入口，存在时运行其 `--version` 比较。入口存在且版本一致就直接继续；只有入口不存在或版本不一致，才向用户完整展示本次预览并询问是否安装。用户明确同意后才运行 `node "<PANSHI_CAMP_SKILL_DIR>/scripts/install-cli.mjs" --yes`。不得代替用户确认，也不得添加其他参数。

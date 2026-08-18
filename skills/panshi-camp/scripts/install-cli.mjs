@@ -395,7 +395,10 @@ const markerFor = (manifest, inventory, packageTreeSha256) => ({
   packageTreeSha256,
 })
 
-const verifyInstalledPackage = async (installationRoot, manifest, pathApi = path, currentUid) => {
+export const requiresExecutableMode = (platform) => platform !== 'win32'
+
+const verifyInstalledPackage = async (installationRoot, manifest, layout, currentUid) => {
+  const { pathApi } = layout
   const packageRoot = pathApi.join(installationRoot, 'node_modules', manifest.packageName)
   const packagePath = pathApi.join(packageRoot, 'package.json')
   const metadata = await lstat(packagePath).catch(() => null)
@@ -412,7 +415,7 @@ const verifyInstalledPackage = async (installationRoot, manifest, pathApi = path
   const binMetadata = await lstat(binPath).catch(() => null)
   if (!binMetadata?.isFile() || binMetadata.isSymbolicLink()) return fail('INSTALLER_PACKAGE_INVALID', 'bin 文件缺失或不安全')
   if (currentUid !== undefined && binMetadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', 'bin 文件必须由当前 uid 所有')
-  if (pathApi === path && (binMetadata.mode & 0o111) === 0) return fail('INSTALLER_PACKAGE_INVALID', 'bin 文件不可执行')
+  if (requiresExecutableMode(layout.platform) && (binMetadata.mode & 0o111) === 0) return fail('INSTALLER_PACKAGE_INVALID', 'bin 文件不可执行')
   return binPath
 }
 
@@ -439,7 +442,7 @@ const inspectExistingVersion = async ({ versionRoot, manifest, layout, currentUi
   let packageTreeSha256
   try { packageTreeSha256 = await verifyTrustedPackageTree(versionRoot, manifest, layout.pathApi, currentUid) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本 CLI package tree 与可信 manifest 冲突') }
   if (JSON.stringify(marker) !== JSON.stringify(markerFor(manifest, inventory, packageTreeSha256))) return fail('INSTALLER_VERSION_CONFLICT', '同版本安装树清单或摘要冲突')
-  try { await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本入口或 package metadata 冲突') }
+  try { await verifyInstalledPackage(versionRoot, manifest, layout, currentUid) } catch { return fail('INSTALLER_VERSION_CONFLICT', '同版本入口或 package metadata 冲突') }
   return true
 }
 
@@ -593,7 +596,7 @@ const verifyFinalState = async ({ versionRoot, manifest, config, layout, homeDir
   if (!versionMetadata?.isDirectory() || versionMetadata.isSymbolicLink()) return fail('INSTALLER_PATH_UNSAFE', '最终版本目录不安全')
   if (currentUid !== undefined && versionMetadata.uid !== currentUid) return fail('INSTALLER_PATH_NOT_OWNED', '最终版本目录必须由当前 uid 所有')
   await inspectExistingVersion({ versionRoot, manifest, layout, currentUid })
-  const binPath = await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid)
+  const binPath = await verifyInstalledPackage(versionRoot, manifest, layout, currentUid)
   if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) return fail('INSTALLER_STABLE_ENTRY_INVALID', '稳定入口最终版本无效')
   if (layout.platform === 'win32') {
     const targetMetadata = await lstat(binPath).catch(() => null)
@@ -794,7 +797,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
         cwd: stagingRoot,
         windowsHide: true,
       })
-      await verifyInstalledPackage(stagingRoot, manifest, layout.pathApi, currentUid)
+      await verifyInstalledPackage(stagingRoot, manifest, layout, currentUid)
       const packageTreeSha256 = await verifyTrustedPackageTree(stagingRoot, manifest, layout.pathApi, currentUid)
       await rm(archivePath, { force: true })
       const inventory = await inventoryTree(stagingRoot, { pathApi: layout.pathApi, currentUid })
@@ -813,7 +816,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
     if (await parseManagedStableEntry(layout, currentUid) !== manifest.version) {
       entryTransaction = await switchStableEntry({ layout, manifest, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename })
     }
-    await verifyInstalledPackage(versionRoot, manifest, layout.pathApi, currentUid)
+    await verifyInstalledPackage(versionRoot, manifest, layout, currentUid)
     configTransaction = await writeConfigAtomically({ config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, failpoint, checkAfterSwap, backupCleanup, beforeQuarantineRename, directoryState: configDirectoryState })
     await verifyFinalState({ versionRoot, manifest, config: mergedConfig, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
     for (const transaction of [configTransaction, entryTransaction]) transaction?.markCommitted()

@@ -28,6 +28,7 @@ import {
   mergePanshiProfile,
   parseInstallerArgv,
   resolveLayout,
+  requiresExecutableMode,
   runEmbeddedInstaller,
   runInstaller,
   validateManifest,
@@ -851,6 +852,12 @@ test('Windows layout uses win32 semantics and the user-level stable cmd entry', 
   assert.equal(layout.stableEntry, 'C:\\Users\\alice\\AppData\\Local\\panshi-camp-cli\\bin\\panshi-camp.cmd')
   assert.equal(layout.configPath, 'C:\\Users\\alice\\.config\\panshi-camp\\config.json')
   assert.equal(win32.isAbsolute(layout.stableEntry), true)
+})
+
+test('Windows package verification does not require POSIX executable mode bits', () => {
+  assert.equal(requiresExecutableMode('win32'), false)
+  assert.equal(requiresExecutableMode('linux'), true)
+  assert.equal(requiresExecutableMode('darwin'), true)
 })
 
 test('Windows path safety fails closed when an ancestor has reparse-point attributes', async () => {

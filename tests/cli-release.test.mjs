@@ -34,11 +34,11 @@ test('default release build is local-only and does not modify the tracked Skill 
   const before = await readFile(skillManifestPath, 'utf8')
   const result = await buildCliRelease({ repoRoot })
   assert.equal(await readFile(skillManifestPath, 'utf8'), before)
-  assert.equal(result.manifest.version, '0.1.2')
-  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.2.tgz')
+  assert.equal(result.manifest.version, '0.1.3')
+  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.3.tgz')
   assert.equal((await stat(result.archivePath)).size, result.manifest.sizeBytes)
   await checkCliRelease({ repoRoot })
-  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.3' }), /CLI_RELEASE_TAG_DRIFT/u)
+  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.4' }), /CLI_RELEASE_TAG_DRIFT/u)
 })
 
 test('release path gate rejects traversal, absolute paths, and Windows drive paths', () => {

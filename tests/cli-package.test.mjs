@@ -18,6 +18,52 @@ const run = (command, args, options = {}) => execFileAsync(command, args, {
   ...options,
 })
 
+const createTrackedSourceSnapshot = async (temporaryRoot) => {
+  const indexPath = join(temporaryRoot, 'git-index')
+  const archivePath = join(temporaryRoot, 'source.tar')
+  const extractionRoot = join(temporaryRoot, 'source')
+  const gitEnvironment = { ...process.env, GIT_INDEX_FILE: indexPath }
+
+  await run('git', ['read-tree', 'HEAD'], { env: gitEnvironment })
+  await run('git', ['add', '--all'], { env: gitEnvironment })
+  const { stdout: treeOutput } = await run('git', ['write-tree'], { env: gitEnvironment })
+  await run('git', ['archive', '--format=tar', '--output', archivePath, treeOutput.trim()])
+  await mkdir(extractionRoot)
+  await run('tar', ['-xf', archivePath, '-C', extractionRoot])
+
+  return extractionRoot
+}
+
+test('tracked source can npm ci and pack the CLI without ignored dist files', async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-fresh-source-'))
+  try {
+    const sourceRoot = await createTrackedSourceSnapshot(temporaryRoot)
+    await run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: sourceRoot })
+    await assert.rejects(
+      readFile(join(sourceRoot, 'packages/camp-client/dist/index.js')),
+      { code: 'ENOENT' },
+      'npm pack must not rely on the ignored camp-client dist directory',
+    )
+
+    const packDestination = join(temporaryRoot, 'packed')
+    await mkdir(packDestination)
+    const packed = await run('npm', [
+      'pack',
+      '--json',
+      '--pack-destination',
+      packDestination,
+      join(sourceRoot, 'apps/cli'),
+    ], { cwd: sourceRoot })
+    const [packReport] = JSON.parse(packed.stdout)
+
+    assert.equal(packReport.name, 'panshi-camp-cli')
+    assert.equal(packReport.filename, `panshi-camp-cli-${cliPackage.version}.tgz`)
+    assert.deepEqual(await readdir(packDestination), [packReport.filename])
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+})
+
 test('packed CLI installs and runs outside the monorepo', async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-package-'))
   try {
@@ -25,6 +71,8 @@ test('packed CLI installs and runs outside the monorepo', async () => {
     const [packReport] = JSON.parse(dryRun.stdout)
     const packedPaths = packReport.files.map(({ path }) => path).sort()
 
+    assert.equal(packReport.name, 'panshi-camp-cli')
+    assert.equal(packReport.filename, `panshi-camp-cli-${cliPackage.version}.tgz`)
     assert.deepEqual(packedPaths, [
       'dist/main.js',
       'dist/skill/SKILL.md',
@@ -45,8 +93,8 @@ test('packed CLI installs and runs outside the monorepo', async () => {
     assert.equal(Object.keys(packedPackage.dependencies).some((name) => name.startsWith('@panshi/')), false)
 
     await run('npm', ['pack', '--json', '--pack-destination', temporaryRoot, cliRoot])
-    const archive = (await readdir(temporaryRoot)).find((file) => file.endsWith('.tgz'))
-    assert.ok(archive, 'npm pack must create a tarball')
+    const archive = `panshi-camp-cli-${cliPackage.version}.tgz`
+    assert.ok((await readdir(temporaryRoot)).includes(archive), 'npm pack must create the exact tarball')
 
     const installationRoot = join(temporaryRoot, 'installation')
     await mkdir(installationRoot)

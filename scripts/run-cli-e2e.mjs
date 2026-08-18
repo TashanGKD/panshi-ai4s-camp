@@ -29,5 +29,5 @@ const run = (command, args) => new Promise((resolve, reject) => {
 
 await run(npm, ['run', 'build', '-w', '@panshi/contracts'])
 await run(npm, ['run', 'build', '-w', '@panshi/camp-client'])
-await run(npm, ['run', 'build', '-w', '@panshi/cli'])
+await run(npm, ['run', 'build', '-w', 'panshi-camp-cli'])
 await run(process.execPath, [playwrightCli, 'test', '--config=playwright.cli.config.ts'])

@@ -36,6 +36,8 @@ type VerificationPurpose = 'register' | 'reset_password'
 type VerificationDeliveryState = 'pending' | 'sent' | 'failed'
 type SessionKind = 'web' | 'cli' | 'admin_web' | 'admin_cli'
 type ConfirmationStatus = 'pending' | 'executing' | 'consumed' | 'expired' | 'failed'
+type SmsNotificationEventType = 'application_submitted' | 'needs_supplement' | 'admitted' | 'waitlisted' | 'rejected'
+type SmsNotificationStatus = 'pending' | 'processing' | 'retry_wait' | 'accepted' | 'dead_letter'
 
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
@@ -245,6 +247,36 @@ export const applicationStatusHistory = pgTable('application_status_history', {
     'draft', 'submitted', 'reviewing', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'
   )`),
   index('application_status_history_application_id_idx').on(table.applicationId, table.createdAt),
+])
+
+export const smsNotificationOutbox = pgTable('sms_notification_outbox', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventKey: text('event_key').notNull().unique('sms_notification_outbox_event_key_unique'),
+  eventType: text('event_type').$type<SmsNotificationEventType>().notNull(),
+  applicationId: uuid('application_id').notNull().references(() => applications.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  phoneNormalized: text('phone_normalized').notNull(),
+  status: text('status').$type<SmsNotificationStatus>().notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull().defaultNow(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  bizId: text('biz_id'),
+  providerRequestId: text('provider_request_id'),
+  lastErrorCode: text('last_error_code'),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+}, (table) => [
+  check('sms_notification_outbox_event_key_check', sql`char_length(btrim(${table.eventKey})) > 0`),
+  check('sms_notification_outbox_event_type_check', sql`${table.eventType} in ('application_submitted', 'needs_supplement', 'admitted', 'waitlisted', 'rejected')`),
+  check('sms_notification_outbox_phone_check', sql`${table.phoneNormalized} ~ '^1[3-9][0-9]{9}$'`),
+  check('sms_notification_outbox_status_check', sql`${table.status} in ('pending', 'processing', 'retry_wait', 'accepted', 'dead_letter')`),
+  check('sms_notification_outbox_attempts_check', sql`${table.attempts} >= 0`),
+  check('sms_notification_outbox_lock_state_check', sql`(${table.status} = 'processing') = (${table.lockedAt} is not null)`),
+  check('sms_notification_outbox_accepted_state_check', sql`(${table.status} = 'accepted') = (${table.acceptedAt} is not null and ${table.bizId} is not null)`),
+  check('sms_notification_outbox_dead_letter_state_check', sql`${table.status} <> 'dead_letter' or ${table.lastErrorCode} is not null`),
+  index('sms_notification_outbox_ready_idx').on(table.status, table.availableAt, table.id),
+  index('sms_notification_outbox_application_idx').on(table.applicationId, table.createdAt),
 ])
 
 export const checkInCredentials = pgTable('check_in_credentials', {

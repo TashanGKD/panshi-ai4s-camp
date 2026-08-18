@@ -53,6 +53,7 @@ const requiredTables = [
   'registration_form_versions',
   'resources',
   'sessions',
+  'sms_notification_outbox',
   'system_settings',
   'user_profiles',
   'users',
@@ -76,6 +77,7 @@ const expectedPrimaryKeys = [
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_pkey', columns: ['id'] },
   { tableName: 'resources', constraintName: 'resources_pkey', columns: ['id'] },
   { tableName: 'sessions', constraintName: 'sessions_pkey', columns: ['id'] },
+  { tableName: 'sms_notification_outbox', constraintName: 'sms_notification_outbox_pkey', columns: ['id'] },
   { tableName: 'system_settings', constraintName: 'system_settings_pkey', columns: ['key'] },
   { tableName: 'user_profiles', constraintName: 'user_profiles_pkey', columns: ['user_id'] },
   { tableName: 'users', constraintName: 'users_pkey', columns: ['id'] },
@@ -96,6 +98,7 @@ const expectedUniqueConstraints = [
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_version_unique', columns: ['version'] },
   { tableName: 'resources', constraintName: 'resources_key_unique', columns: ['key'] },
   { tableName: 'sessions', constraintName: 'sessions_token_hash_unique', columns: ['token_hash'] },
+  { tableName: 'sms_notification_outbox', constraintName: 'sms_notification_outbox_event_key_unique', columns: ['event_key'] },
   { tableName: 'users', constraintName: 'users_phone_normalized_unique', columns: ['phone_normalized'] },
 ] as const
 
@@ -125,6 +128,8 @@ const expectedForeignKeys = [
   { tableName: 'registration_form_versions', constraintName: 'registration_form_versions_created_by_users_id_fk', columns: ['created_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'resources', constraintName: 'resources_file_id_files_id_fk', columns: ['file_id'], referencedTableName: 'files', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'sessions', constraintName: 'sessions_user_id_users_id_fk', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'cascade' },
+  { tableName: 'sms_notification_outbox', constraintName: 'sms_notification_outbox_application_id_fkey', columns: ['application_id'], referencedTableName: 'applications', referencedColumns: ['id'], deleteAction: 'cascade' },
+  { tableName: 'sms_notification_outbox', constraintName: 'sms_notification_outbox_user_id_fkey', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'restrict' },
   { tableName: 'system_settings', constraintName: 'system_settings_updated_by_users_id_fk', columns: ['updated_by'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'set null' },
   { tableName: 'user_profiles', constraintName: 'user_profiles_user_id_fkey', columns: ['user_id'], referencedTableName: 'users', referencedColumns: ['id'], deleteAction: 'cascade' },
 ] as const
@@ -164,6 +169,14 @@ const expectedChecks = [
   { constraintName: 'resources_revision_check', tokens: ['revision', '>= 0'] },
   { constraintName: 'resources_sort_order_check', tokens: ['sort_order', '>= 0'] },
   { constraintName: 'sessions_kind_check', tokens: ['kind', 'web', 'cli', 'admin_web', 'admin_cli'] },
+  { constraintName: 'sms_notification_outbox_accepted_state_check', tokens: ['status', 'accepted', 'accepted_at', 'biz_id'] },
+  { constraintName: 'sms_notification_outbox_attempts_check', tokens: ['attempts', '>= 0'] },
+  { constraintName: 'sms_notification_outbox_dead_letter_state_check', tokens: ['status', 'dead_letter', 'last_error_code'] },
+  { constraintName: 'sms_notification_outbox_event_key_check', tokens: ['event_key', 'btrim'] },
+  { constraintName: 'sms_notification_outbox_event_type_check', tokens: ['event_type', 'application_submitted', 'needs_supplement', 'admitted', 'waitlisted', 'rejected'] },
+  { constraintName: 'sms_notification_outbox_lock_state_check', tokens: ['status', 'processing', 'locked_at'] },
+  { constraintName: 'sms_notification_outbox_phone_check', tokens: ['phone_normalized', '[3-9]'] },
+  { constraintName: 'sms_notification_outbox_status_check', tokens: ['status', 'pending', 'processing', 'retry_wait', 'accepted', 'dead_letter'] },
   { constraintName: 'users_display_name_check', tokens: ['display_name', 'btrim'] },
   { constraintName: 'users_phone_normalized_check', tokens: ['phone_normalized', '+861', '[3-9]'] },
   { constraintName: 'users_role_check', tokens: ['role', 'user', 'admin'] },
@@ -690,6 +703,7 @@ describe('initial PostgreSQL schema', () => {
       '0021_check_in.sql',
       '0022_cli_sessions.sql',
       '0023_confirmation_intents.sql',
+      '0024_sms_notification_outbox.sql',
     ])
     expect(secondRun.rows).toEqual(firstRun.rows)
     for (const migration of secondRun.rows) {

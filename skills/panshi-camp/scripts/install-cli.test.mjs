@@ -906,9 +906,11 @@ test('the executable has no URL or SHA environment/argument override hooks', asy
 test('direct execution with the embedded release manifest only previews by default', async () => {
   const script = new URL('./install-cli.mjs', import.meta.url)
   const result = await execFileAsync(process.execPath, [fileURLToPath(script)], { encoding: 'utf8' })
+  const trustedManifest = JSON.parse(await readFile(new URL('../release-manifest.json', import.meta.url), 'utf8'))
+  const preview = JSON.parse(result.stdout)
   assert.equal(result.stderr, '')
-  assert.match(result.stdout, /"action": "preview-only"/u)
-  assert.match(result.stdout, /"requiredVersion": "0\.1\.1"/u)
+  assert.equal(preview.action, 'preview-only')
+  assert.equal(preview.requiredVersion, trustedManifest.version)
 })
 
 test('Skill documents preview-first bootstrap and only uses an absolute stable CLI placeholder', async () => {

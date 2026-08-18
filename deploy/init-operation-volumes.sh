@@ -12,6 +12,5 @@ for target in /data /backups; do
   [[ "$(cd "$target" && pwd -P)" == "$target" ]] || { printf 'Volume target resolves unexpectedly\n' >&2; exit 1; }
 done
 
-mkdir -p /data/uploads
 chown -R "$OPERATIONS_UID:$OPERATIONS_GID" /data /backups
-chmod 700 /data /data/uploads /backups
+chmod 700 /data /backups

@@ -134,6 +134,7 @@ const volumeInit = await readProjectFile('deploy/init-operation-volumes.sh')
 assert.match(volumeInit, /OPERATIONS_UID/u)
 assert.match(volumeInit, /OPERATIONS_GID/u)
 assert.match(volumeInit, /chown[^\n]+\/data[^\n]+\/backups/u)
+assert.doesNotMatch(volumeInit, /mkdir[^\n]+\/data\/uploads/u, 'the API must create and mark the private upload root itself')
 assert.doesNotMatch(volumeInit, /chown[^\n]+(?:^|\s)\/(?:\s|$)/u, 'volume init must never chown the filesystem root')
 
 const webDockerfile = await readProjectFile('apps/web/Dockerfile')

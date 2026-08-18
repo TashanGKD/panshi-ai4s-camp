@@ -31,6 +31,8 @@
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
+    "@alicloud/dysmsapi20170525": "^4.6.0",
+    "@alicloud/openapi-client": "^0.4.15",
     "@panshi/contracts": "0.0.0",
     "bcryptjs": "3.0.3",
     "cookie-parser": "1.4.7",

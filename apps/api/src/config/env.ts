@@ -70,13 +70,20 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   RATE_LIMIT_AUTHENTICATED_WINDOW_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(60_000),
   RATE_LIMIT_ADMIN_MAX: z.coerce.number().int().min(1).max(10_000).default(180),
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(60_000),
-  VERIFICATION_PROVIDER: z.enum(['disabled', 'mock']).default('disabled'),
+  VERIFICATION_PROVIDER: z.enum(['disabled', 'mock', 'aliyun']).default('disabled'),
   VERIFICATION_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   CHECK_IN_TOKEN_SECRET: z.string().regex(/^[a-f0-9]{64}$/iu).optional(),
   VERIFICATION_TTL_SECONDS: z.coerce.number().int().min(60).max(1_800).default(300),
   VERIFICATION_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
   VERIFICATION_MOCK_CODE: z.string().regex(/^\d{6}$/u).optional(),
+  ALIBABA_CLOUD_ACCESS_KEY_ID: z.string().min(1).optional(),
+  ALIBABA_CLOUD_ACCESS_KEY_SECRET: z.string().min(1).optional(),
+  ALIYUN_SMS_SIGN_NAME: z.string().min(1).optional(),
+  ALIYUN_SMS_TEMPLATE_CODE: z.string().min(1).optional(),
+  ALIYUN_SMS_TEMPLATE_PARAM_KEY: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u).default('code'),
+  ALIYUN_SMS_ENDPOINT: z.string().min(1).default('dysmsapi.aliyuncs.com'),
+  ALIYUN_SMS_REGION_ID: z.string().min(1).default('cn-hangzhou'),
   FILE_STORAGE_ROOT: z.string().min(1).default(defaultFileStorageRoot).transform((value) => resolve(projectRoot, value)),
   FILE_UPLOAD_TEMP_ROOT: z.string().min(1).optional().transform((value) => value ? resolve(projectRoot, value) : undefined),
   FILE_UPLOAD_MAX_BYTES: z.coerce.number().int().min(1_024).max(FILE_UPLOAD_HARD_MAX_BYTES).default(FILE_UPLOAD_HARD_MAX_BYTES),
@@ -92,8 +99,15 @@ const ApiEnvSchema = DatabaseEnvSchema.extend({
   if (env.NODE_ENV === 'production' && env.VERIFICATION_PROVIDER === 'mock') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_PROVIDER'], message: 'mock provider is forbidden in production' })
   }
-  if (env.VERIFICATION_PROVIDER === 'mock' && env.VERIFICATION_SECRET === undefined) {
+  if (env.VERIFICATION_PROVIDER !== 'disabled' && env.VERIFICATION_SECRET === undefined) {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_SECRET'], message: 'verification secret must be 64 hexadecimal characters' })
+  }
+  if (env.VERIFICATION_PROVIDER === 'aliyun') {
+    for (const key of ['ALIBABA_CLOUD_ACCESS_KEY_ID', 'ALIBABA_CLOUD_ACCESS_KEY_SECRET', 'ALIYUN_SMS_SIGN_NAME', 'ALIYUN_SMS_TEMPLATE_CODE'] as const) {
+      if (env[key] === undefined) {
+        context.addIssue({ code: 'custom', path: [key], message: `${key} is required for the Aliyun verification provider` })
+      }
+    }
   }
   if (env.VERIFICATION_MOCK_CODE !== undefined && env.NODE_ENV !== 'test') {
     context.addIssue({ code: 'custom', path: ['VERIFICATION_MOCK_CODE'], message: 'fixed mock codes are test-only' })

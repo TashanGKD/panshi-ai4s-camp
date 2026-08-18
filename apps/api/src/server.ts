@@ -9,6 +9,7 @@ import { createIdentityRepository } from './modules/identity/identity.repository
 import { createAdminSummaryRepository } from './modules/admin-summary/admin-summary.repository.js'
 import { createAdminSummaryService } from './modules/admin-summary/admin-summary.service.js'
 import { createMockVerificationProvider } from './modules/identity/mock-verification-provider.js'
+import { createAliyunVerificationProvider } from './modules/identity/aliyun-verification-provider.js'
 import { createVerificationService } from './modules/identity/verification.service.js'
 import { createRegistrationFormRepository } from './modules/registration/form.repository.js'
 import { createRegistrationFormService } from './modules/registration/form.service.js'
@@ -246,8 +247,18 @@ export const createConfiguredServerLifecycle = (onFatal?: () => void) => {
         ? { logger: ({ phone, code, purpose }) => console.info(`[verification:${purpose}] ${phone} ${code}`) }
         : {}),
     })
-    : undefined
-  const verificationService = env.VERIFICATION_PROVIDER === 'mock'
+    : env.VERIFICATION_PROVIDER === 'aliyun'
+      ? createAliyunVerificationProvider({
+        accessKeyId: env.ALIBABA_CLOUD_ACCESS_KEY_ID!,
+        accessKeySecret: env.ALIBABA_CLOUD_ACCESS_KEY_SECRET!,
+        signName: env.ALIYUN_SMS_SIGN_NAME!,
+        templateCode: env.ALIYUN_SMS_TEMPLATE_CODE!,
+        templateParamKey: env.ALIYUN_SMS_TEMPLATE_PARAM_KEY,
+        endpoint: env.ALIYUN_SMS_ENDPOINT,
+        regionId: env.ALIYUN_SMS_REGION_ID,
+      })
+      : undefined
+  const verificationService = env.VERIFICATION_PROVIDER !== 'disabled'
     ? createVerificationService(identityRepository, verificationProvider, {
       secret: env.VERIFICATION_SECRET!,
       ttlSeconds: env.VERIFICATION_TTL_SECONDS,

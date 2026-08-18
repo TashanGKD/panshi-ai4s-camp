@@ -202,13 +202,30 @@ docker compose --env-file /secure/path/panshi-ai4s-camp.prod.env -p panshi-ai4s-
 
 `npm run test:deployment:build` is the explicit CI/release gate. It reproduces each Docker dependency/build stage in clean temporary contexts, validates artifacts and API runtime imports, runs native Compose and image/live HTTP checks when Docker is available, and explicitly reports skipped container checks otherwise. At this review, the Docker engine and Compose plugin are unavailable; clean-context builds can run, but container builds, executable Nginx validation, and live proxy checks cannot be claimed.
 
-`VERIFICATION_PROVIDER=disabled` is intentional in the current production model. The code currently supports only `disabled` and a development-only `mock`; no production SMS adapter is implemented, so student verification-code delivery remains unavailable until that adapter is added.
+The production account system uses its own PostgreSQL users, verification records, sessions, applications, reviews, and check-in records. It does not query or mutate another Tashan product's account database. Only the operator-managed Aliyun SMS delivery credentials are reused at the infrastructure boundary.
 
 ## SMS adapter switch
 
-Do not set production to `mock`: configuration validation rejects that combination. Until a real adapter exists, keep `VERIFICATION_PROVIDER=disabled`, keep registration closed in published content, and verify that verification-send returns the documented unavailable response without disclosing account existence.
+Do not set production to `mock`: configuration validation rejects that combination. Enable real delivery with `VERIFICATION_PROVIDER=aliyun`, a separate 32-byte `VERIFICATION_SECRET`, and these operator-managed values: `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIYUN_SMS_SIGN_NAME`, `ALIYUN_SMS_TEMPLATE_CODE`, `ALIYUN_SMS_TEMPLATE_PARAM_KEY`, `ALIYUN_SMS_ENDPOINT`, and `ALIYUN_SMS_REGION_ID`. Never commit them or print their values in an operations log.
 
-A future production switch is allowed only after a named adapter implements the existing `VerificationProvider` contract and has delivery receipts, timeout/retry behavior, IP and per-phone rate limits, a global cost circuit breaker, secret rotation, redacted logging, and integration tests. Add that adapter name to configuration validation; never alias it to `mock`. In a maintenance window, deploy with the new provider name and its operator-managed secret variables, then test one dedicated non-user phone through send, register, login, reset, audit redaction, and rate-limit boundaries. Roll back the switch by restoring `VERIFICATION_PROVIDER=disabled` and redeploying the previous release; do not retain test codes or provider credentials in the repository or operations log. No live SMS vendor is selected by this document.
+The API stores only a keyed HMAC of each verification code, limits sends per phone and IP, limits verification attempts, and marks rejected deliveries unusable. Before public registration, test one dedicated non-user phone through send, register, login, reset, audit redaction, and rate-limit boundaries. Roll back delivery by restoring `VERIFICATION_PROVIDER=disabled` and restarting the API; do not retain test codes or provider credentials in the repository or operations log.
+
+## AUP independent deployment
+
+The AUP deployment uses the independent directory `/home/aup/panshi-ai4s-camp`, Compose project `panshi-ai4s-camp-prod`, and loopback port `127.0.0.1:3200`. Its PostgreSQL, uploads, backups, images, containers, secrets, and deployment marker are separately namespaced. The default deployment command is a dry run; production requires explicit opt-in:
+
+```sh
+./deploy/deploy-to-aup.sh
+./deploy/deploy-to-aup.sh --apply
+```
+
+The operator-managed production environment remains at `/home/aup/panshi-ai4s-camp/secrets/production.env`. For private preview, forward the loopback listener without exposing it publicly:
+
+```sh
+ssh -N -L 3200:127.0.0.1:3200 aup-server
+```
+
+Then open `http://127.0.0.1:3200`. Public DNS, TLS, and the AUP-to-ECS reverse tunnel are a separate release step.
 
 ## Deployment verification
 

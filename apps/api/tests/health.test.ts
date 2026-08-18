@@ -375,6 +375,9 @@ describe('API runtime configuration', () => {
       VERIFICATION_TTL_SECONDS: 300,
       VERIFICATION_COOLDOWN_SECONDS: 60,
       VERIFICATION_MAX_ATTEMPTS: 5,
+      ALIYUN_SMS_TEMPLATE_PARAM_KEY: 'code',
+      ALIYUN_SMS_ENDPOINT: 'dysmsapi.aliyuncs.com',
+      ALIYUN_SMS_REGION_ID: 'cn-hangzhou',
       FILE_STORAGE_ROOT: expect.stringMatching(/\/panshi-ai4s-camp\/var\/uploads$/u),
       FILE_UPLOAD_TEMP_ROOT: expect.stringMatching(/\/panshi-ai4s-camp\/var\/uploads\/\.incoming$/u),
       FILE_UPLOAD_MAX_BYTES: 5_242_880,
@@ -402,8 +405,29 @@ describe('API runtime configuration', () => {
       .toMatchObject({ VERIFICATION_MOCK_CODE: '246810' })
   })
 
+  it('accepts a complete Aliyun provider configuration in production', () => {
+    expect(getApiEnv({
+      DATABASE_URL: 'postgresql://localhost/panshi',
+      API_PORT: '3001',
+      CORS_ORIGINS: 'https://camp.example',
+      NODE_ENV: 'production',
+      CHECK_IN_TOKEN_SECRET: 'cd'.repeat(32),
+      VERIFICATION_PROVIDER: 'aliyun',
+      VERIFICATION_SECRET: 'ab'.repeat(32),
+      ALIBABA_CLOUD_ACCESS_KEY_ID: 'access-id',
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: 'access-secret',
+      ALIYUN_SMS_SIGN_NAME: '攻玉智研',
+      ALIYUN_SMS_TEMPLATE_CODE: 'SMS_TEST',
+    })).toMatchObject({
+      VERIFICATION_PROVIDER: 'aliyun',
+      ALIYUN_SMS_TEMPLATE_PARAM_KEY: 'code',
+      SECURE_COOKIES: true,
+    })
+  })
+
   it.each([
     { NODE_ENV: 'production', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32) },
+    { NODE_ENV: 'production', VERIFICATION_PROVIDER: 'aliyun', VERIFICATION_SECRET: 'ab'.repeat(32), CHECK_IN_TOKEN_SECRET: 'cd'.repeat(32) },
     { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'too-short' },
     { NODE_ENV: 'test', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'g'.repeat(64) },
     { NODE_ENV: 'development', VERIFICATION_PROVIDER: 'mock', VERIFICATION_SECRET: 'ab'.repeat(32), VERIFICATION_MOCK_CODE: '246810' },

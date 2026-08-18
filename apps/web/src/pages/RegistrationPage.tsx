@@ -101,7 +101,7 @@ export function RegistrationPage() {
     operationLocked.current = true
     setPending(true)
     try {
-      await applicationClient.removeFile(fileId)
+      await applicationClient.hideFile(fileId)
       if (!mounted.current) return
       const next = { ...state.draft, attachments: state.draft.attachments.filter((item) => item.slotId !== slotId) }
       operationLocked.current = false; setPending(false); await save(next)

@@ -11,7 +11,7 @@ export const webCapabilities = {
   '/forgot-password': ['auth.verification.send', 'auth.password_reset'],
   '/application': [
     'public.registration_form.show', 'public.institutions.search', 'application.show', 'application.validate',
-    'application.draft.save', 'application.reopen', 'application.submit', 'file.upload', 'file.download', 'file.delete',
+    'application.draft.save', 'application.reopen', 'application.submit', 'file.upload', 'file.download', 'file.hide', 'file.delete',
   ],
   '/account': ['auth.status', 'auth.logout', 'account.password_change', 'application.show', 'check_in.show', 'check_in.qr.export'],
 } as const satisfies Record<string, readonly LearnerCapabilityId[]>

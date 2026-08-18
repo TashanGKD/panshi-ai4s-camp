@@ -41,6 +41,10 @@ export const createApplicationClient = (apiBaseUrl?: string, runtime: PublicClie
       const confirmed = await prepare('file.delete', { fileId: id })
       return client.files.delete(id, operation(confirmed)).catch(map)
     },
+    hideFile: async (id: string) => {
+      const confirmed = await prepare('file.hide', { fileId: id })
+      return client.files.hide(id, operation(confirmed)).catch(map)
+    },
     logout: async () => {
       const confirmed = await prepare('auth.logout', { scope: 'current' })
       return client.auth.logoutWeb(operation(confirmed)).catch(map)

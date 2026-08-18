@@ -5,7 +5,7 @@ import { DEFAULT_REGISTRATION_FORM, type MyApplicationResponse } from '@panshi/c
 import { RegistrationPage } from '../src/pages/RegistrationPage'
 
 const api = vi.hoisted(() => ({
-  getMine: vi.fn(), getInstitutions: vi.fn(), reopen: vi.fn(), saveDraft: vi.fn(), submit: vi.fn(), upload: vi.fn(), removeFile: vi.fn(), logout: vi.fn(),
+  getMine: vi.fn(), getInstitutions: vi.fn(), reopen: vi.fn(), saveDraft: vi.fn(), submit: vi.fn(), upload: vi.fn(), hideFile: vi.fn(), removeFile: vi.fn(), logout: vi.fn(),
 }))
 
 vi.mock('../src/api/application-client', () => ({
@@ -166,6 +166,19 @@ describe('registration route navigation guard', () => {
     fireEvent.click(await screen.findByRole('button', { name: '正式提交' }))
     expect(await screen.findByText('文件大小超过当前限制（最大 100000 字节）')).toHaveAttribute('role', 'alert')
     expect(screen.getByRole('button', { name: '删除并替换' })).toBeEnabled()
+    expect(api.removeFile).not.toHaveBeenCalled()
+  })
+
+  it('uses the recoverable hide operation when replacing a linked attachment', async () => {
+    const slot = DEFAULT_REGISTRATION_FORM.attachments[0]!
+    api.getMine.mockResolvedValue(response({
+      ...application,
+      attachments: [{ id: '50000000-0000-4000-8000-000000000001', slotId: slot.id, originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 10, downloadUrl: '/api/v1/files/50000000-0000-4000-8000-000000000001/download' }],
+    }))
+    api.hideFile.mockResolvedValue({ apiVersion: 'v1', data: {} })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '删除并替换' }))
+    await waitFor(() => expect(api.hideFile).toHaveBeenCalledWith('50000000-0000-4000-8000-000000000001'))
     expect(api.removeFile).not.toHaveBeenCalled()
   })
 

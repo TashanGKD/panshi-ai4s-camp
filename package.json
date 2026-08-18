@@ -12,8 +12,10 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "node tests/workspaces.test.mjs && node --test tests/release-runner.test.mjs && npm run test:e2e-startup && npm run test:deployment && npm run test:workspaces",
+    "test": "node tests/workspaces.test.mjs && node --test tests/release-runner.test.mjs && npm run test:parity && npm run test:e2e-startup && npm run test:deployment && npm run test:workspaces",
     "test:release": "node scripts/run-release-tests.mjs",
+    "check:parity": "npm run build -w @panshi/contracts && npm run build -w @panshi/cli && node scripts/check-web-cli-parity.mjs",
+    "test:parity": "npm run build -w @panshi/contracts && npm run build -w @panshi/cli && node scripts/check-web-cli-parity.self-test.mjs && node --test tests/web-cli-parity.test.mjs",
     "test:deployment": "node tests/nginx-config-validator.test.mjs && node tests/deployment.test.mjs",
     "test:deployment:build": "node tests/deployment-build.test.mjs",
     "test:backup-restore": "bash tests/backup-restore.test.sh",

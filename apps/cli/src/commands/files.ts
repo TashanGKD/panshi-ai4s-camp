@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { basename, extname, resolve } from 'node:path'
 import { extractConfirmationOptions, runConfirmedOperation } from '../confirmation-flow.js'

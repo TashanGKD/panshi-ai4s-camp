@@ -21,7 +21,7 @@ describe('Web learner capability bindings', () => {
   it('covers every learner-v1 capability exposed by the current Web application', () => {
     const bound = new Set<LearnerCapabilityId>(Object.values(webCapabilities).flat())
     const locallyOrWebExposed = learnerCapabilities
-      .filter(({ id }) => !['auth.status', 'file.hide', 'check_in.qr.export', 'application.validate'].includes(id) || bound.has(id))
+      .filter(({ id }) => !['auth.status', 'check_in.qr.export', 'application.validate'].includes(id) || bound.has(id))
       .map(({ id }) => id)
     for (const id of locallyOrWebExposed) expect(bound.has(id), id).toBe(true)
   })

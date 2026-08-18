@@ -14,6 +14,7 @@ import { KeychainCredentialStore, type CredentialStore } from './credentials.js'
 import { readSecret as readSecretInput, readSecretBundle } from './io.js'
 import { executeCommand, findCommand } from './commands/registry.js'
 import { runSkillCommand } from './commands/skill.js'
+import { exportCliCapabilities } from './commands/internal.js'
 
 const HELP = `磐石·科学智能实训营 CLI
 
@@ -69,6 +70,11 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
       return 0
     }
     const homeDirectory = dependencies.homeDirectory ?? homedir()
+    if (parsed.command[0] === 'internal' && parsed.command[1] === 'capabilities' && parsed.command.length === 2) {
+      if (!json) throw new CliRuntimeError('INPUT_INVALID', 'internal capabilities 仅支持 --json')
+      ;(dependencies.stdout ?? ((text: string) => process.stdout.write(text)))(`${JSON.stringify(exportCliCapabilities())}\n`)
+      return 0
+    }
     if (parsed.command[0] === 'skill') {
       if (json) throw new CliRuntimeError('INPUT_INVALID', 'skill 管理命令仅支持人工可读模式')
       const result = await runSkillCommand(parsed.command.slice(1), {

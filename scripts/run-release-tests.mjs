@@ -22,6 +22,7 @@ try {
   const unitEnv = { ...env }
   delete unitEnv.TEST_DATABASE_URL
   delete unitEnv.DATABASE_URL
+  await run(['run', 'test:parity'], unitEnv)
   await run(['test'], unitEnv)
   for (const suite of suites) {
     await run(['run', 'db:migrate', '-w', '@panshi/api'])

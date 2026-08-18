@@ -11,7 +11,7 @@ import { CliRuntimeError, safeError } from './errors.js'
 import { createOutput } from './output.js'
 import { loadConfig, resolveEndpoint, type CliConfig } from './config.js'
 import { KeychainCredentialStore, type CredentialStore } from './credentials.js'
-import { readSecret as readSecretInput } from './io.js'
+import { readSecret as readSecretInput, readSecretBundle } from './io.js'
 import { executeCommand, findCommand } from './commands/registry.js'
 
 const HELP = `磐石·科学智能实训营 CLI
@@ -35,7 +35,8 @@ type Dependencies = {
   stdin?: () => Promise<string>
   promptText?: (label: string) => Promise<string>
   readSecret?: (label: string) => Promise<string>
-  confirm?: (preview: unknown) => Promise<boolean>
+  readSecrets?: (fields: Array<{ key: string, label: string }>) => Promise<Record<string, string>>
+  confirm?: (preview: unknown, mode?: 'single' | 'double', targetIdentifier?: string) => Promise<boolean>
 }
 
 const promptText = async (label: string) => {
@@ -44,9 +45,11 @@ const promptText = async (label: string) => {
   try { return (await terminal.question(`${label}: `)).trim() } finally { terminal.close() }
 }
 
-const confirmPreview = async (preview: unknown) => {
+const confirmPreview = async (preview: unknown, mode: 'single' | 'double' = 'single', targetIdentifier?: string) => {
   process.stderr.write(`确认预览：\n${JSON.stringify(preview, null, 2)}\n`)
-  return (await promptText('确认执行？请输入 y')).toLocaleLowerCase() === 'y'
+  if ((await promptText('确认执行？请输入 y')).toLocaleLowerCase() !== 'y') return false
+  if (mode === 'double') return (await promptText(`请再次输入目标标识 ${targetIdentifier ?? ''}`)) === targetIdentifier
+  return true
 }
 
 const defaultConfigPath = (home: string) => join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'panshi-camp', 'config.json')
@@ -95,6 +98,7 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
       stdin: dependencies.stdin ?? (async () => readFileSync(0, 'utf8')),
       promptText: dependencies.promptText ?? promptText,
       readSecret: dependencies.readSecret ?? ((label) => readSecretInput({ isTTY: Boolean(process.stdin.isTTY), env: process.env }, label)),
+      readSecrets: dependencies.readSecrets ?? ((fields) => readSecretBundle({ isTTY: Boolean(process.stdin.isTTY), env: process.env }, fields)),
       confirm: dependencies.confirm ?? confirmPreview,
     })
     output.success({ ok: true, apiVersion: 'v1', capabilityId: result.capabilityId, data: result.data, requestId: result.requestId ?? 'local' })

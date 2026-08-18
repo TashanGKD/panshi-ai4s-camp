@@ -52,3 +52,8 @@ export const runApplicationForm: CommandHandler = async ({ client, args }) => {
   if (args.length) throw new CliRuntimeError('INPUT_INVALID', 'application form 不接受额外参数')
   return { data: (await client.public.getRegistrationForm()).data }
 }
+
+export const runApplicationCountShow: CommandHandler = async ({ client, args }) => {
+  if (args.length) throw new CliRuntimeError('INPUT_INVALID', 'application-count show 不接受额外参数')
+  return { data: (await client.public.getApplicationCount()).data }
+}

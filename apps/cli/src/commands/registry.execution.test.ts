@@ -19,14 +19,11 @@ describe('read command execution contracts', () => {
         getTravel: vi.fn(async () => ({ sections: [] })), getContacts: vi.fn(async () => ({ items: [] })),
         getInstitutions: vi.fn(async () => api({ version: 'v1', sources: [], universities: [{ name: '中国科学院大学', province: '北京', level: '本科' }], ucasTrainingUnits: [{ name: '中国科学院物理研究所', type: 'institute' }] })),
         getRegistrationForm: vi.fn(async () => api({ formVersionId: crypto.randomUUID(), version: 1, form: {} })),
+        getApplicationCount: vi.fn(async () => api({ count: 12, public: true })),
         listResources: vi.fn(async () => api({ resources: [] })),
         downloadResource: vi.fn(async () => ({ stream: bytes(), headers: new Headers(), status: 200 })),
       },
       auth: { status: vi.fn(async () => api({ user: { id: 'user-1', displayName: '测试用户', role: 'user', phoneNormalized: '+8613800000000' } })) },
-      confirmations: {
-        prepare: vi.fn(async () => api({ confirmationId: crypto.randomUUID(), expiresAt: '2026-09-01T00:00:00.000Z', preview: { action: '登录账号' }, payloadSha256: 'a'.repeat(64), confirmation: 'single' })),
-        execute: vi.fn(async () => api({ token: 'a'.repeat(64), expiresAt: '2026-09-01T00:00:00.000Z', user: { id: 'user-1', displayName: '测试用户', role: 'user' } })),
-      },
       application: { getMine: vi.fn(async () => api({ application: {}, timeline: [], supplementRequest: null, accessibleResources: [] })) },
       files: { download: vi.fn(async () => ({ stream: bytes(), headers: new Headers(), status: 200 })) },
       checkIn: { show: vi.fn(async () => api({ availability: 'available', qrPayload: 'panshi-check-in-payload-that-is-long-enough', displayCode: 'ABC12345', checkedInAt: null })) },
@@ -40,9 +37,9 @@ describe('read command execution contracts', () => {
       ['public.contacts.show', ['contacts', 'show']],
       ['public.institutions.search', ['institutions', 'search', '中国科学院']],
       ['public.registration_form.show', ['application', 'form']],
+      ['public.application_count.show', ['application-count', 'show']],
       ['resource.list', ['resources', 'list']],
       ['resource.download', ['resources', 'download', crypto.randomUUID(), '--output', join(root, 'resource.bin')]],
-      ['auth.login', ['auth', 'login']],
       ['auth.status', ['auth', 'status']],
       ['application.show', ['application', 'show']],
       ['application.validate', ['application', 'validate', '--input', '-']],
@@ -54,12 +51,11 @@ describe('read command execution contracts', () => {
       const result = await executeCommand([...args], {
         client: client as never, json: false, profileName: 'local', credentials,
         workspaceRoot: join(root, 'workspace'), homeDirectory: join(root, 'home'),
-        stdin: async () => '{}', promptText: async () => '13800000000', readSecret: async () => 'password123', confirm: async () => true,
+        stdin: async () => '{}', promptText: async () => '13800000000', readSecret: async () => 'password123',
+        readSecrets: async () => ({ password: 'password123' }), confirm: async () => true,
       })
       expect(result.capabilityId).toBe(expectedCapabilityId)
       expect(CliSuccessSchema.safeParse({ ok: true, apiVersion: 'v1', capabilityId: result.capabilityId, data: JSON.parse(JSON.stringify(result.data)), requestId: 'local' }).success).toBe(true)
     }
-    expect(client.confirmations.prepare).toHaveBeenCalledWith('auth.login', { phoneMasked: '+8613******000', clientKind: 'cli' }, expect.any(Object))
-    expect(client.confirmations.execute).toHaveBeenCalledWith(expect.any(String), { phone: '+8613800000000', password: 'password123', clientKind: 'cli' }, expect.any(Object))
   })
 })

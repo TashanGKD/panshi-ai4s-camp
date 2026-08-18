@@ -16,7 +16,8 @@ export type CommandContext = {
   stdin: () => Promise<string>
   promptText: (label: string) => Promise<string>
   readSecret: (label: string) => Promise<string>
-  confirm: (preview: unknown) => Promise<boolean>
+  readSecrets: (fields: Array<{ key: string, label: string }>) => Promise<Record<string, string>>
+  confirm: (preview: unknown, mode?: 'single' | 'double', targetIdentifier?: string) => Promise<boolean>
 }
 
 export type CommandResult = { data: unknown, requestId?: string }

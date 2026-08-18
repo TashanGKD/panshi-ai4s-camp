@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { parseCliArgv } from './argv.js'
 import { loadConfig, resolveEndpoint } from './config.js'
-import { readSecret } from './io.js'
+import { readSecret, readSecretBundle } from './io.js'
 import { runCli } from './main.js'
 
 describe('CLI safe defaults', () => {
@@ -55,5 +55,13 @@ describe('CLI safe defaults', () => {
     await expect(readSecret({ isTTY: false, env: {}, readFd: vi.fn() }, '密码')).rejects.toMatchObject({ code: 'INTERACTIVE_INPUT_REQUIRED' })
     const readFd = vi.fn(async (fd: number) => { expect(fd).toBe(9); return 'private\n' })
     await expect(readSecret({ isTTY: false, env: { PANSHI_CAMP_SECRET_FD: '9' }, readFd }, '密码')).resolves.toBe('private')
+  })
+
+  it('reads multiple agent secrets from one dedicated descriptor without using stdin', async () => {
+    const readFd = vi.fn(async () => JSON.stringify({ code: '123456', password: 'private-value' }))
+    await expect(readSecretBundle({ isTTY: false, env: { PANSHI_CAMP_SECRET_FD: '9' }, readFd }, [
+      { key: 'code', label: '验证码' }, { key: 'password', label: '密码' },
+    ])).resolves.toEqual({ code: '123456', password: 'private-value' })
+    expect(readFd).toHaveBeenCalledOnce()
   })
 })

@@ -48,3 +48,33 @@ export const readSecret = async (
   if (!secret || /[\r\n]/u.test(secret)) throw new CliRuntimeError('SECRET_INPUT_INVALID')
   return secret
 }
+
+export const readSecretBundle = async (
+  input: Partial<SecretInput> & Pick<SecretInput, 'isTTY' | 'env'>,
+  fields: Array<{ key: string, label: string }>,
+): Promise<Record<string, string>> => {
+  if (fields.length === 0) return {}
+  if (input.isTTY && input.env.PANSHI_CAMP_SECRET_FD === undefined) {
+    const result: Record<string, string> = {}
+    for (const field of fields) {
+      const secret = await (input.prompt ?? promptHidden)(field.label)
+      if (!secret || /[\r\n]/u.test(secret)) throw new CliRuntimeError('SECRET_INPUT_INVALID')
+      result[field.key] = secret
+    }
+    return result
+  }
+  const raw = await readSecret(input, fields.length === 1 ? fields[0]!.label : '敏感信息')
+  if (fields.length === 1) return { [fields[0]!.key]: raw }
+  let value: unknown
+  try { value = JSON.parse(raw) } catch { throw new CliRuntimeError('SECRET_INPUT_INVALID') }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CliRuntimeError('SECRET_INPUT_INVALID')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some((key) => !fields.some((field) => field.key === key))) throw new CliRuntimeError('SECRET_INPUT_INVALID')
+  const result: Record<string, string> = {}
+  for (const field of fields) {
+    const secret = record[field.key]
+    if (typeof secret !== 'string' || !secret || /[\r\n]/u.test(secret)) throw new CliRuntimeError('SECRET_INPUT_INVALID')
+    result[field.key] = secret
+  }
+  return result
+}

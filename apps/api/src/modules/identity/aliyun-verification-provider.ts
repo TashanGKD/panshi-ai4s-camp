@@ -1,6 +1,5 @@
-import * as Dysmsapi from '@alicloud/dysmsapi20170525'
-import * as OpenApi from '@alicloud/openapi-client'
 import type { VerificationProvider } from './verification-provider.js'
+import { Dysmsapi, createAliyunSmsClient, type AliyunSmsClient } from '../sms/aliyun-client.js'
 
 export type AliyunVerificationProviderOptions = {
   accessKeyId: string
@@ -10,34 +9,6 @@ export type AliyunVerificationProviderOptions = {
   templateParamKey: string
   endpoint: string
   regionId: string
-}
-
-type AliyunSmsResponse = {
-  body?: {
-    code?: string
-    message?: string
-    bizId?: string
-  }
-}
-
-export type AliyunSmsClient = {
-  sendSms(request: InstanceType<typeof Dysmsapi.SendSmsRequest>): Promise<AliyunSmsResponse>
-}
-
-type AliyunSmsClientConstructor = new (
-  config: InstanceType<typeof OpenApi.Config>,
-) => AliyunSmsClient
-
-const resolveClientConstructor = (): AliyunSmsClientConstructor => {
-  const moduleValue = Dysmsapi as unknown as { default?: unknown }
-  if (typeof moduleValue.default === 'function') {
-    return moduleValue.default as AliyunSmsClientConstructor
-  }
-  const nestedDefault = (moduleValue.default as { default?: unknown } | undefined)?.default
-  if (typeof nestedDefault === 'function') {
-    return nestedDefault as AliyunSmsClientConstructor
-  }
-  throw new Error('Aliyun SMS client is unavailable')
 }
 
 const assertCompleteOptions = (options: AliyunVerificationProviderOptions) => {
@@ -52,15 +23,12 @@ export const createAliyunVerificationProvider = (
 ): VerificationProvider => {
   assertCompleteOptions(options)
 
-  const client = injectedClient ?? (() => {
-    const Client = resolveClientConstructor()
-    return new Client(new OpenApi.Config({
+  const client = injectedClient ?? createAliyunSmsClient({
       accessKeyId: options.accessKeyId,
       accessKeySecret: options.accessKeySecret,
       endpoint: options.endpoint,
       regionId: options.regionId,
-    }))
-  })()
+    })
 
   return {
     sendCode: async ({ phone, code }) => {

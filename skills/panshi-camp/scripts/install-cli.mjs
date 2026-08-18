@@ -582,6 +582,36 @@ const removeCreatedEmptyDirectory = async ({ created, directory, layout, homeDir
   }
 }
 
+const readDirectoryIdentity = async (directory, currentUid) => {
+  const metadata = await lstat(directory, { bigint: true }).catch(() => null)
+  if (!metadata?.isDirectory() || metadata.isSymbolicLink()) return fail('INSTALLER_DIRECTORY_IDENTITY_UNAVAILABLE', '安装事务目录缺失或不安全')
+  if (currentUid !== undefined && metadata.uid !== BigInt(currentUid)) return fail('INSTALLER_PATH_NOT_OWNED', '安装事务目录必须由当前 uid 所有')
+  if (typeof metadata.dev !== 'bigint' || typeof metadata.ino !== 'bigint' || metadata.ino <= 0n) {
+    return fail('INSTALLER_DIRECTORY_IDENTITY_UNAVAILABLE', '当前平台无法提供安全的安装事务目录身份')
+  }
+  return Object.freeze({ dev: metadata.dev, ino: metadata.ino })
+}
+
+const sameDirectoryIdentity = (left, right) => left?.dev === right?.dev && left?.ino === right?.ino
+
+const assertDirectoryIdentity = async (directory, expectedIdentity, currentUid) => {
+  const actualIdentity = await readDirectoryIdentity(directory, currentUid)
+  if (!sameDirectoryIdentity(actualIdentity, expectedIdentity)) return fail('INSTALLER_DIRECTORY_IDENTITY_CHANGED', '安装事务目录身份在切换前发生变化')
+}
+
+const removeDirectoryIfIdentityMatches = async ({ directory, expectedIdentity, currentUid }) => {
+  if (!expectedIdentity) return false
+  try {
+    const actualIdentity = await readDirectoryIdentity(directory, currentUid)
+    if (!sameDirectoryIdentity(actualIdentity, expectedIdentity)) return false
+    await rm(directory, { recursive: true, force: true })
+    return true
+  } catch {
+    // Identity mismatch and cleanup failures must preserve replacement paths and the primary error.
+    return false
+  }
+}
+
 const previewFor = ({ manifest, layout }) => ({
   action: 'preview-only',
   requiredVersion: manifest.version,
@@ -634,6 +664,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   let binDirectoryCreated = false
   const configDirectoryState = { created: false }
   let stagingRoot = null
+  let transactionDirectoryIdentity = null
   let archivePath
   let installedFresh = false
   let entryTransaction = null
@@ -642,6 +673,7 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   try {
     installRootCreated = await ensureDirectory({ directory: layout.installRoot, mode: 0o700, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
     stagingRoot = alreadyInstalled ? null : await mkdtemp(layout.pathApi.join(layout.installRoot, '.install-'))
+    if (stagingRoot) transactionDirectoryIdentity = await readDirectoryIdentity(stagingRoot, currentUid)
     archivePath = stagingRoot ? layout.pathApi.join(stagingRoot, manifest.assetName) : null
     if (!alreadyInstalled) {
       await downloadAsset({ manifest, destination: archivePath, fetchImplementation: dependencies.fetch ?? globalThis.fetch })
@@ -657,7 +689,9 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
       const inventory = await inventoryTree(stagingRoot, { pathApi: layout.pathApi, currentUid })
       await writeFile(layout.pathApi.join(stagingRoot, MARKER_NAME), `${JSON.stringify(markerFor(manifest, inventory, packageTreeSha256))}\n`, { flag: 'wx', mode: 0o600 })
       await assertSafePaths({ layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid, targets: [layout.installRoot, versionRoot] })
+      await assertDirectoryIdentity(stagingRoot, transactionDirectoryIdentity, currentUid)
       await rename(stagingRoot, versionRoot)
+      stagingRoot = null
       installedFresh = true
       await checkAfterSwap('version', [layout.installRoot, versionRoot])
       await inspectExistingVersion({ versionRoot, manifest, layout, currentUid })
@@ -685,10 +719,10 @@ export const runInstaller = async ({ argv, manifest: rawManifest, dependencies =
   } catch (error) {
     await configTransaction?.rollback().catch(() => {})
     await entryTransaction?.rollback().catch(() => {})
-    if (installedFresh) await rm(versionRoot, { recursive: true, force: true })
+    if (installedFresh) await removeDirectoryIfIdentityMatches({ directory: versionRoot, expectedIdentity: transactionDirectoryIdentity, currentUid })
     throw error
   } finally {
-    if (stagingRoot) await rm(stagingRoot, { recursive: true, force: true })
+    if (stagingRoot) await removeDirectoryIfIdentityMatches({ directory: stagingRoot, expectedIdentity: transactionDirectoryIdentity, currentUid })
     if (!succeeded) {
       await removeCreatedEmptyDirectory({ created: configDirectoryState.created, directory: layout.configDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })
       await removeCreatedEmptyDirectory({ created: binDirectoryCreated, directory: layout.binDirectory, layout, homeDirectory, windowsPathInspector: dependencies.windowsPathInspector, currentUid })

@@ -10,6 +10,7 @@ import {
   readFile,
   readlink,
   readdir,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -391,6 +392,27 @@ test('npm install failures use --ignore-scripts and clean the staging directory'
   await assert.rejects(lstat(join(fixture.homeDirectory, '.local/share/panshi-camp-cli/1.2.3')), { code: 'ENOENT' })
 })
 
+test('failure cleanup preserves a real replacement at the staging path', async (t) => {
+  let movedStagingRoot
+  let replacementSentinel
+  const fixture = await install(t, {
+    execFile: async (...args) => {
+      const options = args[2]
+      await fakeNpmInstall(...args)
+      movedStagingRoot = join(fixture.root, 'moved-transaction-staging')
+      replacementSentinel = join(options.cwd, 'replacement-sentinel')
+      await rename(options.cwd, movedStagingRoot)
+      await mkdir(options.cwd)
+      await writeFile(replacementSentinel, 'staging replacement must survive\n')
+    },
+  })
+
+  await assert.rejects(fixture.run(), /INSTALLER_PACKAGE_INVALID/u)
+
+  assert.equal(await readFile(replacementSentinel, 'utf8'), 'staging replacement must survive\n')
+  assert.equal(await readFile(join(movedStagingRoot, 'node_modules/panshi-camp-cli/dist/main.js'), 'utf8'), mainContents)
+})
+
 test('successful installation verifies package metadata, writes secure config, and is idempotent', async (t) => {
   const fixture = await install(t)
 
@@ -552,10 +574,32 @@ test('final verification rejects a config-after-swap version-root symlink and fu
 
   await assert.rejects(fixture.run(), /INSTALLER_(?:PATH_UNSAFE|VERSION_CONFLICT)/u)
 
-  await assert.rejects(lstat(join(layout.installRoot, manifest.version)), { code: 'ENOENT' })
+  const replacement = join(layout.installRoot, manifest.version)
+  assert.equal((await lstat(replacement)).isSymbolicLink(), true)
+  assert.equal(await readlink(replacement), outside)
   assert.equal(await readlink(layout.stableEntry), oldEntry)
   assert.equal(await readFile(layout.configPath, 'utf8'), originalConfig)
   assert.equal(await readFile(join(outside, 'sentinel'), 'utf8'), 'keep')
+})
+
+test('rollback preserves a real replacement when the fresh version directory identity changed', async (t) => {
+  const fixture = await install(t)
+  const layout = resolveLayout({ platform: 'linux', homeDirectory: fixture.homeDirectory })
+  const versionRoot = join(layout.installRoot, manifest.version)
+  const movedTransactionRoot = join(fixture.root, 'moved-transaction-version')
+  const sentinel = join(versionRoot, 'replacement-sentinel')
+  fixture.dependencies.afterSwapCheck = async (name) => {
+    if (name !== 'config') return
+    await rename(versionRoot, movedTransactionRoot)
+    await mkdir(versionRoot)
+    await writeFile(sentinel, 'replacement must survive\n')
+  }
+
+  await assert.rejects(fixture.run(), (error) => error?.code === 'INSTALLER_VERSION_CONFLICT')
+
+  assert.equal(await readFile(sentinel, 'utf8'), 'replacement must survive\n')
+  assert.equal((await lstat(movedTransactionRoot)).isDirectory(), true)
+  assert.equal(await readFile(join(movedTransactionRoot, 'node_modules/panshi-camp-cli/dist/main.js'), 'utf8'), mainContents)
 })
 
 test('final verification rejects a config-after-swap config symlink without touching its target', async (t) => {

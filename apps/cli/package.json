@@ -1,7 +1,6 @@
 {
   "name": "panshi-camp-cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "bin": {
     "panshi-camp": "./dist/main.js"
@@ -11,7 +10,6 @@
   ],
   "scripts": {
     "build": "node scripts/build-package.mjs",
-    "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },

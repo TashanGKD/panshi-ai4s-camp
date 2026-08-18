@@ -5,6 +5,7 @@ node_modules/
 coverage/
 dist/
 **/dist/
+dist-release/
 playwright-report/
 test-results/
 .superpowers/

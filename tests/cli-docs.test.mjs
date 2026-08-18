@@ -5,6 +5,8 @@ import { learnerCapabilities } from '../packages/contracts/dist/index.js'
 
 const cliPackage = JSON.parse(await readFile(new URL('../apps/cli/package.json', import.meta.url), 'utf8'))
 const rootPackage = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const installCommand = 'npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes'
+const productionFlags = '--profile panshi --environment production'
 
 const extractReference = (document) => {
   const match = document.match(/<!-- CLI_COMMAND_REFERENCE_START -->([\s\S]*?)<!-- CLI_COMMAND_REFERENCE_END -->/u)
@@ -57,5 +59,32 @@ test('CLI workspace commands match the package name in docs and root scripts', a
   assert.ok(cliDocument.includes(`npm run build ${expectedSelector}\n`), 'docs/cli.md CLI workspace selector drifted from package name')
   for (const scriptName of ['check:parity', 'test:parity']) {
     assert.ok(rootPackage.scripts[scriptName].includes(`npm run build ${expectedSelector}`), `${scriptName} CLI workspace selector drifted from package name`)
+  }
+})
+
+test('public CLI release docs share the 0.1.0 install and production contracts', async () => {
+  assert.equal(cliPackage.version, '0.1.0')
+  const documents = [
+    ['README.md', new URL('../README.md', import.meta.url)],
+    ['docs/cli.md', new URL('../docs/cli.md', import.meta.url)],
+    ['register example', new URL('../skills/panshi-camp/examples/register-and-apply.md', import.meta.url)],
+    ['status example', new URL('../skills/panshi-camp/examples/check-status-and-check-in.md', import.meta.url)],
+  ]
+
+  for (const [name, url] of documents) {
+    const contents = await readFile(url, 'utf8')
+    assert.ok(contents.includes(installCommand), `${name} must use the canonical public Skill install command`)
+    assert.ok(contents.includes(productionFlags), `${name} must require the canonical production profile and environment`)
+  }
+
+  for (const url of [new URL('../README.md', import.meta.url), new URL('../docs/cli.md', import.meta.url)]) {
+    const contents = await readFile(url, 'utf8')
+    assert.match(contents, /Node(?:\.js)? 24/u)
+    assert.match(contents, /npm 11/u)
+    assert.match(contents, /无需克隆源码/u)
+    assert.match(contents, /无需 sudo/u)
+    assert.match(contents, /预览[\s\S]{0,120}明确同意/u)
+    assert.match(contents, /CLI 包内[\s\S]{0,160}不携带[\s\S]{0,80}信任根/u)
+    assert.match(contents, /GitHub Skill/u)
   }
 })

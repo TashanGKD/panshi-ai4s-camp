@@ -22,7 +22,8 @@ describe('panshi-camp learner Skill package', () => {
   it('references CLI commands without copied endpoints, fixed event data, or secrets', async () => {
     const files = ['SKILL.md', 'examples/register-and-apply.md', 'examples/check-status-and-check-in.md']
     const content = (await Promise.all(files.map((file) => readFile(join(skillRoot, file), 'utf8')))).join('\n')
-    expect(content).toContain('panshi-camp --json')
+    expect(content).toContain('panshi-camp --profile panshi --environment production --json')
+    expect(content).not.toMatch(/^panshi-camp --json(?:\s|$)/mu)
     expect(content).not.toMatch(/\/api\/|https?:\/\/|20\d{2}[年/-]|1[3-9]\d{9}|演讲嘉宾|password|cookie|bearer token|qrPayload/iu)
     expect(content).toContain('不得根据此前对话推定用户已确认')
   })

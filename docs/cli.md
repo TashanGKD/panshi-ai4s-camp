@@ -4,10 +4,26 @@ CLI 与公开网站、学员个人中心使用同一套 `/api/v1` 服务和权�
 
 ## 环境与安装
 
-- Node.js：`>=24 <25`
-- npm：`>=11 <12`
+- Node.js 24（`>=24 <25`）
+- npm 11（`>=11 <12`）
 
-在项目根目录执行：
+公开使用时，从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
+
+```bash
+npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes
+```
+
+Skill 首先预览 CLI 安装位置、版本和附件；只有用户看过预览并明确同意，才执行当前用户级安装。CLI 包内的 Skill 快照不携带独立信任根，避免 tarball 摘要与 manifest 自引用；公开安装必须从 GitHub Skill 开始，受版本控制的 Skill manifest 才是信任根，Release remote manifest 只是核对件。
+
+首次生产调用和后续生产调用都必须显式使用 `--profile panshi --environment production`：
+
+```bash
+panshi-camp --profile panshi --environment production --json info show
+```
+
+无参数 CLI 仍显示帮助并采用本地安全默认，不会隐式访问远程服务。
+
+仅在开发本仓库时，才在项目根目录执行：
 
 ```bash
 npm install
@@ -17,7 +33,7 @@ npm run build -w panshi-camp-cli
 node apps/cli/dist/main.js --help
 ```
 
-不带服务地址时，CLI 只访问本机 `http://127.0.0.1:3001`。生产环境必须在权限为 `0600` 的配置文件中声明 HTTPS profile，并同时显式传入 `--profile <名称> --environment production`。配置文件不得保存密码、验证码、Cookie 或 token。
+不带服务地址时，CLI 只访问本机 `http://127.0.0.1:3001`。生产环境必须在权限为 `0600` 的配置文件中声明 HTTPS profile，并同时显式传入 `--profile panshi --environment production`。配置文件不得保存密码、验证码、Cookie 或 token。
 
 ```json
 {

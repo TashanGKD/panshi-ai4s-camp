@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile)
 const repoRoot = resolve(import.meta.dirname, '..')
 const cliRoot = join(repoRoot, 'apps/cli')
 const cliPackage = JSON.parse(await readFile(join(cliRoot, 'package.json'), 'utf8'))
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 const run = (command, args, options = {}) => execFileAsync(command, args, {
   cwd: repoRoot,
@@ -52,7 +53,7 @@ test('tracked source can npm ci and pack the CLI without ignored dist files', as
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-fresh-source-'))
   try {
     const sourceRoot = await createTrackedSourceSnapshot(temporaryRoot)
-    await run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: sourceRoot })
+    await run(npmCommand, ['ci', '--no-audit', '--no-fund'], { cwd: sourceRoot })
     await assert.rejects(
       readFile(join(sourceRoot, 'packages/camp-client/dist/index.js')),
       { code: 'ENOENT' },
@@ -61,8 +62,10 @@ test('tracked source can npm ci and pack the CLI without ignored dist files', as
 
     const packDestination = join(temporaryRoot, 'packed')
     await mkdir(packDestination)
-    const packed = await run('npm', [
+    await run(npmCommand, ['run', 'build', '-w', 'panshi-camp-cli'], { cwd: sourceRoot })
+    const packed = await run(npmCommand, [
       'pack',
+      '--ignore-scripts',
       '--json',
       '--pack-destination',
       packDestination,
@@ -81,7 +84,8 @@ test('tracked source can npm ci and pack the CLI without ignored dist files', as
 test('packed CLI installs and runs outside the monorepo', async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'panshi-cli-package-'))
   try {
-    const dryRun = await run('npm', ['pack', '--dry-run', '--json', cliRoot])
+    await run(npmCommand, ['run', 'build', '-w', 'panshi-camp-cli'])
+    const dryRun = await run(npmCommand, ['pack', '--ignore-scripts', '--dry-run', '--json', cliRoot])
     const [packReport] = JSON.parse(dryRun.stdout)
     const packedPaths = packReport.files.map(({ path }) => path).sort()
 
@@ -107,14 +111,19 @@ test('packed CLI installs and runs outside the monorepo', async () => {
       qr: '0.6.0',
     })
     assert.equal(Object.keys(packedPackage.dependencies).some((name) => name.startsWith('@panshi/')), false)
+    assert.ok(!packedPaths.includes('dist/skill/release-manifest.json'), 'the package snapshot must not contain the tracked trust root')
+    assert.ok(!packedPaths.some((path) => /(?:^|\/)tests?(?:\/|$)|\.test\./u.test(path)), 'the package must not contain tests')
+    const sourceManifest = JSON.parse(await readFile(join(repoRoot, 'skills/panshi-camp/release-manifest.json'), 'utf8'))
+    assert.equal(sourceManifest.packageName, cliPackage.name)
+    assert.equal(sourceManifest.version, cliPackage.version)
 
-    await run('npm', ['pack', '--json', '--pack-destination', temporaryRoot, cliRoot])
+    await run(npmCommand, ['pack', '--ignore-scripts', '--json', '--pack-destination', temporaryRoot, cliRoot])
     const archive = `panshi-camp-cli-${cliPackage.version}.tgz`
     assert.ok((await readdir(temporaryRoot)).includes(archive), 'npm pack must create the exact tarball')
 
     const installationRoot = join(temporaryRoot, 'installation')
     await mkdir(installationRoot)
-    await run('npm', [
+    await run(npmCommand, [
       'install',
       '--ignore-scripts',
       '--no-audit',
@@ -129,7 +138,7 @@ test('packed CLI installs and runs outside the monorepo', async () => {
         { code: 'ENOENT' },
       )
     }
-    const executable = join(installationRoot, 'node_modules/.bin/panshi-camp')
+    const executable = join(installationRoot, `node_modules/.bin/panshi-camp${process.platform === 'win32' ? '.cmd' : ''}`)
     const isolatedEnvironment = {
       ...process.env,
       HOME: join(temporaryRoot, 'empty-home'),
@@ -147,7 +156,7 @@ test('packed CLI installs and runs outside the monorepo', async () => {
     const version = await run(executable, ['--version'], { cwd: temporaryRoot, env: isolatedEnvironment })
     assert.equal(version.stdout, `${cliPackage.version}\n`)
     assert.equal(version.stderr, '')
-    assert.equal(basename(executable), 'panshi-camp')
+    assert.equal(basename(executable), process.platform === 'win32' ? 'panshi-camp.cmd' : 'panshi-camp')
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
   }

@@ -34,5 +34,7 @@ await cp(skillSource, skillOutput, {
   recursive: true,
   errorOnExist: true,
   force: false,
-  filter: (source) => !source.endsWith('.test.mjs') && !source.endsWith('/.npmignore'),
+  filter: (source) => !source.endsWith('.test.mjs')
+    && !source.endsWith('/.npmignore')
+    && !source.endsWith('/release-manifest.json'),
 })

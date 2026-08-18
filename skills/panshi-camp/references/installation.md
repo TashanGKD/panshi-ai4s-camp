@@ -23,7 +23,7 @@
 
 ## 尚未发布或安装失败
 
-Task 3 写入真实 `release-manifest.json` 之前，安装器会报告 `INSTALLER_NOT_PUBLISHED`（CLI 尚未发布），不联网、不写盘。不要猜测 Release 地址，不要自行改写 URL 或摘要。
+受版本控制的 Skill 已内嵌真实 `release-manifest.json`。CLI tarball 内的 Skill 快照会排除该独立信任根，避免 tarball SHA 反写 manifest 后形成自引用循环；公开安装必须从 GitHub Skill 路径开始，不得从 CLI 包内快照自行恢复或猜测信任根。
 
 摘要、大小、逐跳重定向主机、包名、版本、安装树清单或最终包内 `dist/main.js` 校验失败时，安装器会拒绝切换稳定入口并清理下载与临时安装目录。可信 manifest 的 `packageTreeSha256` 只覆盖发行 tarball 中的 `panshi-camp-cli` 包目录，不覆盖 npm 安装的公共、平台相关依赖。规范为：递归读取普通文件，拒绝符号链接及其他节点；相对路径统一使用 `/`，按完整路径的 UTF-8 字节升序排列；每项严格编码为 `{"path":<路径>,"size":<字节数>,"sha256":<文件内容的小写 SHA-256>}`，对这些对象组成的无空白 JSON 数组的 UTF-8 字节再计算小写 SHA-256；目录和 mode 不进入摘要。Task 4 发行门禁必须直接导入 `install-cli.mjs` 导出的 `computePackageTreeSha256(packageRoot)`，避免复制算法。安装器在首次安装、同版本复用和成功返回前都直接重算真实 CLI 包目录摘要并与可信 manifest 比较；本地 marker 只是辅助受管状态记录，不是信任根，同时伪造包树和 marker 仍会被拒绝。稳定入口直接指向已验证的包内入口，不依赖 npm `.bin` shim。npm 安装固定使用 `--ignore-scripts`，不会执行发行包生命周期脚本。已有同版本 CLI 包内容被修改、删除或增加，稳定入口非受管，路径经过符号链接／Windows reparse point，owner 不符，或 `panshi` profile 指向其他地址时，安装器均拒绝覆盖。
 
@@ -35,4 +35,4 @@ Task 3 写入真实 `release-manifest.json` 之前，安装器会报告 `INSTALL
 
 ## 平台验证边界
 
-Unix 安装、符号链接逃逸、权限和清理测试可在 macOS/Linux 运行。Windows 路径使用 `win32` 语义，并通过可注入 reparse 属性测试；真实 junction 创建与拒绝探针已写入但当前跳过。Task 4 将加入 Windows CI；加入前未验证。macOS 上的跳过结果不代表真实 junction 已在本机验证。
+Unix 安装、符号链接逃逸、权限和清理测试可在 macOS/Linux 运行。Windows 路径使用 `win32` 语义，并通过可注入 reparse 属性测试；Windows release matrix 会在 `windows-latest` 实际执行真实 junction 创建与拒绝探针。macOS/Linux 上的跳过结果不代表本机完成了 Windows junction 验证。

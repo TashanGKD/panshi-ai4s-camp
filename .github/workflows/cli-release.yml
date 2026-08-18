@@ -1,0 +1,54 @@
+name: CLI release
+
+on:
+  push:
+    tags:
+      - 'cli-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: node --test skills/panshi-camp/scripts/install-cli.test.mjs
+      - run: npm run build -w @panshi/contracts
+      - run: node --test tests/cli-docs.test.mjs tests/cli-package.test.mjs tests/cli-release.test.mjs
+      - run: npm test -w panshi-camp-cli
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:parity
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:cli-release
+      - name: Verify tag and release artifact
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run check:cli-release -- --tag "$RELEASE_TAG"
+      - name: Upload immutable CLI release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist-release/panshi-camp-cli-*.tgz dist-release/release-manifest.json --verify-tag --title "Panshi Camp CLI $RELEASE_TAG" --generate-notes

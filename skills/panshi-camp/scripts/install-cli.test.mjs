@@ -868,7 +868,7 @@ test('Windows path safety fails closed when an ancestor has reparse-point attrib
   assert.ok(seen.some((candidate) => candidate.includes('AppData')))
 })
 
-test('Windows real-junction probe (Task4 will add CI; unverified until then)', { skip: process.platform !== 'win32' }, async (t) => {
+test('Windows real-junction probe runs on the Windows release matrix', { skip: process.platform !== 'win32' }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'panshi-installer-junction-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const outside = join(root, 'outside')
@@ -901,11 +901,12 @@ test('the executable has no URL or SHA environment/argument override hooks', asy
   assert.doesNotMatch(source, /process\.env\.(?:.*URL|.*SHA)|--(?:url|sha256|manifest)/iu)
 })
 
-test('direct execution without the Task 3 manifest reports not published and creates nothing', async () => {
+test('direct execution with the embedded release manifest only previews by default', async () => {
   const script = new URL('./install-cli.mjs', import.meta.url)
-  const result = await execFileAsync(process.execPath, [script.pathname, '--yes'], { encoding: 'utf8' }).catch((error) => error)
-  assert.notEqual(result.code, 0)
-  assert.match(result.stderr, /尚未发布|INSTALLER_NOT_PUBLISHED/u)
+  const result = await execFileAsync(process.execPath, [script.pathname], { encoding: 'utf8' })
+  assert.equal(result.stderr, '')
+  assert.match(result.stdout, /"action": "preview-only"/u)
+  assert.match(result.stdout, /"requiredVersion": "0\.1\.0"/u)
 })
 
 test('Skill documents preview-first bootstrap and only uses an absolute stable CLI placeholder', async () => {
@@ -916,13 +917,13 @@ test('Skill documents preview-first bootstrap and only uses an absolute stable C
   assert.match(skill, /<PANSHI_CAMP_CLI>/u)
   assert.match(skill, /scripts\/install-cli\.mjs/u)
   assert.match(skill, /--yes/u)
-  assert.doesNotMatch(skill, /`panshi-camp(?:\s|`)/u)
+  assert.doesNotMatch(skill, /^panshi-camp(?:\s|$)/mu)
   assert.match(installation, /无参数.*预览/su)
   assert.match(installation, /明确同意.*--yes/su)
   assert.match(installation, /\.local\/bin\/panshi-camp/u)
   assert.match(installation, /panshi-camp\.cmd/u)
   assert.doesNotMatch(combined, /github\.com\/[^\s)]+\/releases\/download\//u)
-  assert.match(installation, /Task 4 将加入 Windows CI；加入前未验证/u)
+  assert.match(installation, /Windows release matrix.*真实 junction/su)
   assert.match(installation, /同一用户.*返回后.*改写/u)
   const requiredOrder = [
     '无参数运行安装器',

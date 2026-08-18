@@ -17,6 +17,22 @@
 - `packages/contracts`：跨应用共享的 Zod 数据契约与类型。
 - `packages/ui`：`web` 与 `admin` 共用的 React UI 组件。
 
+## CLI / Agent Skill 公开安装（0.1.0）
+
+前置环境为 Node.js 24 与 npm 11。直接从 GitHub Skill 路径安装，无需克隆源码，也无需 sudo：
+
+```bash
+npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes
+```
+
+Skill 会先预览 CLI 安装计划；只有用户查看预览并明确同意后，才会把 CLI 安装到当前用户目录。首次使用生产服务时，所有命令都必须显式带上 `--profile panshi --environment production`，例如：
+
+```bash
+panshi-camp --profile panshi --environment production --json info show
+```
+
+无参数 CLI 仍只显示帮助并保持本地安全默认，不会隐式访问生产服务。受版本控制的 `skills/panshi-camp/release-manifest.json` 是安装信任根；CLI 包内的 Skill 快照不携带独立信任根，避免摘要自引用循环。因此公开安装必须从 GitHub Skill 开始，Release 中的 remote manifest 仅用于核对。
+
 ## 快速开始
 
 在本项目根目录安装依赖并建立未跟踪的本地环境。Compose 的本地项目名固定为 `panshi-ai4s-camp-local`，不要与生产项目共用名字或卷：

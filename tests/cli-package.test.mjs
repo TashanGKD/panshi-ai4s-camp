@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
+import { shouldCopySkillSource } from '../apps/cli/scripts/package-files.mjs'
 
 const execFileAsync = promisify(execFile)
 const repoRoot = resolve(import.meta.dirname, '..')
@@ -46,6 +47,26 @@ test('Windows command shims run through ComSpec under Node 24', () => {
     resolveCommandInvocation('panshi-camp', ['--version'], { platform: 'linux', env: {} }),
     { command: 'panshi-camp', args: ['--version'] },
   )
+})
+
+test('Skill package filter excludes the trust root and tests on POSIX and Windows paths', () => {
+  for (const source of [
+    '/skill/release-manifest.json',
+    '/skill/nested/release-manifest.json',
+    'C:\\skill\\release-manifest.json',
+    'C:\\skill\\nested\\release-manifest.json',
+    '/skill/.npmignore',
+    'C:\\skill\\install-cli.test.mjs',
+  ]) {
+    assert.equal(shouldCopySkillSource(source), false, source)
+  }
+  for (const source of [
+    '/skill/SKILL.md',
+    'C:\\skill\\scripts\\install-cli.mjs',
+    '/skill/examples/register-and-apply.md',
+  ]) {
+    assert.equal(shouldCopySkillSource(source), true, source)
+  }
 })
 
 const createTrackedSourceSnapshot = async (temporaryRoot) => {

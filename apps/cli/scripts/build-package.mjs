@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { shouldCopySkillSource } from './package-files.mjs'
 
 const cliRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryRoot = resolve(cliRoot, '../..')
@@ -34,7 +35,5 @@ await cp(skillSource, skillOutput, {
   recursive: true,
   errorOnExist: true,
   force: false,
-  filter: (source) => !source.endsWith('.test.mjs')
-    && !source.endsWith('/.npmignore')
-    && !source.endsWith('/release-manifest.json'),
+  filter: shouldCopySkillSource,
 })

@@ -338,10 +338,11 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
   }
 
   it('is idempotent and reads only versions selected by published_version_id', async () => {
-    const { seedInitialContent } = await import('../src/db/seeds/initial-content.js')
+    const { initialPublishedContent, seedInitialContent } = await import('../src/db/seeds/initial-content.js')
+    const publishedModuleCount = Object.keys(initialPublishedContent).length
     const creatorId = await createCreator()
     await seedInitialContent(testDatabase!.db, creatorId)
-    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(14)
+    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(publishedModuleCount * 2)
     await seedInitialContent(testDatabase!.db, creatorId)
     await testDatabase!.db.update(contentModules).set({ draft: { title: '数据库草稿标题' } }).where(eq(contentModules.key, 'basic'))
     await testDatabase!.db.update(contentModules).set({ draft: { directions: '虚构交通路线' } }).where(eq(contentModules.key, 'travel'))
@@ -356,11 +357,11 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
 
     expect(siteResponse.status).toBe(200)
     expect(JSON.stringify(siteResponse.body)).not.toContain('数据库草稿标题')
-    expect(travelResponse.status).toBe(404)
+    expect(travelResponse.status).toBe(200)
     expect(JSON.stringify(travelResponse.body)).not.toContain('虚构交通路线')
     expect(await testDatabase!.db.select().from(contentModules)).toHaveLength(8)
-    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(7)
-    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(14)
+    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(publishedModuleCount)
+    expect(await testDatabase!.db.select().from(auditLogs)).toHaveLength(publishedModuleCount * 2)
   })
 
   it('reuses a matching pre-existing version instead of pointing at a missing deterministic id', async () => {
@@ -388,7 +389,7 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
     expect(publicationAudits[0]?.metadata).toEqual({
       moduleKey: 'basic',
       previousPublishedVersionId: null,
-      source: 'initial_content_seed',
+      source: 'authoritative_v2_1_1_seed',
       version: 1,
       versionId: existingId,
     })
@@ -399,7 +400,8 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
   })
 
   it('serializes concurrent seed calls without duplicate versions or audits', async () => {
-    const { seedInitialContent } = await import('../src/db/seeds/initial-content.js')
+    const { initialPublishedContent, seedInitialContent } = await import('../src/db/seeds/initial-content.js')
+    const publishedModuleCount = Object.keys(initialPublishedContent).length
     const creatorId = await createCreator()
 
     await expect(Promise.all([
@@ -408,10 +410,10 @@ describe.skipIf(!testDatabase)('public content PostgreSQL boundary', () => {
     ])).resolves.toEqual([undefined, undefined])
 
     expect(await testDatabase!.db.select().from(contentModules)).toHaveLength(8)
-    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(7)
+    expect(await testDatabase!.db.select().from(contentVersions)).toHaveLength(publishedModuleCount)
     const audits = await testDatabase!.db.select().from(auditLogs)
-    expect(audits).toHaveLength(14)
-    expect(audits.filter(({ action }) => action === 'content.version_created')).toHaveLength(7)
-    expect(audits.filter(({ action }) => action === 'content.version_published')).toHaveLength(7)
+    expect(audits).toHaveLength(publishedModuleCount * 2)
+    expect(audits.filter(({ action }) => action === 'content.version_created')).toHaveLength(publishedModuleCount)
+    expect(audits.filter(({ action }) => action === 'content.version_published')).toHaveLength(publishedModuleCount)
   })
 })

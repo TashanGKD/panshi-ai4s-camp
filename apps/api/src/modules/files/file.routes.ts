@@ -213,7 +213,8 @@ export const createFileRouter = (
   }).single('file')
 
   const receiveUpload: RequestHandler = (request, response, next) => {
-    if (confirmations) {
+    const actor = (response.locals as AuthenticatedLocals).authenticatedUser
+    if (confirmations && actor.role === 'user') {
       try { requireConfirmationHeaders(request) } catch (error) { next(error); return }
     }
     const declaredLength = Number(request.get('Content-Length'))
@@ -221,7 +222,6 @@ export const createFileRouter = (
       next(new HttpError(413, 'FILE_TOO_LARGE', '文件超过大小限制'))
       return
     }
-    const actor = (response.locals as AuthenticatedLocals).authenticatedUser
     let release: (() => void) | undefined
     try {
       release = gate.acquire(actor.id)
@@ -253,7 +253,7 @@ export const createFileRouter = (
             ? request.body.visibility as 'public' | 'authenticated' | 'admitted'
             : undefined
           const originalName = normalizeMultipartOriginalName(request.file.originalname)
-          if (confirmations) {
+          if (confirmations && actor.role === 'user') {
             const hash = createHash('sha256')
             const hashingStream = createReadStream(request.file.path)
             for await (const chunk of hashingStream) hash.update(chunk as Buffer)
@@ -329,7 +329,7 @@ export const createFileRouter = (
     try {
       const fileId = parseId(request.params.id ?? '')
       const actor = (response.locals as AuthenticatedLocals).authenticatedUser
-      if (!confirmations) await service.hide(fileId, actor)
+      if (!confirmations || actor.role === 'admin') await service.hide(fileId, actor)
       else await executeConfirmedRequest(confirmations, { userId: actor.id, role: actor.role, user: actor }, 'file.hide', request, { fileId })
       response.sendStatus(204)
     } catch (error) {
@@ -340,7 +340,7 @@ export const createFileRouter = (
     try {
       const fileId = parseId(request.params.id ?? '')
       const actor = (response.locals as AuthenticatedLocals).authenticatedUser
-      if (!confirmations) await service.remove(fileId, actor)
+      if (!confirmations || actor.role === 'admin') await service.remove(fileId, actor)
       else await executeConfirmedRequest(confirmations, { userId: actor.id, role: actor.role, user: actor }, 'file.delete', request, { fileId })
       response.sendStatus(204)
     } catch (error) {

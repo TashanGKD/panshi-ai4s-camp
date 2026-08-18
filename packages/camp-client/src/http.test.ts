@@ -49,6 +49,17 @@ describe('shared camp transport', () => {
       .rejects.toSatisfy((error: unknown) => error instanceof Error && !error.message.includes(token))
   })
 
+  it('does not misclassify credential-provider failures as network failures', async () => {
+    const credentialError = Object.assign(new Error('KEYCHAIN_UNAVAILABLE'), { code: 'KEYCHAIN_UNAVAILABLE' })
+    const transport = createTransport({
+      baseUrl: 'http://127.0.0.1:3001',
+      credentialProvider: { getToken: async () => { throw credentialError } },
+      fetch: vi.fn() as typeof fetch,
+    })
+
+    await expect(transport.json('auth.status', '/api/v1/me/profile', { schema: Envelope })).rejects.toBe(credentialError)
+  })
+
   it('preserves stable API error details, request ID, and Retry-After', async () => {
     const transport = createTransport({
       baseUrl: 'http://127.0.0.1:3001',

@@ -76,24 +76,20 @@ export const createTransport = (options: TransportOptions) => {
   const baseUrl = resolveCliBaseUrl(options.baseUrl)
   const fetchImpl = options.fetch ?? globalThis.fetch
   const request = async (capabilityId: LearnerCapabilityId | null, path: string, init: RequestInit = {}) => {
-    let token: string | null = null
+    const token = options.credentialProvider ? await options.credentialProvider.getToken() : null
+    if (token !== null && !TOKEN_PATTERN.test(token)) throw new CampClientError('UNAUTHORIZED', 'Stored credential is invalid', 401)
+    const headers = new Headers(init.headers)
+    if (!headers.has('Accept')) headers.set('Accept', 'application/json')
+    if (capabilityId) options.onCapability?.(capabilityId, path)
+    if (token) headers.set('Authorization', `Bearer ${token}`)
     try {
-      token = options.credentialProvider ? await options.credentialProvider.getToken() : null
-      if (token !== null && !TOKEN_PATTERN.test(token)) throw new CampClientError('UNAUTHORIZED', 'Stored credential is invalid', 401)
-      const headers = new Headers(init.headers)
-      if (!headers.has('Accept')) headers.set('Accept', 'application/json')
-      if (capabilityId) options.onCapability?.(capabilityId, path)
-      if (token) headers.set('Authorization', `Bearer ${token}`)
       return await fetchImpl(`${baseUrl}${path}`, {
         ...init,
         headers,
         credentials: token ? 'omit' : options.credentials ?? 'include',
       })
-    } catch (error) {
-      if (error instanceof CampClientError) throw error
+    } catch {
       throw new CampClientError('SERVICE_UNAVAILABLE', 'Network request failed', 0)
-    } finally {
-      token = null
     }
   }
 

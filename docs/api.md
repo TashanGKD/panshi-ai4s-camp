@@ -32,6 +32,10 @@
 - `POST /api/v1/auth/admin/logout`：若 Cookie 中存在 token，按 SHA-256 hash 幂等撤销；无论 token 缺失、未知、过期、已撤销或已轮换，都用匹配属性清除 Cookie 并返回 204。Origin 保护仍先于路由执行。
 - `GET /api/v1/me/profile`：返回 `id`、`displayName`、`phoneNormalized` 和 `role`；对有效的学员或管理员会话开放，未知、过期或已撤销会话返回 401。普通学员仍不能访问任何管理员接口。
 
+CLI 使用同一身份库，但通过 `POST /api/v1/auth/cli/login` 获取只适用于 CLI 的 bearer session。服务端数据库只保存 token 的 SHA-256 hash；CLI 将原始 token 存入操作系统钥匙串。请求不得同时携带 Cookie 与 bearer token；CLI 退出、密码重置、账号停用和会话过期都会使 bearer session 失效。CLI 登录不会撤销仍有效的浏览器会话，新的 CLI 登录只轮换同账号旧的 CLI session。
+
+所有 CLI 写操作先调用 `POST /api/v1/confirmations/prepare` 创建一次性确认意图。确认意图绑定 capability、脱敏预览、非秘密 payload 摘要、client binding 和 idempotency key；执行时由业务路由同时校验确认 header 与实际请求体。确认过期、已使用、请求体变化或绑定不一致均拒绝执行。密码、验证码和登录 token 不进入确认预览、payload hash 或审计 metadata。
+
 已实现的管理员内容接口均要求真实 `panshi_session` Cookie 和 `admin` 角色：
 
 - `GET /api/v1/admin/content/:key/draft`：读取草稿 payload、当前 `revision` 和已发布版本号。响应前按模块富文本白名单清洗历史数据库值。
@@ -191,6 +195,8 @@ Cookie 和 session 实现必须满足以下安全底线：
 - `DELETE /api/v1/files/:id`：文件所有者或有效管理员删除文件。状态先进入 `deleting` 并立即停止下载，物理删除成功后进入 `deleted`；物理删除失败进入 `delete_failed`，返回 503 `FILE_DELETE_FAILED`，再次调用同一接口可重试。
 
 附件一旦进入已提交或后续状态，隐藏和删除接口均返回 409 `FILE_LOCKED_BY_APPLICATION`；只读下载仍按本人或管理员权限判断。
+
+学员录取后，`GET /api/v1/me/check-in` 才返回报到凭证。Web 可将其渲染为二维码；CLI 的 `check-in show` 只返回脱敏占位，`check-in qr export --output <path>` 在本地生成权限受限的图片文件，任何人类可读或 JSON 输出均不得包含二维码原文。
 报名提交、附件隐藏和附件删除统一按“先报名记录、后文件记录”的顺序加行锁；报名状态核对与文件隐藏／删除在同一数据库事务内完成，避免提交与文件操作并发时出现已提交附件消失。
 
 上传仅允许 PDF 和 DOCX，稳定拒绝码包括 `FILE_REQUIRED`、`FILE_NAME_INVALID`、`FILE_EXTENSION_NOT_ALLOWED`、`FILE_MIME_MISMATCH`、`FILE_TOO_LARGE`、`FILE_CONTENT_INVALID`、`FILE_MULTIPART_INVALID`、`FILE_PURPOSE_INVALID`、`FILE_ATTACHMENT_SLOT_INVALID`、`FILE_UPLOAD_CONCURRENCY_LIMITED`、`FILE_UPLOAD_GLOBAL_RATE_LIMITED` 和 `FILE_UPLOAD_RATE_LIMITED`。错误响应不包含物理路径、文件内容或底层解析器消息。Task 13 绑定报名附件时必须同时验证文件处于 `active`、所有者是当前申请人、`purpose=registration_attachment`，且附件 `slot` 与提交所用表单快照一致；每个报名附件项只能绑定一个有效文件。

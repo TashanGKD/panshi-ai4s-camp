@@ -1,3 +1,4 @@
+import { CampClientError } from '@panshi/camp-client'
 import { CliRuntimeError } from '../errors.js'
 import { saveDownload } from './download.js'
 import { parseOptions, requiredString } from './options.js'
@@ -12,9 +13,17 @@ const download = async (kind: 'resource' | 'file', context: Parameters<CommandHa
   const { positionals, values } = parseOptions(context.args, { '--output': 'string' })
   if (positionals.length !== 1 || !positionals[0]) throw new CliRuntimeError('INPUT_INVALID', '请提供文件编号')
   const outputPath = requiredString(values, 'output')
-  const response = kind === 'resource'
-    ? await context.client.public.downloadResource(positionals[0])
-    : await context.client.files.download(positionals[0])
+  let response
+  try {
+    response = kind === 'resource'
+      ? await context.client.public.downloadResource(positionals[0])
+      : await context.client.files.download(positionals[0])
+  } catch (error) {
+    if (kind === 'resource' && error instanceof CampClientError && error.code === 'RESOURCE_NOT_AVAILABLE') {
+      throw new CliRuntimeError('RESOURCE_NOT_FOUND', error.message, error.details, error.requestId)
+    }
+    throw error
+  }
   return { data: await saveDownload({
     outputPath, stream: response.stream, headers: response.headers,
     workspaceRoot: context.workspaceRoot, homeDirectory: context.homeDirectory,

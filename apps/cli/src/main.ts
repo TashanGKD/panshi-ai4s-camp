@@ -96,7 +96,7 @@ export const runCli = async (argv: string[], dependencies: Dependencies = {}): P
     const baseUrl = resolveEndpoint({ explicitBaseUrl: parsed.baseUrl, profile, environment: parsed.environment })
     const selected = findCommand(parsed.command).command
     const capability = learnerCapabilities.find(({ id }) => id === selected.capabilityId)
-    const useCredential = parsed.profile !== undefined || (capability !== undefined && !capability.roles.includes('anonymous'))
+    const useCredential = parsed.profile !== undefined || capability?.roles.includes('user') === true
     const client = createCampClient({
       baseUrl,
       fetch: dependencies.fetch,

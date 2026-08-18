@@ -1,7 +1,7 @@
 import type { Request } from 'express'
 import type { JsonObject, LearnerCapabilityId } from '@panshi/contracts'
 import { HttpError } from '../../middleware/error-handler.js'
-import type { ConfirmationActor, ConfirmationService } from './confirmation.service.js'
+import { ConfirmationError, type ConfirmationActor, type ConfirmationService } from './confirmation.service.js'
 
 const HEADER_BINDING = 'X-Confirmation-Binding'
 const HEADER_IDEMPOTENCY = 'X-Idempotency-Key'
@@ -16,7 +16,12 @@ export const executeConfirmedRequest = async (
   serverContext?: unknown,
 ) => {
   const { confirmationId, clientBinding, idempotencyKey } = requireConfirmationHeaders(request)
-  return service.execute(actor, confirmationId, { clientBinding, idempotencyKey, payload }, capabilityId, serverContext)
+  try {
+    return await service.execute(actor, confirmationId, { clientBinding, idempotencyKey, payload }, capabilityId, serverContext)
+  } catch (error) {
+    if (error instanceof ConfirmationError) throw new HttpError(error.status, error.code, error.message)
+    throw error
+  }
 }
 
 export const requireConfirmationHeaders = (request: Pick<Request, 'get'>) => {

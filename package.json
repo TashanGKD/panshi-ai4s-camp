@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "node tests/workspaces.test.mjs && node --test tests/release-runner.test.mjs && npm run test:parity && npm run test:e2e-startup && npm run test:deployment && npm run test:workspaces",
+    "test": "node tests/workspaces.test.mjs && npm run build -w @panshi/contracts && node --test tests/release-runner.test.mjs tests/cli-docs.test.mjs && npm run test:parity && npm run test:e2e-startup && npm run test:deployment && npm run test:workspaces",
     "test:release": "node scripts/run-release-tests.mjs",
     "check:parity": "npm run build -w @panshi/contracts && npm run build -w @panshi/cli && node scripts/check-web-cli-parity.mjs",
     "test:parity": "npm run build -w @panshi/contracts && npm run build -w @panshi/cli && node scripts/check-web-cli-parity.self-test.mjs && node --test tests/web-cli-parity.test.mjs",
@@ -30,6 +30,7 @@
     "e2e:student-auth": "playwright test e2e/student-auth.spec.ts --config=playwright.student-auth.config.ts",
     "e2e:application": "playwright test e2e/application-submit.spec.ts --config=playwright.application.config.ts",
     "e2e:review": "playwright test e2e/review-workflow.spec.ts --config=playwright.review.config.ts",
+    "e2e:cli": "node scripts/run-cli-e2e.mjs",
     "test:e2e:all": "node scripts/run-e2e-all.mjs",
     "dev:web": "npm run dev -w @panshi/web",
     "dev:admin": "npm run dev -w @panshi/admin",

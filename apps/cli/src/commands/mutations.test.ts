@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { runApplicationSubmit } from './application.js'
-import { runAuthLogin } from './auth.js'
+import { runAuthLogin, runAuthLogout, runAuthPasswordReset, runAuthVerificationSend } from './auth.js'
 import { runFileDelete, runFileUpload } from './files.js'
 
 const id = () => crypto.randomUUID()
@@ -58,5 +58,19 @@ describe('confirmed mutation commands', () => {
     const client = { confirmations: { prepare: vi.fn() }, auth: { loginCli: vi.fn() } }
     await expect(runAuthLogin(context(client, ['plaintext-password']))).rejects.toMatchObject({ code: 'INPUT_INVALID' })
     expect(client.confirmations.prepare).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['verification', runAuthVerificationSend, ['--phone', '+8613800000000', '--purpose', 'register'], { auth: { sendVerificationCode: vi.fn(async () => ({ accepted: true })) } }, { accepted: true }],
+    ['password reset', runAuthPasswordReset, ['--phone', '+8613800000000'], { auth: { resetPassword: vi.fn(async () => ({ reset: true })) } }, { reset: true }],
+    ['logout', runAuthLogout, [], { auth: { logoutCli: vi.fn(async () => ({ loggedOut: true })) } }, { loggedOut: true }],
+  ] as const)('preserves the raw confirmed %s result as command data', async (_name, handler, args, clientPart, expected) => {
+    const confirmationArgs = ['--confirmation-id', id(), '--client-binding', 'b'.repeat(64), '--idempotency-key', id()]
+    const result = await handler(context({ ...clientPart, confirmations: { prepare: vi.fn() } }, [...args, ...confirmationArgs], {
+      json: true,
+      readSecrets: async () => ({ code: '123456', newPassword: 'safe-password' }),
+    }))
+
+    expect(result.data).toEqual(expected)
   })
 })

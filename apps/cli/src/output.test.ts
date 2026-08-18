@@ -8,7 +8,7 @@ describe('CLI output', () => {
     expect(stdout).toHaveBeenCalledTimes(1)
     expect(stdout.mock.calls[0]?.[0]).toBe('{"ok":true,"apiVersion":"v1","capabilityId":"public.site.show","data":{},"requestId":"local"}\n')
     expect(stderr).toHaveBeenCalledWith('loading\n')
-    expect(stdout.mock.calls[0]?.[0]).not.toMatch(/\u001b\[/u)
+    expect(stdout.mock.calls[0]?.[0]).not.toContain(`${String.fromCharCode(27)}[`)
   })
 
   it('writes a JSON failure to stdout for agent callers', () => {

@@ -8,7 +8,8 @@ export const runCheckInShow: CommandHandler = async ({ client, args }) => {
   if (args.length) throw new CliRuntimeError('INPUT_INVALID', 'check-in show 不接受额外参数')
   const response = await client.checkIn.show()
   if (response.data.availability === 'unavailable') return { data: response.data }
-  const { qrPayload: _redacted, ...safe } = response.data
+  const safe = { ...response.data }
+  delete (safe as Partial<typeof response.data>).qrPayload
   return { data: { ...safe, qrPayload: '[REDACTED]' } }
 }
 
@@ -17,14 +18,11 @@ export const runCheckInQrExport: CommandHandler = async (context) => {
   if (positionals.length) throw new CliRuntimeError('INPUT_INVALID', 'check-in qr export 参数无效')
   const response = await context.client.checkIn.show()
   if (response.data.availability === 'unavailable') throw new CliRuntimeError('STATE_NOT_ALLOWED', response.data.reason)
-  let payload = response.data.qrPayload
-  try {
-    const bytes = encodeQR(payload, 'gif', { scale: 8 })
-    const result = await savePrivateBytes({
-      outputPath: requiredString(values, 'output'), bytes,
-      workspaceRoot: context.workspaceRoot, homeDirectory: context.homeDirectory,
-    })
-    bytes.fill(0)
-    return { data: { ...result, displayCode: response.data.displayCode } }
-  } finally { payload = '' }
+  const bytes = encodeQR(response.data.qrPayload, 'gif', { scale: 8 })
+  const result = await savePrivateBytes({
+    outputPath: requiredString(values, 'output'), bytes,
+    workspaceRoot: context.workspaceRoot, homeDirectory: context.homeDirectory,
+  })
+  bytes.fill(0)
+  return { data: { ...result, displayCode: response.data.displayCode } }
 }

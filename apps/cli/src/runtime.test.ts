@@ -23,6 +23,25 @@ describe('CLI safe defaults', () => {
     expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toMatchObject({ ok: false, code: 'INPUT_INVALID' })
   })
 
+  it('uses an available learner credential for optionally authenticated resource reads', async () => {
+    const token = 'a'.repeat(64)
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${token}`)
+      return new Response(JSON.stringify({ apiVersion: 'v1', data: { resources: [] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const stdout = vi.fn()
+
+    await expect(runCli(['--json', 'resources', 'list'], {
+      stdout,
+      fetch: fetch as typeof globalThis.fetch,
+      getCredential: async () => token,
+    })).resolves.toBe(0)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it.each(['--password', '--verification-code', '--token', '--cookie'])('rejects secret-bearing option %s', (option) => {
     expect(() => parseCliArgv(['auth', 'login', option, 'secret'])).toThrow('UNKNOWN_OR_FORBIDDEN_OPTION')
   })

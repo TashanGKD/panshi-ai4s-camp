@@ -87,6 +87,13 @@ export type AppDependencies = {
 }
 
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const anonymousConfirmedCliPaths = new Set([
+  '/api/v1/auth/verification/send',
+  '/api/v1/auth/register',
+  '/api/v1/auth/password/reset',
+])
+const confirmationUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+const confirmationBinding = /^[a-f0-9]{64}$/u
 const privateNoStore: RequestHandler = (_request, response, next) => {
   response.setHeader('Cache-Control', 'private, no-store')
   const setHeader = response.setHeader.bind(response)
@@ -130,8 +137,14 @@ const createOriginGuard = (allowedOrigins: readonly string[]): RequestHandler =>
       const anonymousConfirmationWithoutBrowserState = /^\/api\/v1\/confirmations\/(?:prepare|[0-9a-f-]+\/execute)$/u.test(request.path)
         && request.get('Authorization') === undefined
         && typeof request.cookies?.panshi_session !== 'string'
+      const anonymousConfirmedCliMutation = anonymousConfirmedCliPaths.has(request.path)
+        && request.get('Authorization') === undefined
+        && typeof request.cookies?.panshi_session !== 'string'
+        && confirmationUuid.test(request.get('X-Confirmation-Id') ?? '')
+        && confirmationBinding.test(request.get('X-Confirmation-Binding') ?? '')
+        && confirmationUuid.test(request.get('X-Idempotency-Key') ?? '')
       if (origin === undefined) {
-        if (bearerOnly || cliLoginWithoutBrowserState || anonymousConfirmationWithoutBrowserState) {
+        if (bearerOnly || cliLoginWithoutBrowserState || anonymousConfirmationWithoutBrowserState || anonymousConfirmedCliMutation) {
           next()
           return
         }

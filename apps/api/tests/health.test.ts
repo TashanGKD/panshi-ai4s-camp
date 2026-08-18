@@ -207,6 +207,41 @@ describe('API health', () => {
     expect(ApiErrorSchema.parse(response.body).error.code).toBe('ORIGIN_REQUIRED')
   })
 
+  it('permits a no-cookie anonymous CLI auth mutation only with the complete confirmation header set', async () => {
+    const response = await request(createTestApp())
+      .post('/api/v1/auth/verification/send')
+      .set('X-Confirmation-Id', '10000000-0000-4000-8000-000000000001')
+      .set('X-Confirmation-Binding', 'b'.repeat(64))
+      .set('X-Idempotency-Key', '20000000-0000-4000-8000-000000000001')
+      .send({})
+
+    expect(response.status).toBe(404)
+    expect(ApiErrorSchema.parse(response.body).error.code).toBe('NOT_FOUND')
+  })
+
+  it.each([
+    ['missing one confirmation header', '/api/v1/auth/verification/send', {
+      'X-Confirmation-Id': '10000000-0000-4000-8000-000000000001',
+      'X-Confirmation-Binding': 'b'.repeat(64),
+    }],
+    ['browser cookie present', '/api/v1/auth/verification/send', {
+      'X-Confirmation-Id': '10000000-0000-4000-8000-000000000001',
+      'X-Confirmation-Binding': 'b'.repeat(64),
+      'X-Idempotency-Key': '20000000-0000-4000-8000-000000000001',
+      Cookie: 'panshi_session=browser-state',
+    }],
+    ['unlisted mutation path', '/api/v1/not-implemented', {
+      'X-Confirmation-Id': '10000000-0000-4000-8000-000000000001',
+      'X-Confirmation-Binding': 'b'.repeat(64),
+      'X-Idempotency-Key': '20000000-0000-4000-8000-000000000001',
+    }],
+  ])('rejects anonymous no-Origin requests with $0', async (_name, path, headers) => {
+    const response = await request(createTestApp()).post(path).set(headers).send({})
+
+    expect(response.status).toBe(403)
+    expect(ApiErrorSchema.parse(response.body).error.code).toBe('ORIGIN_REQUIRED')
+  })
+
   it('permits configured origins and returns the versioned API 404 boundary', async () => {
     const response = await request(createTestApp())
       .post('/api/v1/not-implemented')

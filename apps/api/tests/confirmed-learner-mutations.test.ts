@@ -5,34 +5,40 @@ import { join } from 'node:path'
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
-import type { ConfirmationService } from '../src/modules/confirmations/confirmation.service.js'
+import { ConfirmationError, type ConfirmationService } from '../src/modules/confirmations/confirmation.service.js'
 
 const origin = 'https://camp.example'
 const token = 'd'.repeat(64)
+const adminToken = 'a'.repeat(64)
 const user = { id: '10000000-0000-4000-8000-000000000001', displayName: '学员', phoneNormalized: '+8613800138000', passwordHash: 'hash', role: 'user' as const, disabledAt: null, passwordResetRequiredAt: null }
+const admin = { ...user, id: '10000000-0000-4000-8000-000000000002', displayName: '管理员', phoneNormalized: '+8613900139000', role: 'admin' as const }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const identityRepository = {
   findUserByPhoneNormalized: async () => null,
   findSessionByTokenHash: async (tokenHash: string) => tokenHash === hash(token)
     ? { tokenHash, kind: 'web' as const, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user }
-    : null,
+    : tokenHash === hash(adminToken)
+      ? { tokenHash, kind: 'admin_web' as const, expiresAt: new Date(Date.now() + 60_000), revokedAt: null, user: admin }
+      : null,
   revokeSessionByTokenHash: async () => undefined,
 }
 const authTransactions = { rotateSessionAndAudit: async () => undefined, revokeSessionAndAudit: async () => undefined }
+const confirmationExecute = vi.fn(async (_actor, _id, _input, capabilityId: string) => {
+  if (capabilityId === 'auth.login') return { apiVersion: 'v1', data: { token: 'e'.repeat(64), expiresAt: new Date(Date.now() + 60_000).toISOString(), user: { id: user.id, displayName: user.displayName, role: user.role } } }
+  if (capabilityId === 'auth.register') return { apiVersion: 'v1', data: { user: { id: user.id, displayName: user.displayName, role: user.role } } }
+  if (capabilityId === 'file.upload') return { apiVersion: 'v1', data: { file: { id: randomUUID(), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 8 } } }
+  return { apiVersion: 'v1', data: { accepted: true } }
+})
 const confirmations = {
   prepare: vi.fn(async () => ({
     confirmationId: randomUUID(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(), preview: { action: '测试确认' }, payloadSha256: 'a'.repeat(64), confirmation: 'single' as const,
   })),
-  execute: vi.fn(async (_actor, _id, _input, capabilityId: string) => {
-    if (capabilityId === 'auth.login') return { apiVersion: 'v1', data: { token: 'e'.repeat(64), expiresAt: new Date(Date.now() + 60_000).toISOString(), user: { id: user.id, displayName: user.displayName, role: user.role } } }
-    if (capabilityId === 'auth.register') return { apiVersion: 'v1', data: { user: { id: user.id, displayName: user.displayName, role: user.role } } }
-    if (capabilityId === 'file.upload') return { apiVersion: 'v1', data: { file: { id: randomUUID(), originalName: 'resume.pdf', mimeType: 'application/pdf', sizeBytes: 8 } } }
-    return { apiVersion: 'v1', data: { accepted: true } }
-  }),
+  execute: confirmationExecute,
 } as unknown as ConfirmationService
 const applicationService = { getMine: vi.fn(), saveDraft: vi.fn(), reopen: vi.fn(), submit: vi.fn() } as never
-const fileService = { upload: vi.fn(), openForDownload: vi.fn(), openPublishedResource: vi.fn(), hide: vi.fn(), remove: vi.fn() } as never
+const fileUpload = vi.fn(async () => ({ id: randomUUID(), originalName: 'fixture.pdf', mimeType: 'application/pdf', sizeBytes: 8 }))
+const fileService = { upload: fileUpload, openForDownload: vi.fn(), openPublishedResource: vi.fn(), hide: vi.fn(), remove: vi.fn() } as never
 const accountService = { changeOwnPassword: vi.fn() } as never
 let temporaryDirectory = ''
 
@@ -68,6 +74,25 @@ const prepare = async (capabilityId: string, payload: Record<string, unknown>, a
 }
 
 describe('confirmed learner mutation boundary', () => {
+  it('keeps administrator resource uploads on the authenticated admin path without learner confirmation headers', async () => {
+    fileUpload.mockResolvedValueOnce({ id: randomUUID(), originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 8 })
+    const response = await request(app()).post('/api/v1/files').set('Origin', origin)
+      .set('Cookie', `panshi_session=${adminToken}`).field('purpose', 'resource').field('visibility', 'admitted')
+      .attach('file', Buffer.from('%PDF-1.4'), { filename: 'guide.pdf', contentType: 'application/pdf' })
+
+    expect(response.status).toBe(201)
+    expect(fileUpload).toHaveBeenCalledOnce()
+  })
+
+  it('maps confirmation contract failures to their public API code', async () => {
+    confirmationExecute.mockRejectedValueOnce(new ConfirmationError('CONFIRMATION_MISMATCH', '确认内容与准备阶段不一致', 409))
+    const response = await request(app()).post('/api/v1/auth/verification/send')
+      .set('Origin', origin).set(confirmedHeaders()).send({ phone: '13800138000', purpose: 'register' })
+
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('CONFIRMATION_MISMATCH')
+  })
+
   it.each([
     ['verification send', '/api/v1/auth/verification/send', { phone: '13800138000', purpose: 'register' }],
     ['registration', '/api/v1/auth/register', { phone: '13800138000', code: '123456', password: 'password-123' }],

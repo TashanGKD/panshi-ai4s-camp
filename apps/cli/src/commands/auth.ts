@@ -53,7 +53,7 @@ export const runAuthVerificationSend: CommandHandler = async (context) => {
     options: extracted.options, previewPayload: { phoneMasked: maskMainlandChinaMobile(phone), purpose: body.purpose }, executionPayload: body,
     execute: async (confirmation) => await context.client.auth.sendVerificationCode(body, confirmation),
   })
-  return { data: response.data }
+  return { data: response }
 }
 
 export const runAuthRegister: CommandHandler = async (context) => {
@@ -84,7 +84,7 @@ export const runAuthPasswordReset: CommandHandler = async (context) => {
       options: extracted.options, previewPayload: { phoneMasked: maskMainlandChinaMobile(phone) }, executionPayload: body,
       execute: async (confirmation) => await context.client.auth.resetPassword(body, confirmation),
     })
-    return { data: response.data }
+    return { data: response }
   } finally { body.code = ''; body.newPassword = ''; secrets.code = ''; secrets.newPassword = '' }
 }
 
@@ -96,5 +96,5 @@ export const runAuthLogout: CommandHandler = async (context) => {
     execute: async (confirmation) => await context.client.auth.logoutCli(confirmation),
   })
   await context.credentials.delete(context.profileName)
-  return { data: data.data }
+  return { data }
 }

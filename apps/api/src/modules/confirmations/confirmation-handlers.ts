@@ -7,7 +7,7 @@ import {
   StudentLoginRequestSchema,
   StudentRegistrationRequestSchema,
   learnerCapabilities,
-  normalizeMainlandChinaMobile,
+  maskMainlandChinaMobile,
   type JsonObject,
   type LearnerCapabilityId,
 } from '@panshi/contracts'
@@ -75,11 +75,6 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return result.data
 }
 
-const maskedPhone = (input: string) => {
-  const phone = normalizeMainlandChinaMobile(input)
-  return `${phone.slice(0, 5)}******${phone.slice(-3)}`
-}
-
 const applicationBinding = (payload: JsonObject): JsonObject => {
   const expectedRevision = typeof payload.expectedRevision === 'number' ? payload.expectedRevision : -1
   const profile = payload.profile && typeof payload.profile === 'object' && !Array.isArray(payload.profile) ? payload.profile as JsonObject : {}
@@ -115,7 +110,7 @@ export const createLearnerConfirmationHandlers = (dependencies: {
       prepare: (payload) => ({ preview: { action: '发送验证码', phone: payload.phoneMasked ?? null, purpose: payload.purpose ?? null }, targetType: 'account' }),
       executionBindingPayload: (_prepared, execution) => {
         const input = parse(SendVerificationCodeRequestSchema, execution)
-        return { phoneMasked: maskedPhone(input.phone), purpose: input.purpose }
+        return { phoneMasked: maskMainlandChinaMobile(input.phone), purpose: input.purpose }
       },
       execute: async ({ executionPayload }) => {
         const input = parse(SendVerificationCodeRequestSchema, executionPayload)
@@ -126,7 +121,7 @@ export const createLearnerConfirmationHandlers = (dependencies: {
     {
       capabilityId: 'auth.register',
       prepare: (payload) => ({ preview: { action: '注册账号', phone: payload.phoneMasked ?? null }, targetType: 'account' }),
-      executionBindingPayload: (_prepared, execution) => ({ phoneMasked: maskedPhone(parse(StudentRegistrationRequestSchema, execution).phone) }),
+      executionBindingPayload: (_prepared, execution) => ({ phoneMasked: maskMainlandChinaMobile(parse(StudentRegistrationRequestSchema, execution).phone) }),
       execute: async ({ executionPayload }) => {
         const input = parse(StudentRegistrationRequestSchema, executionPayload)
         const user = await verification().register(input.phone, input.code, input.password)
@@ -138,7 +133,7 @@ export const createLearnerConfirmationHandlers = (dependencies: {
       prepare: (payload) => ({ preview: { action: '登录账号', phone: payload.phoneMasked ?? null, clientKind: payload.clientKind ?? null }, targetType: 'session' }),
       executionBindingPayload: (_prepared, execution) => {
         const input = parse(StudentLoginRequestSchema.extend({ clientKind: z.enum(['web', 'cli']) }), execution)
-        return { phoneMasked: maskedPhone(input.phone), clientKind: input.clientKind }
+        return { phoneMasked: maskMainlandChinaMobile(input.phone), clientKind: input.clientKind }
       },
       execute: async ({ executionPayload }) => {
         const input = parse(StudentLoginRequestSchema.extend({ clientKind: z.enum(['web', 'cli']) }), executionPayload)
@@ -152,7 +147,7 @@ export const createLearnerConfirmationHandlers = (dependencies: {
     {
       capabilityId: 'auth.password_reset',
       prepare: (payload) => ({ preview: { action: '重置密码', phone: payload.phoneMasked ?? null }, targetType: 'account' }),
-      executionBindingPayload: (_prepared, execution) => ({ phoneMasked: maskedPhone(parse(PasswordResetRequestSchema, execution).phone) }),
+      executionBindingPayload: (_prepared, execution) => ({ phoneMasked: maskMainlandChinaMobile(parse(PasswordResetRequestSchema, execution).phone) }),
       execute: async ({ executionPayload }) => {
         const input = parse(PasswordResetRequestSchema, executionPayload)
         await verification().resetPassword(input.phone, input.code, input.newPassword)

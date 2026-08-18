@@ -10,4 +10,12 @@ describe('CLI output', () => {
     expect(stderr).toHaveBeenCalledWith('loading\n')
     expect(stdout.mock.calls[0]?.[0]).not.toMatch(/\u001b\[/u)
   })
+
+  it('writes a JSON failure to stdout for agent callers', () => {
+    const stdout = vi.fn(); const stderr = vi.fn(); const output = createOutput({ json: true, stdout, stderr })
+    output.failure({ ok: false, code: 'INPUT_INVALID', message: 'invalid', requestId: 'local' })
+    expect(stdout).toHaveBeenCalledOnce()
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toEqual({ ok: false, code: 'INPUT_INVALID', message: 'invalid', requestId: 'local' })
+    expect(stderr).not.toHaveBeenCalled()
+  })
 })

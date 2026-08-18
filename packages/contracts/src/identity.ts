@@ -23,6 +23,11 @@ export const normalizeMainlandChinaMobile = (input: string): string => {
   return result.data
 }
 
+export const maskMainlandChinaMobile = (input: string): string => {
+  const phone = normalizeMainlandChinaMobile(input)
+  return `${phone.slice(0, 5)}******${phone.slice(-3)}`
+}
+
 export const validatePassword = (input: string): string => {
   const result = PasswordSchema.safeParse(input)
   if (!result.success) throw new Error('Password must be 8 to 72 UTF-8 bytes')

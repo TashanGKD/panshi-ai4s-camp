@@ -1,6 +1,7 @@
 import {
   ApiErrorSchema,
   ConfirmationPrepareResponseSchema,
+  maskMainlandChinaMobile,
   type JsonObject,
   type LearnerCapabilityId,
 } from '@panshi/contracts'
@@ -77,11 +78,7 @@ export const confirmationClient = createConfirmationClient(import.meta.env.VITE_
   pageOrigin: typeof window === 'undefined' ? undefined : window.location.origin,
 })
 
-export const maskMainlandPhone = (phone: string) => {
-  const digits = phone.replace(/\D/gu, '')
-  const normalized = digits.startsWith('86') ? `+${digits}` : `+86${digits}`
-  return `${normalized.slice(0, 5)}******${normalized.slice(-3)}`
-}
+export const maskMainlandPhone = maskMainlandChinaMobile
 
 export const applicationConfirmationPayload = (body: { expectedRevision: number, profile?: Record<string, unknown>, answers?: Record<string, unknown>, attachments?: Array<{ slotId: string }> }): JsonObject => ({
   expectedRevision: body.expectedRevision,

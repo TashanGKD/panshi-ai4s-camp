@@ -1,4 +1,3 @@
-import { parseArgs } from 'node:util'
 import { CliRuntimeError } from './errors.js'
 
 const forbidden = new Set(['--password', '--verification-code', '--token', '--cookie'])
@@ -14,24 +13,23 @@ export type ParsedCliArgv = {
 
 export const parseCliArgv = (argv: string[]): ParsedCliArgv => {
   for (const item of argv) if (forbidden.has(item.split('=', 1)[0]!)) throw new CliRuntimeError('UNKNOWN_OR_FORBIDDEN_OPTION')
-  try {
-    const parsed = parseArgs({
-      args: argv, allowPositionals: true, strict: true,
-      options: {
-        json: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false },
-        'base-url': { type: 'string' }, profile: { type: 'string' }, environment: { type: 'string' },
-      },
-    })
-    const environment = parsed.values.environment
-    if (environment !== undefined && environment !== 'local' && environment !== 'production') throw new CliRuntimeError('ENVIRONMENT_INVALID')
-    return {
-      command: parsed.positionals, json: parsed.values.json ?? false, help: parsed.values.help ?? false,
-      ...(parsed.values['base-url'] ? { baseUrl: parsed.values['base-url'] } : {}),
-      ...(parsed.values.profile ? { profile: parsed.values.profile } : {}),
-      ...(environment ? { environment } : {}),
+  const result: ParsedCliArgv = { command: [], json: false, help: false }
+  for (let index = 0; index < argv.length; index += 1) {
+    const item = argv[index]!
+    if (item === '--json') { result.json = true; continue }
+    if (item === '--help' || item === '-h') { result.help = true; continue }
+    const global = ['--base-url', '--profile', '--environment'].find((name) => item === name || item.startsWith(`${name}=`))
+    if (!global) { result.command.push(item); continue }
+    const inline = item.startsWith(`${global}=`) ? item.slice(global.length + 1) : undefined
+    const value = inline ?? argv[index + 1]
+    if (!value || (!inline && value.startsWith('-'))) throw new CliRuntimeError('UNKNOWN_OR_FORBIDDEN_OPTION')
+    if (!inline) index += 1
+    if (global === '--base-url') result.baseUrl = value
+    if (global === '--profile') result.profile = value
+    if (global === '--environment') {
+      if (value !== 'local' && value !== 'production') throw new CliRuntimeError('ENVIRONMENT_INVALID')
+      result.environment = value
     }
-  } catch (error) {
-    if (error instanceof CliRuntimeError) throw error
-    throw new CliRuntimeError('UNKNOWN_OR_FORBIDDEN_OPTION')
   }
+  return result
 }

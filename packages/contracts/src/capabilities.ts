@@ -104,12 +104,12 @@ const defineCapability = (
 
 export const learnerCapabilities = CapabilityRegistrySchema.parse([
   defineCapability('public.site.show', 'GET /api/v1/public/site', ['/'], 'info show', ['info.show'], ['anonymous'], 'read', 'none', 'PublicSiteResponse'),
-  defineCapability('public.content.show', 'GET /api/v1/public/content/:key', ['/'], 'content show <key>', ['content.show'], ['anonymous'], 'read', 'none', 'PublicContentResponse'),
+  defineCapability('public.content.show', 'GET /api/v1/public/content/:key', ['/'], 'content get <key>', ['content.show'], ['anonymous'], 'read', 'none', 'PublicContentResponse'),
   defineCapability('public.schedule.list', 'GET /api/v1/public/schedule', ['/schedule'], 'schedule list', ['schedule.list'], ['anonymous'], 'read', 'none', 'PublicScheduleResponse'),
   defineCapability('public.travel.show', 'GET /api/v1/public/content/travel', ['/travel'], 'travel show', ['travel.show'], ['anonymous'], 'read', 'none', 'PublicContentResponse'),
-  defineCapability('public.contacts.show', 'GET /api/v1/public/site', ['/contact'], 'contacts show', ['contacts.show'], ['anonymous'], 'read', 'none', 'PublicSiteResponse'),
+  defineCapability('public.contacts.show', 'GET /api/v1/public/content/contacts', ['/contact'], 'contacts show', ['contacts.show'], ['anonymous'], 'read', 'none', 'PublicContentResponse'),
   defineCapability('public.institutions.search', 'GET /api/v1/public/institutions', ['/application'], 'institutions search <query>', ['institutions.search'], ['anonymous'], 'read', 'none', 'InstitutionSearchResponse'),
-  defineCapability('public.registration_form.show', 'GET /api/v1/public/registration-form', ['/application'], 'registration-form show', ['registration_form.show'], ['anonymous'], 'read', 'none', 'RegistrationFormResponse'),
+  defineCapability('public.registration_form.show', 'GET /api/v1/public/registration-form', ['/application'], 'application form', ['registration_form.show'], ['anonymous'], 'read', 'none', 'RegistrationFormResponse'),
   defineCapability('public.application_count.show', 'GET /api/v1/public/statistics/applications', ['/'], 'application-count show', ['application_count.show'], ['anonymous'], 'read', 'none', 'ApplicationCountResponse'),
   defineCapability('resource.list', 'GET /api/v1/resources', ['/resources'], 'resources list', ['resources.list'], ['anonymous', 'user'], 'read', 'none', 'ResourceListResponse'),
   defineCapability('resource.download', 'GET /api/v1/resources/:id/download', ['/resources'], 'resources download <id>', ['resources.download'], ['anonymous', 'user'], 'read', 'none', 'ResourceDownloadResponse'),

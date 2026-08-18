@@ -18,9 +18,9 @@ describe('CLI safe defaults', () => {
   it('emits a single stable JSON failure for an unknown command', async () => {
     const stdout = vi.fn(); const stderr = vi.fn()
     await expect(runCli(['--json', 'unknown'], { stdout, stderr })).resolves.toBe(1)
-    expect(stdout).not.toHaveBeenCalled()
-    expect(stderr).toHaveBeenCalledOnce()
-    expect(JSON.parse(stderr.mock.calls[0]?.[0] as string)).toMatchObject({ ok: false, code: 'INPUT_INVALID' })
+    expect(stdout).toHaveBeenCalledOnce()
+    expect(stderr).not.toHaveBeenCalled()
+    expect(JSON.parse(stdout.mock.calls[0]?.[0] as string)).toMatchObject({ ok: false, code: 'INPUT_INVALID' })
   })
 
   it.each(['--password', '--verification-code', '--token', '--cookie'])('rejects secret-bearing option %s', (option) => {

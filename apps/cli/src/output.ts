@@ -7,13 +7,13 @@ export const createOutput = (input: { json: boolean, stdout?: Write, stderr?: Wr
   return {
     progress: (message: string) => stderr(`${message}\n`),
     success: (value: unknown) => {
-      const parsed = CliSuccessSchema.parse(value)
+      const parsed = CliSuccessSchema.parse(JSON.parse(JSON.stringify(value)))
       stdout(input.json ? `${JSON.stringify(parsed)}\n` : `${JSON.stringify(parsed.data, null, 2)}\n`)
     },
     failure: (value: unknown) => {
       const parsed = CliFailureSchema.parse(value)
-      const rendered = input.json ? JSON.stringify(parsed) : `${parsed.code}: ${parsed.message}`
-      stderr(`${rendered}\n`)
+      if (input.json) stdout(`${JSON.stringify(parsed)}\n`)
+      else stderr(`${parsed.code}: ${parsed.message}\n`)
     },
     text: (value: string) => stdout(`${value}\n`),
   }

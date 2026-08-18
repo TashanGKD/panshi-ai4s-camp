@@ -37,17 +37,22 @@ test('canonical release manifests accept platform CRLF but reject noncanonical f
   assert.equal(releaseGate.isCanonicalManifestSource(canonicalLf.replace('\n', '\r'), manifest), false)
   assert.equal(releaseGate.isCanonicalManifestSource(JSON.stringify(manifest), manifest), false)
 })
+
+test('release source text is checked out with LF on every platform', async () => {
+  const attributes = await readFile(join(repoRoot, '.gitattributes'), 'utf8')
+  assert.match(attributes, /^\* text=auto eol=lf$/mu)
+})
 const skillManifestPath = join(repoRoot, 'skills/panshi-camp/release-manifest.json')
 
 test('default release build is local-only and does not modify the tracked Skill manifest', async () => {
   const before = await readFile(skillManifestPath, 'utf8')
   const result = await buildCliRelease({ repoRoot })
   assert.equal(await readFile(skillManifestPath, 'utf8'), before)
-  assert.equal(result.manifest.version, '0.1.7')
-  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.7.tgz')
+  assert.equal(result.manifest.version, '0.1.8')
+  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.8.tgz')
   assert.equal((await stat(result.archivePath)).size, result.manifest.sizeBytes)
   await checkCliRelease({ repoRoot })
-  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.8' }), /CLI_RELEASE_TAG_DRIFT/u)
+  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.9' }), /CLI_RELEASE_TAG_DRIFT/u)
 })
 
 test('release path gate rejects traversal, absolute paths, and Windows drive paths', () => {

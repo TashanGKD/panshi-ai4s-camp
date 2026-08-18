@@ -37,12 +37,19 @@ const writeAtomic = async (destination, contents) => {
   }
 }
 
-const runNpm = async (args, cwd) => execFileAsync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+export const resolveNpmInvocation = ({ platform = process.platform, env = process.env } = {}) => platform === 'win32'
+  ? { command: env.ComSpec || env.COMSPEC || 'cmd.exe', prefix: ['/d', '/s', '/c', 'npm.cmd'] }
+  : { command: 'npm', prefix: [] }
+
+const runNpm = async (args, cwd) => {
+  const invocation = resolveNpmInvocation()
+  return execFileAsync(invocation.command, [...invocation.prefix, ...args], {
   cwd,
   encoding: 'utf8',
   maxBuffer: 20 * 1024 * 1024,
   env: { ...process.env },
-})
+  })
+}
 
 export const buildCliRelease = async ({
   repoRoot = resolve(import.meta.dirname, '..'),

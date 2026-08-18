@@ -6,24 +6,39 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
 
-import { buildCliRelease } from '../scripts/build-cli-release.mjs'
+import { buildCliRelease, resolveNpmInvocation } from '../scripts/build-cli-release.mjs'
 import * as releaseGate from '../scripts/check-cli-release.mjs'
 import { assertSafeArchivePath } from '../scripts/cli-release-lib.mjs'
 
 const execFileAsync = promisify(execFile)
 const { checkCliRelease } = releaseGate
 const repoRoot = resolve(import.meta.dirname, '..')
+
+test('release builder invokes npm through ComSpec on Windows', () => {
+  assert.deepEqual(resolveNpmInvocation({ platform: 'win32', env: { ComSpec: 'C:\\Windows\\System32\\cmd.exe' } }), {
+    command: 'C:\\Windows\\System32\\cmd.exe',
+    prefix: ['/d', '/s', '/c', 'npm.cmd'],
+  })
+  assert.deepEqual(resolveNpmInvocation({ platform: 'win32', env: {} }), {
+    command: 'cmd.exe',
+    prefix: ['/d', '/s', '/c', 'npm.cmd'],
+  })
+  assert.deepEqual(resolveNpmInvocation({ platform: 'linux', env: {} }), {
+    command: 'npm',
+    prefix: [],
+  })
+})
 const skillManifestPath = join(repoRoot, 'skills/panshi-camp/release-manifest.json')
 
 test('default release build is local-only and does not modify the tracked Skill manifest', async () => {
   const before = await readFile(skillManifestPath, 'utf8')
   const result = await buildCliRelease({ repoRoot })
   assert.equal(await readFile(skillManifestPath, 'utf8'), before)
-  assert.equal(result.manifest.version, '0.1.1')
-  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.1.tgz')
+  assert.equal(result.manifest.version, '0.1.2')
+  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.2.tgz')
   assert.equal((await stat(result.archivePath)).size, result.manifest.sizeBytes)
   await checkCliRelease({ repoRoot })
-  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.2' }), /CLI_RELEASE_TAG_DRIFT/u)
+  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.3' }), /CLI_RELEASE_TAG_DRIFT/u)
 })
 
 test('release path gate rejects traversal, absolute paths, and Windows drive paths', () => {

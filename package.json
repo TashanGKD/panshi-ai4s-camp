@@ -25,7 +25,7 @@
     "test:e2e-startup": "node --test tests/e2e-api-server.test.mjs",
     "test:workspaces": "npm run test --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "lint": "eslint . --ignore-pattern '**/dist/**' --global document --global Node --global getComputedStyle",
+    "lint": "eslint . --global document --global Node --global getComputedStyle",
     "visual:test": "playwright test e2e/visual.spec.ts --config=playwright.visual.config.ts",
     "visual:update": "playwright test e2e/visual.spec.ts --config=playwright.visual.config.ts --update-snapshots",
     "e2e:launch": "node scripts/run-launch-e2e.mjs",

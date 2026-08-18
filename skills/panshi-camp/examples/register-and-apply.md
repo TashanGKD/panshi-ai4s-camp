@@ -1,6 +1,6 @@
 # 注册与报名示例
 
-所需 CLI 版本：`0.1.10`。首次使用先安装公开 Skill（Node.js 24、npm 11；无需克隆源码或 sudo）：
+所需 CLI 版本：`0.1.11`。首次使用先安装公开 Skill（Node.js 24、npm 11；无需克隆源码或 sudo）：
 
 ```bash
 npx --yes skills@latest add TashanGKD/panshi-ai4s-camp --global --agent codex claude-code --skill panshi-camp --yes

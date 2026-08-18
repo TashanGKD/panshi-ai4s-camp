@@ -31,7 +31,9 @@ jobs:
       - run: node --test e2e/cli-public-install.test.mjs
       - run: npm run build -w @panshi/contracts
       - run: npm run build -w @panshi/camp-client
-      - run: node --test tests/cli-docs.test.mjs tests/cli-package.test.mjs tests/cli-release.test.mjs
+      - run: node --test tests/cli-docs.test.mjs
+      - run: node --test tests/cli-package.test.mjs
+      - run: node --test tests/cli-release.test.mjs
       - run: npm test -w panshi-camp-cli
       - run: npm run typecheck
       - run: npm run lint

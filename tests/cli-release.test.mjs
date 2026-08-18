@@ -46,13 +46,19 @@ const skillManifestPath = join(repoRoot, 'skills/panshi-camp/release-manifest.js
 
 test('default release build is local-only and does not modify the tracked Skill manifest', async () => {
   const before = await readFile(skillManifestPath, 'utf8')
+  const trustedManifest = JSON.parse(before)
   const result = await buildCliRelease({ repoRoot })
   assert.equal(await readFile(skillManifestPath, 'utf8'), before)
-  assert.equal(result.manifest.version, '0.1.8')
-  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.8.tgz')
+  assert.equal(result.manifest.version, '0.1.9')
+  assert.equal(result.manifest.assetName, 'panshi-camp-cli-0.1.9.tgz')
   assert.equal((await stat(result.archivePath)).size, result.manifest.sizeBytes)
-  await checkCliRelease({ repoRoot })
-  await assert.rejects(checkCliRelease({ repoRoot, expectedTag: 'cli-v0.1.9' }), /CLI_RELEASE_TAG_DRIFT/u)
+  // npm's tar metadata is platform-specific, so Windows may produce different archive bytes.
+  // The extracted package tree is the cross-platform trust boundary; the Linux publisher
+  // remains responsible for matching the checked-in archive digest exactly.
+  assert.equal(result.manifest.packageTreeSha256, trustedManifest.packageTreeSha256)
+  await checkCliRelease({ repoRoot, skillManifestPath: result.manifestPath })
+  if (process.platform !== 'win32') await checkCliRelease({ repoRoot })
+  await assert.rejects(checkCliRelease({ repoRoot, skillManifestPath: result.manifestPath, expectedTag: 'cli-v0.1.10' }), /CLI_RELEASE_TAG_DRIFT/u)
 })
 
 test('release path gate rejects traversal, absolute paths, and Windows drive paths', () => {

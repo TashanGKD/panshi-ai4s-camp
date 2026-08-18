@@ -77,6 +77,7 @@ describe('Aliyun notification provider', () => {
   it.each([
     ['isv.BUSINESS_LIMIT_CONTROL', 'retry'],
     ['isp.SYSTEM_ERROR', 'retry'],
+    ['isp.RAM_PERMISSION_DENY', 'dead_letter'],
     ['isv.MOBILE_NUMBER_ILLEGAL', 'dead_letter'],
     ['isv.SMS_TEMPLATE_ILLEGAL', 'dead_letter'],
   ])('classifies explicit provider code %s as %s', async (code, disposition) => {

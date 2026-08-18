@@ -36,7 +36,6 @@ const phonePattern = /^1[3-9][0-9]{9}$/u
 const retryableProviderCodes = new Set([
   'isv.BUSINESS_LIMIT_CONTROL',
   'isp.SYSTEM_ERROR',
-  'isp.RAM_PERMISSION_DENY',
 ])
 
 const assertCompleteOptions = (options: AliyunNotificationProviderOptions) => {
